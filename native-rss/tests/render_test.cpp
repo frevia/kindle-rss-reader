@@ -3,6 +3,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
+#include <fstream>
 
 int main(){
     const char* path=std::getenv("RSS_FONT");
@@ -17,6 +18,23 @@ int main(){
         }
         assert(painted>30);c.icon(static_cast<rss::Icon>(value),{-10,-10,36,36});
     }
+    // Golden pixels from the original renderer; tolerate platform floating-point rounding.
+    rss::Canvas icons(720,240,font);
+    for(int i=1;i<=static_cast<int>(rss::Icon::Check);++i)for(int row=0;row<6;++row){
+        const int size=24+row*2;
+        icons.fill({(i-1)*40,row*40,40,40},row%2?25:255);
+        icons.icon(static_cast<rss::Icon>(i),{(i-1)*40,row*40,size,size},row%2?255:30);
+    }
+    std::ifstream golden(std::filesystem::path(__FILE__).parent_path()/"fixtures/icons.pgm",std::ios::binary);
+    std::string magic;int width=0,height=0,maximum=0;
+    golden>>magic>>width>>height>>maximum;golden.get();
+    assert(magic=="P5"&&width==icons.width&&height==icons.height&&maximum==255);
+    std::vector<char> expected(icons.pixels.size());golden.read(expected.data(),expected.size());
+    assert(golden.gcount()==static_cast<std::streamsize>(expected.size()));
+    for(std::size_t i=0;i<expected.size();++i)
+        assert(std::abs(static_cast<int>(icons.pixels[i])-static_cast<unsigned char>(expected[i]))<=1);
+    c.clear();c.icon(rss::Icon::Rss,{100,100,200,1});
+    assert(c.pixels[100*c.width+100]==255); // Far outside a very narrow icon's stroke.
     c.clear();
     std::string text;
     for(int i=0;i<100;++i)text+="中文分页测试。A paragraph with words and punctuation, safe UTF-8 wrapping.\n\n";

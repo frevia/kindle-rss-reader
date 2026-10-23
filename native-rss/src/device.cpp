@@ -21,9 +21,14 @@ std::optional<Rect> changed_region(const std::vector<std::uint8_t>& before,
     constexpr int width=1072,height=1448;
     if(before.size()!=width*height||after.size()!=before.size())throw std::runtime_error("屏幕像素数量不匹配");
     int left=width,top=height,right=-1,bottom=-1;
-    for(int y=0;y<height;++y)for(int x=0;x<width;++x){
-        const auto i=y*width+x;
-        if(before[i]!=after[i]){left=std::min(left,x);right=std::max(right,x);top=std::min(top,y);bottom=y;}
+    for(int y=0;y<height;++y){
+        const auto* previous=before.data()+y*width;
+        const auto* current=after.data()+y*width;
+        if(std::memcmp(previous,current,width)==0)continue;
+        int first=0,last=width-1;
+        while(previous[first]==current[first])++first;
+        while(previous[last]==current[last])--last;
+        left=std::min(left,first);right=std::max(right,last);top=std::min(top,y);bottom=y;
     }
     if(right<0)return std::nullopt;
     left=left/8*8;top=top/8*8;right=std::min(width,(right/8+1)*8);bottom=std::min(height,(bottom/8+1)*8);

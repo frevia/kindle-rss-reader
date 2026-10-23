@@ -122,13 +122,19 @@ void Canvas::icon(Icon kind,Rect area,std::uint8_t color){
     }
     const double scale=std::min(area.w,area.h)/24.0;
     const double ox=area.x+(area.w-24*scale)/2,oy=area.y+(area.h-24*scale)/2;
+    struct PreparedSegment { double x1,y1,dx,dy,inverse_length; };
+    std::vector<PreparedSegment> segments;segments.reserve(lines.size());
+    for(const auto& l:lines){const double dx=l.x2-l.x1,dy=l.y2-l.y1,length=dx*dx+dy*dy;
+        segments.push_back({l.x1,l.y1,dx,dy,length?1.0/length:0.0});}
     for(int y=std::max(0,area.y);y<std::min(height,area.y+area.h);++y)
         for(int x=std::max(0,area.x);x<std::min(width,area.x+area.w);++x){
-            double distance=100;
+            double distance=10000;
             const double px=(x+.5-ox)/scale,py=(y+.5-oy)/scale;
-            for(const auto& l:lines){double dx=l.x2-l.x1,dy=l.y2-l.y1,len=dx*dx+dy*dy;
-                double t=len?std::clamp(((px-l.x1)*dx+(py-l.y1)*dy)/len,0.0,1.0):0;
-                distance=std::min(distance,std::hypot(px-l.x1-t*dx,py-l.y1-t*dy));}
+            for(const auto& l:segments){
+                const double t=std::clamp(((px-l.x1)*l.dx+(py-l.y1)*l.dy)*l.inverse_length,0.0,1.0);
+                const double ex=px-l.x1-t*l.dx,ey=py-l.y1-t*l.dy;
+                distance=std::min(distance,ex*ex+ey*ey);}
+            distance=std::sqrt(distance);
             double alpha=std::clamp((1-distance)*scale+.5,0.0,1.0);
             auto& pixel=pixels[y*width+x];pixel=static_cast<std::uint8_t>(pixel*(1-alpha)+color*alpha);
         }

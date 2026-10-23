@@ -33,14 +33,23 @@ App::App(Store& store,Canvas& canvas):store_(store),c_(canvas){
 int App::row_height(const Entry& e){
     return static_cast<int>(std::min<std::size_t>(3,c_.wrap(e.title,36,c_.width-158).size()))*46+94;
 }
+void App::ensure_list_page(std::size_t page){
+    while(!list_complete_&&list_starts_.size()<=page){
+        const auto start=list_starts_.back();int y=280;std::size_t i=start;
+        for(;i<list_.size();++i){
+            const int height=row_height(list_[i]);
+            if(y+height>c_.height-180&&i>start)break;
+            y+=height;
+        }
+        if(i==list_.size())list_complete_=true;
+        else list_starts_.push_back(i);
+    }
+}
+// shortcut: list metadata still loads in full; use database paging if very large libraries make queries slow.
 void App::reload(){
     feeds_=store_.feeds();list_=store_.entries(view_,feed_,search_,midnight(),group_);
-    list_starts_={0};int y=280;
-    for(std::size_t i=0;i<list_.size();++i){
-        const int height=row_height(list_[i]);
-        if(y+height>c_.height-180&&i>list_starts_.back()){list_starts_.push_back(i);y=280;}
-        y+=height;
-    }
+    list_starts_={0};list_complete_=false;
+    ensure_list_page(list_page_);
     list_page_=std::min(list_page_,list_starts_.size()-1);dirty=true;
 }
 void App::show_view(View v,std::int64_t feed){
@@ -86,6 +95,7 @@ void App::draw(){
     dirty=false;
 }
 void App::list_screen(){
+    ensure_list_page(list_page_+1);
     const int w=c_.width,h=c_.height,m=64;
     c_.icon(Icon::Rss,{m,43,34,34});
     c_.text(m+50,76,"RSS Reader",24,30);
@@ -133,7 +143,7 @@ void App::list_screen(){
     c_.rule(m,h-100,w-2*m,210);
     const auto count=list_starts_.size();
     button({36,h-84,180,68},"上一页",[this]{previous();},false,26,Icon::Back);
-    c_.text(w/2-55,h-39,std::to_string(list_page_+1)+" / "+std::to_string(count),23,90);
+    c_.text(w/2-55,h-39,std::to_string(list_page_+1)+" / "+(list_complete_?std::to_string(count):"…"),23,90);
     button({w-216,h-84,180,68},"下一页",[this]{next();},false,26,Icon::Next);
 }
 int App::article_heading_height(){
@@ -518,7 +528,7 @@ void App::tap(int x,int y){
 void App::next(){
     if(images_){if(image_page_+1<current_->images.size())++image_page_;}
     else if(current_){if(page_+1<pages_.size()){++page_;save_position();}}
-    else if(list_page_+1<list_starts_.size())++list_page_;
+    else{ensure_list_page(list_page_+1);if(list_page_+1<list_starts_.size())++list_page_;}
     dirty=true;
 }
 void App::previous(){

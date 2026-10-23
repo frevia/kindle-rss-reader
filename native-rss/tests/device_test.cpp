@@ -1,5 +1,6 @@
 #include "device.hpp"
 #include <cassert>
+#include <algorithm>
 #include <stdexcept>
 
 int main(){
@@ -9,6 +10,22 @@ int main(){
     auto region=rss::changed_region(before,after);
     assert(region&&region->x==1064&&region->y==1440&&region->w==8&&region->h==8);
     after[0]=0;region=rss::changed_region(before,after);
+    assert(region&&region->x==0&&region->y==0&&region->w==1072&&region->h==1448);
+    // Sparse changes, holes within rows, and dense frames retain the exact aligned bounds.
+    std::uint32_t seed=12345;
+    for(int sample=1;sample<=64;++sample){
+        after=before;int left=1072,top=1448,right=0,bottom=0;
+        for(int point=0;point<sample;++point){
+            seed=seed*1664525u+1013904223u;const int x=seed%1072;
+            seed=seed*1664525u+1013904223u;const int y=sample%2?seed%1448:720;
+            after[y*1072+x]=0;left=std::min(left,x);right=std::max(right,x);
+            top=std::min(top,y);bottom=std::max(bottom,y);
+        }
+        region=rss::changed_region(before,after);
+        assert(region&&region->x==left/8*8&&region->y==top/8*8);
+        assert(region->x+region->w==(right/8+1)*8&&region->y+region->h==(bottom/8+1)*8);
+    }
+    std::fill(after.begin(),after.end(),0);region=rss::changed_region(before,after);
     assert(region&&region->x==0&&region->y==0&&region->w==1072&&region->h==1448);
     bool bad_pixels=false;try{rss::changed_region({},after);}catch(const std::runtime_error&){bad_pixels=true;}assert(bad_pixels);
     rss::FrameLayout good{1072,1448,1088,8,0,0,5792,6301696};rss::validate_kpw3_layout(good);

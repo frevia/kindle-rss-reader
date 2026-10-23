@@ -32,6 +32,7 @@ private:
     std::vector<Feed> feeds_;
     std::vector<Entry> list_;
     std::vector<std::size_t> list_starts_{0};
+    bool list_complete_ = false;
     std::vector<Page> pages_;
     std::vector<Hit> hits_;
     std::optional<Entry> current_;
@@ -55,6 +56,7 @@ private:
     void keyboard_key(const std::string& value);
     void input_space();
     int row_height(const Entry& entry);
+    void ensure_list_page(std::size_t page);
     int line_height() const { return font_size_ + line_gap_; }
     void paginate();
     void save_position();

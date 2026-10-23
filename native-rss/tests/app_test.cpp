@@ -1,6 +1,7 @@
 #include "app.hpp"
 #include "feed.hpp"
 #include <cassert>
+#include <algorithm>
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
@@ -9,6 +10,41 @@ int main(){
     std::string font=std::getenv("RSS_FONT")?std::getenv("RSS_FONT"):"/System/Library/Fonts/STHeiti Light.ttc";
     if(!std::filesystem::exists(font))font="/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf";
     rss::Store store(":memory:");rss::Canvas canvas(1072,1448,font);
+    {
+        rss::Store pages_store(":memory:");rss::Feed feed;feed.url="https://pages.example/feed";
+        const auto feed_id=pages_store.add_feed(feed);rss::ParsedFeed batch;
+        for(int i=0;i<45;++i){rss::Entry item;item.guid=std::to_string(i);
+            item.title=i%3==0?std::string(110,'x'):"文章 "+std::to_string(i);item.text="正文";batch.entries.push_back(item);}
+        pages_store.save_entries(feed_id,batch);const auto ordered=pages_store.entries(rss::View::All,feed_id);
+        rss::App pages(pages_store,canvas);pages.show_view(rss::View::All,feed_id);
+        std::vector<std::vector<std::pair<std::int64_t,int>>> expected(1);
+        int y=280;
+        for(const auto& item:ordered){
+            const int height=static_cast<int>(std::min<std::size_t>(3,canvas.wrap(item.title,36,914).size()))*46+94;
+            if(y+height>1268&&!expected.back().empty()){expected.emplace_back();y=280;}
+            expected.back().push_back({item.id,y+40});y+=height;
+        }
+        auto first_id=[&]{pages.draw();pages.tap(100,320);const auto id=pages.current_id();pages.back();return id;};
+        for(std::size_t p=0;p<expected.size();++p){
+            for(const auto& row:expected[p]){
+                pages.draw();pages.tap(100,row.second);assert(pages.current_id()==row.first);pages.back();
+            }
+            if(p+1<expected.size())pages.next();
+        }
+        pages.next();assert(first_id()==expected.back().front().first);
+        for(auto p=expected.size()-1;p>0;--p){pages.previous();assert(first_id()==expected[p-1].front().first);}
+        pages.previous();assert(first_id()==ordered.front().id);
+        // Navigation may arrive before the next draw, and reload preserves the ordinal.
+        pages.next();pages.next();assert(first_id()==expected[2].front().first);
+        pages.reload();assert(first_id()==expected[2].front().first);
+        // Shrinking the snapshot clamps to the remaining page, then to the empty page.
+        pages_store.set_starred(ordered.back().id,true);pages_store.remove_feed(feed_id);
+        pages.reload();assert(first_id()==ordered.back().id);
+        pages.next();assert(first_id()==ordered.back().id);
+        pages_store.set_starred(ordered.back().id,false);pages_store.remove_feed(feed_id);
+        pages.reload();pages.next();pages.previous();pages.draw();pages.tap(100,320);assert(!pages.reading());
+        assert(ordered.size()==45);
+    }
     rss::Feed f;f.url="https://example.com/feed";f.title="测试来源";auto id=store.add_feed(f);
     rss::Entry e;e.guid="one";e.title="中文文章标题";
     for(int i=0;i<200;++i)e.text+="阅读位置必须跨字号保留，返回列表不应自动重排。\n";
