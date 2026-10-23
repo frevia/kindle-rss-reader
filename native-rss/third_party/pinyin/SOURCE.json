@@ -1,0 +1,14 @@
+{
+  "repository": "https://github.com/rime/rime-pinyin-simp",
+  "commit": "0c6861ef7420ee780270ca6d993d18d4101049d0",
+  "files": {
+    "pinyin_simp.dict.yaml": {
+      "url": "https://raw.githubusercontent.com/rime/rime-pinyin-simp/0c6861ef7420ee780270ca6d993d18d4101049d0/pinyin_simp.dict.yaml",
+      "sha256": "e341598343a0f0f2035bb1aafc34a7f3bb7887deeecb3f60796262aaa2983e6b"
+    },
+    "LICENSE": {
+      "url": "https://raw.githubusercontent.com/rime/rime-pinyin-simp/0c6861ef7420ee780270ca6d993d18d4101049d0/LICENSE",
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    }
+  }
+}

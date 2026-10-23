@@ -1,0 +1,7 @@
+/build*/
+/output/
+/vendor/
+*.sqlite*
+__pycache__/
+*.py[cod]
+/docs/*report*.txt

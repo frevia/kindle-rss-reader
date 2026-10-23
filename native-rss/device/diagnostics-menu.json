@@ -1,0 +1,16 @@
+{
+  "items": [
+    {
+      "name": "RSS 只读设备诊断",
+      "action": "sh /mnt/us/extensions/native-rss-diagnostics/diagnose.sh",
+      "exitmenu": false,
+      "refresh": false
+    },
+    {
+      "name": "RSS 恢复机制自检",
+      "action": "sh /mnt/us/extensions/native-rss-diagnostics/process-selftest.sh",
+      "exitmenu": false,
+      "refresh": false
+    }
+  ]
+}
