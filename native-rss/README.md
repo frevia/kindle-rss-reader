@@ -4,6 +4,10 @@
 
 **当前是开发验证版，尚不是真机验收完成的 Kindle 成品。** ARM 静态构建已安装到 KPW3；开发包提供中文字体和证书。单次启动退出、休眠、应用及启动器强杀恢复已有真机证据，拼音搜索选词经用户确认。离线连续翻页、USB 退出、OPML、阅读位置、字号与收藏已通过用户实机验证；长期使用仍待验收。完整范围见 [实施计划](docs/PLAN.md)，设备证据见 [DEVICE.md](docs/DEVICE.md)。
 
+## 安装到 Kindle
+
+使用 Release 附件安装，无需本机构建。请先阅读 [安装与升级教程](docs/INSTALL.md)，确认运行环境，再合并复制安装包；升级时保留 `native-rss/data/`。
+
 ## 本机构建
 
 需要 CMake、pkg-config、C++17 编译器及 libxml2、sqlite3、libcurl（支持 CURLOPT_PROTOCOLS_STR）、freetype2、libwebp、sdl2 开发库。

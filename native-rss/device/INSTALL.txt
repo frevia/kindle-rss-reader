@@ -1,29 +1,48 @@
-Kindle RSS — KPW3 开发验证包
+RSS Reader — KPW3 开发版安装说明
 
-尚未真机验收，不是正式发布版。不要通过“更新 Kindle”安装此 ZIP。
-仅面向已越狱的 KPW3、5.16.2.1.1。程序不依赖 KOReader。
+完整安装教程（含升级、订阅导入和排查）：
+https://github.com/frevia/kindle-rss-reader/blob/main/native-rss/docs/INSTALL.md
+本包也包含 native-rss/docs/INSTALL.md，可离线阅读。
 
-待完成连接和恢复预检后，将包内 native-rss 与 extensions 合并到 Kindle USB 根目录。
-先备份已有 native-rss 目录；本包不包含个人数据库、订阅文件或自动安装脚本。
-KUAL 中的“RSS 阅读器（开发版）”调用 native-rss/launch.sh。
-已配置 Scriptlets 的设备也可以打开 documents/RSS阅读器.sh；两种入口使用同一启动器。
-启动失败或异常退出后，可在 KUAL 选择“导出 RSS 诊断报告”，或运行 RSS设备诊断.sh；
-重新连接 USB 后读取 documents/RSS-device-report.txt。
-启动器还要求设备已有 /mnt/us/libkh/bin/fbink，以及兼容的 timeout、flock 和 LIPC 工具。
-在真机前置检查完成前，不应通过设置 RSS_UI_GUARD 绕过启动器。
+运行条件
+已具备自制程序运行环境的 Kindle Paperwhite 3（KPW3），已验证固件 5.16.2.1.1。
+需要 KUAL；书库启动另需配置 Scriptlets。本包不提供越狱或这些工具的安装，不依赖 KOReader。
+设备需已有 /mnt/us/libkh/bin/fbink、timeout、flock 及系统 LIPC 等工具；诊断入口可辅助检查。
+启用设备密码锁时启动器会拒绝运行；需要保持密码锁时请暂不使用本应用。
+当前为开发版本，基本图文阅读和退出恢复已有实机验证，长期使用及其他机型仍未完整验收。
 
-中文字体、HTTPS 根证书及许可位于 fonts、certs 和 licenses。
-搜索、订阅名称及分组可用原生拼音键盘，完整词组连续输入，ü 用 v；点击候选词后再确定。
-数据保存在 native-rss/data/rss.sqlite。批量订阅文件放到 native-rss/data/feeds.opml，
-在应用中点击“导入订阅”，然后点击“同步”。订阅地址可能含私人凭据，请保管好 OPML 和数据库。
+首次安装
+1. 下载 Release 的 KPW3 安装 ZIP；源码 ZIP 不能直接安装。不要使用“更新 Kindle”。
+2. 已有安装时，先退出阅读器，将整个 native-rss 文件夹备份到电脑。
+3. 解压 ZIP，将 native-rss、extensions、documents 三个目录的内容合并到 Kindle 用户盘根目录。
+   根目录是直接包含 documents 的位置，即设备内的 /mnt/us。不要额外套一层解压文件夹。
+   不要整体替换 documents 或 extensions，以免删除已有书籍和扩展。
+4. 安全弹出 USB 用户盘，打开 KUAL，在 RSS Reader 菜单中选择 RSS Reader。
+   已配置 Scriptlets 时也可从书库打开 RSS Reader（documents/RSS阅读器.sh）。
 
-运行时 USB 磁盘模式被暂时抑制，退出应用后恢复；充电或已配置的 USB 网络可继续使用。
-休眠时会结束应用，重新启动可继续阅读。不要强杀会话启动器。
-已提供独立恢复进程及内核父进程死亡保护；启动器被 SIGKILL 的恢复路径尚未真机验收。
-恢复进程和启动器同时被强杀、系统进程异常或设备掉电仍可能需要重启设备。
+首次使用
+连接 Wi-Fi，在界面添加 RSS/Atom 订阅地址并同步。
+批量导入：退出后把 feeds.opml 放到 native-rss/data/feeds.opml（目录不存在时创建）；
+重新启动，点击左上角标题进入“我的阅读”，选择“导入订阅”，然后同步。
+导出的订阅列表位于 native-rss/data/subscriptions.opml，仅含订阅和分组。
+完整数据位于 native-rss/data/rss.sqlite；备份前退出应用，复制整个 data 目录。
 
-卸载前先退出应用并备份 data，然后移除 extensions/native-rss 和 native-rss。
-卸载不修改固件；删除 native-rss/data 会丢失本地文章、订阅和阅读状态。
+升级与退出
+升级前退出并备份；合并覆盖程序文件，保留 native-rss/data，切勿先删除旧目录。
+退出入口在文章列表左上角标题打开的“我的阅读”页面，选择“退出应用”。
+运行期间暂时抑制 USB 磁盘模式，退出后恢复；休眠会结束应用，再次启动可继续阅读。
+不要强杀会话启动器，也不要设置 RSS_UI_GUARD 绕过检查。
 
-包内 MANIFEST.json 可用于核对文件 SHA-256；BUILD.json 记录二进制与源码对应关系。
-kindle-rss-source-dev.zip 提供本项目源码；依赖下载位置与 SHA-256 记录在 tools 中。
+故障排查
+KUAL 中选择“导出 RSS 诊断报告”；已配置 Scriptlets 时也可运行 RSS设备诊断.sh。
+报告位于 documents/RSS-device-report.txt。反馈时提供版本、机型、固件和复现步骤。
+字体与证书位于 fonts、certs，请保留完整目录。数据库和 OPML 可能含私人订阅地址。
+
+卸载
+退出并备份 data 后，移除 native-rss、extensions/native-rss，以及 documents 下的
+RSS阅读器.sh、RSS设备诊断.sh。不要删除整个 documents 或 extensions。
+删除 native-rss/data 会丢失订阅、缓存和阅读记录。
+
+校验
+安装包外部的 SHA256SUMS.txt 用于校验 Release 附件；包内 MANIFEST.json 记录资源哈希，
+BUILD.json 记录二进制与源码对应关系。功能以所下载的 Release 说明为准。
