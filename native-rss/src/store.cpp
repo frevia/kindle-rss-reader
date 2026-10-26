@@ -1,7 +1,10 @@
 #include "store.hpp"
 
+#include <curl/curl.h>
+
 #include <algorithm>
 #include <filesystem>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <sys/stat.h>
@@ -81,6 +84,36 @@ Entry read_entry(sqlite3_stmt* stmt) {
 const char* entry_columns = "id,feed_id,guid,title,url,author,html,text,published,read,starred,position,in_progress";
 const char* metadata_columns = "id,feed_id,guid,title,url,author,'' AS html,'' AS text,published,read,starred,position,in_progress";
 const char* feed_columns = "id,url,title,group_name,error,etag,modified,synced_at";
+
+void validate_group(const std::string& path) {
+    if (path.empty() || path.size() > 1024 || path.front() == '/' || path.back() == '/' || path.find("//") != std::string::npos)
+        throw std::runtime_error("无效分组路径");
+    for (unsigned char c : path) if (c < 32 || c == 127) throw std::runtime_error("分组路径不能包含控制字符");
+}
+bool group_is_or_below(const std::string& value, const std::string& path) {
+    return value == path || (value.size() > path.size() && value.compare(0,path.size(),path) == 0 && value[path.size()] == '/');
+}
+void validate_feed_url(const std::string& url) {
+    if (url.empty() || url.size() > 2048) throw std::runtime_error("订阅地址长度无效");
+    for (unsigned char c : url) if (c < 32 || c == 127) throw std::runtime_error("订阅地址不能包含控制字符");
+    CURLU* parsed = curl_url();
+    if (!parsed) throw std::runtime_error("无法验证订阅地址");
+    char *scheme = nullptr, *host = nullptr;
+    const bool valid = curl_url_set(parsed,CURLUPART_URL,url.c_str(),0) == CURLUE_OK &&
+        curl_url_get(parsed,CURLUPART_SCHEME,&scheme,0) == CURLUE_OK && curl_url_get(parsed,CURLUPART_HOST,&host,0) == CURLUE_OK &&
+        host && *host && scheme && (std::string(scheme) == "http" || std::string(scheme) == "https");
+    curl_free(scheme); curl_free(host); curl_url_cleanup(parsed);
+    if (!valid) throw std::runtime_error("订阅地址必须是有效的 HTTP(S) URL");
+}
+void add_group_rows(sqlite3* db, const std::string& path) {
+    Statement insert(db,"INSERT OR IGNORE INTO feed_groups(path) VALUES(?)");
+    for (std::size_t end=0; end<path.size();) {
+        end=path.find('/',end); const auto part=end==std::string::npos?path.size():end;
+        check(db,sqlite3_reset(insert.get())); check(db,sqlite3_clear_bindings(insert.get()));
+        insert.text(1,path.substr(0,part)); insert.run();
+        if(end==std::string::npos) break; ++end;
+    }
+}
 }
 
 Store::Store(const std::string& path) {
@@ -107,6 +140,7 @@ Store::Store(const std::string& path) {
                   "read INTEGER NOT NULL DEFAULT 0, starred INTEGER NOT NULL DEFAULT 0, position INTEGER NOT NULL DEFAULT 0,"
                   "UNIQUE(feed_id,guid))");
         exec(db_, "CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
+        exec(db_, "CREATE TABLE IF NOT EXISTS feed_groups (path TEXT PRIMARY KEY)");
         exec(db_, "CREATE TABLE IF NOT EXISTS article_images (entry_id INTEGER NOT NULL REFERENCES entries(id) ON DELETE CASCADE,"
                   "url TEXT NOT NULL,alt TEXT NOT NULL DEFAULT '',ordinal INTEGER NOT NULL,error TEXT NOT NULL DEFAULT '',"
                   "width INTEGER NOT NULL DEFAULT 0,height INTEGER NOT NULL DEFAULT 0,pixels BLOB NOT NULL DEFAULT X'',"
@@ -138,6 +172,7 @@ Store::Store(const std::string& path) {
 Store::~Store() { if (db_) sqlite3_close(db_); }
 
 std::int64_t Store::add_feed(const Feed& feed) {
+    validate_feed_url(feed.url);
     Statement insert(db_, "INSERT INTO feeds(url,title,group_name) VALUES(?,?,?) ON CONFLICT(url) DO UPDATE SET active=1");
     insert.text(1, feed.url); insert.text(2, feed.title); insert.text(3, feed.group); insert.run();
     Statement select(db_, "SELECT id FROM feeds WHERE url=?");
@@ -147,12 +182,39 @@ std::int64_t Store::add_feed(const Feed& feed) {
 }
 
 void Store::edit_feed(std::int64_t id, const std::string& title, const std::string& group) {
-    if (title.empty() || title.size()>512 || group.size()>1024 ||
+    if (title.size()>512 || group.size()>1024 ||
         title.find_first_of("\r\n\t")!=std::string::npos || group.find_first_of("\r\n\t")!=std::string::npos)
-        throw std::runtime_error("名称不能为空，名称和分组必须为单行且长度适中");
-    Statement q(db_, "UPDATE feeds SET title=?,group_name=? WHERE id=? AND active=1");
-    q.text(1,title); q.text(2,group); q.integer(3,id); q.run();
+        throw std::runtime_error("名称和分组必须为单行且长度适中");
+    Statement q(db_, "UPDATE feeds SET title=?,group_name=?,etag=CASE WHEN ?='' THEN '' ELSE etag END,modified=CASE WHEN ?='' THEN '' ELSE modified END WHERE id=? AND active=1");
+    q.text(1,title); q.text(2,group); q.text(3,title); q.text(4,title); q.integer(5,id); q.run();
     if (!sqlite3_changes(db_)) throw std::runtime_error("订阅已不存在");
+}
+
+void Store::update_feed(const Feed& feed) {
+    if (feed.title.size()>512 || feed.group.size()>1024 ||
+        feed.title.find_first_of("\r\n\t")!=std::string::npos || feed.group.find_first_of("\r\n\t")!=std::string::npos)
+        throw std::runtime_error("名称和分组必须为单行且长度适中");
+    if (!feed.group.empty()) validate_group(feed.group);
+    validate_feed_url(feed.url);
+    exec(db_, "BEGIN IMMEDIATE");
+    try {
+        {
+            Statement conflict(db_, "SELECT active,EXISTS(SELECT 1 FROM entries WHERE feed_id=feeds.id) FROM feeds WHERE url=? AND id<>?");
+            conflict.text(1,feed.url); conflict.integer(2,feed.id);
+            const int step=sqlite3_step(conflict.get()); check(db_,step);
+            if (step==SQLITE_ROW) {
+                if (sqlite3_column_int(conflict.get(),0)) throw std::runtime_error("此地址已被其他订阅使用");
+                if (sqlite3_column_int(conflict.get(),1)) throw std::runtime_error("此地址保留着已取消订阅的收藏，请通过添加订阅恢复原订阅");
+                // Only an empty, inactive record can release its address; never merge reading history.
+                Statement release(db_, "DELETE FROM feeds WHERE url=? AND active=0 AND NOT EXISTS(SELECT 1 FROM entries WHERE feed_id=feeds.id)");
+                release.text(1,feed.url); release.run();
+            }
+        }
+        Statement q(db_,"UPDATE feeds SET url=?,title=?,group_name=?,etag=CASE WHEN ?='' OR url<>? THEN '' ELSE etag END,modified=CASE WHEN ?='' OR url<>? THEN '' ELSE modified END,synced_at=CASE WHEN url<>? THEN 0 ELSE synced_at END WHERE id=? AND active=1");
+        q.text(1,feed.url); q.text(2,feed.title); q.text(3,feed.group); q.text(4,feed.title); q.text(5,feed.url); q.text(6,feed.title); q.text(7,feed.url); q.text(8,feed.url); q.integer(9,feed.id); q.run();
+        if (!sqlite3_changes(db_)) throw std::runtime_error("订阅已不存在");
+        exec(db_, "COMMIT");
+    } catch (...) { sqlite3_exec(db_,"ROLLBACK",nullptr,nullptr,nullptr); throw; }
 }
 
 std::vector<Feed> Store::feeds() const {
@@ -161,6 +223,70 @@ std::vector<Feed> Store::feeds() const {
     while (sqlite3_step(query.get()) == SQLITE_ROW) result.push_back(read_feed(query.get()));
     check(db_, sqlite3_errcode(db_));
     return result;
+}
+
+std::vector<std::string> Store::groups() const {
+    std::set<std::string> result{ "" };
+    Statement saved(db_,"SELECT path FROM feed_groups"); int step;
+    while((step=sqlite3_step(saved.get()))==SQLITE_ROW) result.insert(column_text(saved.get(),0));
+    check(db_,step);
+    Statement active(db_,"SELECT group_name FROM feeds WHERE active=1 AND group_name<>''");
+    while((step=sqlite3_step(active.get()))==SQLITE_ROW) {
+        const auto path=column_text(active.get(),0);
+        for(std::size_t end=0;end<path.size();) {
+            end=path.find('/',end); result.insert(path.substr(0,end==std::string::npos?path.size():end));
+            if(end==std::string::npos) break; ++end;
+        }
+    }
+    check(db_,step); return {result.begin(),result.end()};
+}
+
+void Store::add_group(const std::string& path) {
+    validate_group(path); exec(db_,"BEGIN IMMEDIATE");
+    try {
+        const auto existing=groups();
+        if(std::find(existing.begin(),existing.end(),path)!=existing.end()) throw std::runtime_error("分组已存在");
+        add_group_rows(db_,path); exec(db_,"COMMIT");
+    }
+    catch(...) { sqlite3_exec(db_,"ROLLBACK",nullptr,nullptr,nullptr); throw; }
+}
+
+void Store::rename_group(const std::string& old_path,const std::string& new_path) {
+    validate_group(old_path); validate_group(new_path);
+    if(old_path==new_path) return;
+    if(group_is_or_below(new_path,old_path)) throw std::runtime_error("不能将分组移入自身子树");
+    exec(db_,"BEGIN IMMEDIATE");
+    try {
+        const auto current=groups();std::set<std::string> existing(current.begin(),current.end());existing.erase("");
+        if(!existing.count(old_path)) throw std::runtime_error("分组不存在");
+        std::vector<std::pair<std::string,std::string>> paths;
+        for(const auto& p:existing) if(group_is_or_below(p,old_path)) {
+            auto renamed=new_path+p.substr(old_path.size());
+            validate_group(renamed);
+            if(existing.count(renamed)&&!group_is_or_below(renamed,old_path)) throw std::runtime_error("目标分组已存在");
+            paths.emplace_back(p,std::move(renamed));
+        }
+        for(const auto& path:existing) add_group_rows(db_,path);
+        for(const auto& p:paths) { Statement q(db_,"DELETE FROM feed_groups WHERE path=?"); q.text(1,p.first); q.run(); }
+        for(const auto& p:paths) { Statement q(db_,"INSERT INTO feed_groups(path) VALUES(?)"); q.text(1,p.second); q.run(); }
+        Statement update(db_,"UPDATE feeds SET group_name=? || substr(group_name,length(?)+1) WHERE active=1 AND (group_name=? OR (length(group_name)>length(?) AND substr(group_name,1,length(?))=? AND substr(group_name,length(?)+1,1)='/'))");
+        update.text(1,new_path); update.text(2,old_path); update.text(3,old_path); update.text(4,old_path); update.text(5,old_path); update.text(6,old_path); update.text(7,old_path); update.run();
+        add_group_rows(db_,new_path); exec(db_,"COMMIT");
+    } catch(...) { sqlite3_exec(db_,"ROLLBACK",nullptr,nullptr,nullptr); throw; }
+}
+
+void Store::remove_group(const std::string& path) {
+    validate_group(path); exec(db_,"BEGIN IMMEDIATE");
+    try {
+        const auto existing=groups();
+        if(std::find(existing.begin(),existing.end(),path)==existing.end()) throw std::runtime_error("分组不存在");
+        for(const auto& group:existing)if(!group.empty()&&!group_is_or_below(group,path))add_group_rows(db_,group);
+        Statement update(db_,"UPDATE feeds SET group_name='' WHERE active=1 AND (group_name=? OR (length(group_name)>length(?) AND substr(group_name,1,length(?))=? AND substr(group_name,length(?)+1,1)='/'))");
+        update.text(1,path); update.text(2,path); update.text(3,path); update.text(4,path); update.text(5,path); update.run();
+        Statement remove(db_,"DELETE FROM feed_groups WHERE path=? OR (length(path)>length(?) AND substr(path,1,length(?))=? AND substr(path,length(?)+1,1)='/')");
+        remove.text(1,path); remove.text(2,path); remove.text(3,path); remove.text(4,path); remove.text(5,path); remove.run();
+        exec(db_,"COMMIT");
+    } catch(...) { sqlite3_exec(db_,"ROLLBACK",nullptr,nullptr,nullptr); throw; }
 }
 
 void Store::save_entries(std::int64_t feed_id, const ParsedFeed& parsed) {

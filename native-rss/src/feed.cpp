@@ -13,6 +13,8 @@
 #include <ctime>
 #include <iomanip>
 #include <memory>
+#include <map>
+#include <set>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -204,12 +206,13 @@ void entries(xmlNode* parent, const std::string& source, ParsedFeed& out, bool a
     }
 }
 
-void collect_opml(xmlNode* parent, const std::string& group, std::vector<Feed>& feeds) {
+void collect_opml(xmlNode* parent, const std::string& group, std::vector<Feed>& feeds, std::set<std::string>* groups) {
     for (xmlNode* n = parent->children; n; n = n->next) {
-        if (!named(n, "outline")) { collect_opml(n, group, feeds); continue; }
+        if (!named(n, "outline")) { collect_opml(n, group, feeds, groups); continue; }
         std::string title = prop(n, "text"); if (title.empty()) title = prop(n, "title");
         std::string next_group = group.empty() ? title : (title.empty() ? group : group + "/" + title);
         std::string url = prop(n, "xmlUrl");
+        if (url.empty() && !next_group.empty() && groups) groups->insert(next_group);
         if (!url.empty()) {
             xmlURIPtr u = xmlParseURI(url.c_str());
             bool ok = u && u->scheme && u->server && (!std::strcmp(u->scheme, "http") || !std::strcmp(u->scheme, "https"));
@@ -218,7 +221,7 @@ void collect_opml(xmlNode* parent, const std::string& group, std::vector<Feed>& 
                 Feed f; f.url = url; f.title = prop(n, "title"); if (f.title.empty()) f.title = title; f.group = group; feeds.push_back(std::move(f));
             }
         }
-        collect_opml(n, next_group, feeds);
+        collect_opml(n, next_group, feeds, groups);
     }
 }
 
@@ -396,30 +399,35 @@ ParsedFeed parse_feed(std::string_view xml, const std::string& source_url) {
     return result;
 }
 
-std::vector<Feed> parse_opml(std::string_view xml) {
-    xmlDocPtr doc = parse_xml(xml);
+std::vector<Feed> parse_opml(std::string_view xml, std::vector<std::string>* group_list) {
+    std::unique_ptr<xmlDoc,decltype(&xmlFreeDoc)> doc(parse_xml(xml),xmlFreeDoc);
     std::vector<Feed> feeds;
-    xmlNode* root = xmlDocGetRootElement(doc);
-    if (!named(root, "opml")) { xmlFreeDoc(doc); throw std::runtime_error("not an OPML document"); }
-    collect_opml(root, {}, feeds);
-    xmlFreeDoc(doc);
+    xmlNode* root = xmlDocGetRootElement(doc.get());
+    if (!named(root, "opml")) throw std::runtime_error("not an OPML document");
+    std::set<std::string> groups;
+    collect_opml(root, {}, feeds, group_list ? &groups : nullptr);
+    if (group_list) group_list->assign(groups.begin(),groups.end());
     return feeds;
 }
 
-std::string export_opml(const std::vector<Feed>& feeds) {
+std::string export_opml(const std::vector<Feed>& feeds, const std::vector<std::string>& groups) {
     std::string out = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<opml version=\"2.0\"><head><title>Kindle RSS</title></head><body>";
-    std::vector<std::string> opened;
-    for (const auto& f : feeds) {
-        std::vector<std::string> path;
-        std::istringstream groups(f.group);
-        for (std::string part; std::getline(groups, part, '/');) if (!part.empty()) path.push_back(part);
-        std::size_t common = 0;
-        while (common < path.size() && common < opened.size() && path[common] == opened[common]) ++common;
-        while (opened.size() > common) { out += "</outline>"; opened.pop_back(); }
-        while (opened.size() < path.size()) { out += "<outline text=\"" + escape(path[opened.size()]) + "\">"; opened.push_back(path[opened.size()]); }
-        out += "<outline type=\"rss\" text=\"" + escape(f.title) + "\" title=\"" + escape(f.title) + "\" xmlUrl=\"" + escape(f.url) + "\"/>";
-    }
-    while (!opened.empty()) { out += "</outline>"; opened.pop_back(); }
+    struct Node { std::map<std::string,Node> children; std::vector<const Feed*> feeds; } root;
+    auto node_for = [&](const std::string& group) {
+        Node* node=&root; std::istringstream input(group);
+        for(std::string part;std::getline(input,part,'/');) if(!part.empty()) node=&node->children[part];
+        return node;
+    };
+    for(const auto& group:groups) if(!group.empty()) node_for(group);
+    for(const auto& feed:feeds) node_for(feed.group)->feeds.push_back(&feed);
+    auto write = [&](auto&& self,const Node& node) -> void {
+        for(const auto* feed:node.feeds)
+            out += "<outline type=\"rss\" text=\""+escape(feed->title)+"\" title=\""+escape(feed->title)+"\" xmlUrl=\""+escape(feed->url)+"\"/>";
+        for(const auto& [name,child]:node.children) {
+            out += "<outline text=\""+escape(name)+"\">"; self(self,child); out += "</outline>";
+        }
+    };
+    write(write,root);
     return out + "</body></opml>";
 }
 }

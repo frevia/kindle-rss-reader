@@ -11,6 +11,7 @@
 #include <future>
 #include <iostream>
 #include <mutex>
+#include <set>
 #include <sstream>
 #include <stdexcept>
 #include <sys/stat.h>
@@ -54,12 +55,17 @@ void demo(rss::Store& store){
     store.save_entries(id,parsed);
 }
 void import_opml(rss::Store& store,const std::string& path){
-    const auto feeds=rss::parse_opml(read_file(path));for(const auto& feed:feeds)store.add_feed(feed);
+    std::vector<std::string> groups;const auto feeds=rss::parse_opml(read_file(path),&groups);
+    auto existing=store.groups();std::set<std::string> known(existing.begin(),existing.end());
+    for(const auto& group:groups)if(!group.empty()&&!known.count(group)){
+        store.add_group(group);known.insert(group);for(auto slash=group.find('/');slash!=std::string::npos;slash=group.find('/',slash+1))known.insert(group.substr(0,slash));
+    }
+    for(const auto& feed:feeds)store.add_feed(feed);
     std::cout<<"导入 "<<feeds.size()<<" 个订阅（重复地址自动合并）\n";
 }
 void write_export(rss::Store& store,const std::string& path){
     const auto temp=path+".tmp";std::ofstream out(temp,std::ios::binary);
-    out<<rss::export_opml(store.feeds());out.close();if(!out)throw std::runtime_error("导出文件写入失败");
+    out<<rss::export_opml(store.feeds(),store.groups());out.close();if(!out)throw std::runtime_error("导出文件写入失败");
     std::filesystem::rename(temp,path);
 }
 class UiTasks {

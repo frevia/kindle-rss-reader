@@ -1,5 +1,7 @@
+#include "feed.hpp"
 #include "store.hpp"
 
+#include <algorithm>
 #include <cassert>
 #include <cstdio>
 #include <ctime>
@@ -20,6 +22,21 @@ static Entry make_entry(std::string guid, std::string title, std::int64_t publis
 }
 
 int main() {
+    {
+        Store legacy(":memory:");Feed f;f.url="https://legacy.example/feed";f.title="旧分组";f.group="科技/编程";auto id=legacy.add_feed(f);
+        bool duplicate=false;try{legacy.add_group("科技");}catch(const std::runtime_error&){duplicate=true;}assert(duplicate);
+        legacy.rename_group("科技","技术");assert(legacy.feeds()[0].group=="技术/编程");
+        legacy.remove_group("技术/编程");auto names=legacy.groups();assert(std::find(names.begin(),names.end(),"技术")!=names.end());assert(legacy.feeds()[0].id==id&&legacy.feeds()[0].group.empty());
+    }
+
+    {
+        Store limited(":memory:");limited.add_group("A/"+std::string(1022,'b'));
+        bool rejected=false;try{limited.rename_group("A","Longer");}catch(const std::runtime_error&){rejected=true;}
+        assert(rejected&&limited.groups().back().size()==1024);
+        Feed bad;bad.url="file:///tmp/feed";rejected=false;try{limited.add_feed(bad);}catch(const std::runtime_error&){rejected=true;}
+        assert(rejected&&limited.feeds().empty());
+    }
+
     const std::string path = "/tmp/kindle-rss-store-test-" + std::to_string(getpid()) + ".sqlite";
     std::remove(path.c_str());
     std::int64_t feed_id = 0;
@@ -37,6 +54,7 @@ int main() {
         struct stat file_info {};
         assert(::stat(path.c_str(), &file_info) == 0);
         assert((file_info.st_mode & 0777) == 0600);
+        store.add_group("persisted/empty");
 
         ParsedFeed parsed;
         parsed.entries = {make_entry("a", "Percent % literal", 100), make_entry("b", "Underscore _ and \xc3\xa9", 200)};
@@ -87,6 +105,8 @@ int main() {
     }
     {
         Store reopened(path);
+        const auto persisted_groups=reopened.groups();
+        assert(std::find(persisted_groups.begin(),persisted_groups.end(),"persisted/empty")!=persisted_groups.end());
         assert(reopened.entry(first_id) && reopened.entry(first_id)->position == 42);
         Feed feed; feed.url = "https://example.test/feed"; feed.title = "Again";
         assert(reopened.add_feed(feed) == feed_id);
@@ -100,9 +120,15 @@ int main() {
         auto named_id = reopened.add_feed(named_later);
         ParsedFeed named; named.title = "真实订阅标题"; reopened.save_entries(named_id, named);
         assert(reopened.feeds()[1].title == "真实订阅标题");
+        Feed unnamed; unnamed.url = "https://example.test/unnamed";
+        auto unnamed_id = reopened.add_feed(unnamed);
+        ParsedFeed discovered; discovered.title = "自动发现名称"; reopened.save_entries(unnamed_id, discovered);
+        assert(reopened.feeds()[2].title == "自动发现名称");
         sqlite3* db = nullptr;
         assert(sqlite3_open(path.c_str(), &db) == SQLITE_OK);
         assert(sqlite3_exec(db, "CREATE TRIGGER reject_bad BEFORE INSERT ON entries WHEN NEW.guid='bad' BEGIN SELECT RAISE(ABORT,'test failure'); END", nullptr, nullptr, nullptr) == SQLITE_OK);
+        assert(sqlite3_exec(db, "CREATE TRIGGER reject_group BEFORE INSERT ON feed_groups WHEN NEW.path='broken' BEGIN SELECT RAISE(ABORT,'test failure'); END", nullptr, nullptr, nullptr) == SQLITE_OK);
+        assert(sqlite3_exec(db, "CREATE TRIGGER reject_rename BEFORE UPDATE OF group_name ON feeds WHEN NEW.group_name='Rollback' BEGIN SELECT RAISE(ABORT,'test failure'); END", nullptr, nullptr, nullptr) == SQLITE_OK);
         sqlite3_close(db);
         bool failed = false;
         ParsedFeed invalid; invalid.entries = {make_entry("good", "will roll back"), make_entry("bad", "trigger failure")};
@@ -110,6 +136,11 @@ int main() {
         assert(failed);
         assert(reopened.entries(View::All, feed_id, "will roll back").empty());
         assert(reopened.entries(View::All, feed_id, "trigger failure").empty());
+        bool group_failed=false; try { reopened.add_group("broken/child"); } catch(const std::runtime_error&) { group_failed=true; }
+        const auto after_failed_add=reopened.groups();
+        assert(group_failed && std::find(after_failed_add.begin(),after_failed_add.end(),"broken")==after_failed_add.end());
+        group_failed=false; try { reopened.rename_group("news","Rollback"); } catch(const std::runtime_error&) { group_failed=true; }
+        assert(group_failed && reopened.feeds()[0].group=="news");
     }
     std::remove(path.c_str());
     {
@@ -150,10 +181,204 @@ int main() {
         assert(groups.entries(View::All,0,"",0,std::string("")).size()==1);
         content.title="服务器名称";groups.save_entries(child,content);
         assert(groups.feeds()[0].title=="自定义名称");
-        bool rejected=false;try{groups.edit_feed(child,"","");}catch(const std::runtime_error&){rejected=true;}
-        assert(rejected);assert(groups.feeds()[0].title=="自定义名称");
-        groups.set_starred(groups.entries(View::All,child)[0].id,true);
+        const auto entry_id=groups.entries(View::All,child)[0].id;
+        groups.set_read(entry_id,true); groups.set_starred(entry_id,true); groups.set_position(entry_id,37);
+        groups.sync_result(child,"","edit-tag","edit-date",901);
+        groups.edit_feed(child,"","");
+        auto cleared=groups.feeds()[0];
+        assert(cleared.title.empty() && cleared.etag.empty() && cleared.modified.empty() && cleared.synced_at==901);
+        content.title="再次发现名称"; groups.save_entries(child,content);
+        assert(groups.feeds()[0].title=="再次发现名称");
+        assert(groups.entry(entry_id)->read && groups.entry(entry_id)->starred && groups.entry(entry_id)->position==37);
+        bool rejected=false;try{groups.edit_feed(child,std::string(513,'x'),"");}catch(const std::runtime_error&){rejected=true;}
+        assert(rejected); rejected=false; try{groups.edit_feed(child,"two\nlines","");}catch(const std::runtime_error&){rejected=true;}
+        assert(rejected && groups.feeds()[0].title=="再次发现名称");
         groups.remove_feed(child);
         assert(groups.entries(View::All,0,"",0,std::string("")).empty());
+    }
+    {
+        Store groups(":memory:");
+        groups.add_group("A/empty"); groups.add_group("A/empty/deeper");
+        bool rejected=false; try { groups.add_group("A//bad"); } catch(const std::runtime_error&) { rejected=true; }
+        assert(rejected); rejected=false; try { groups.add_group("A/empty"); } catch(const std::runtime_error&) { rejected=true; }
+        assert(rejected);
+        Feed f; f.url="https://groups.test/feed"; f.title="State"; f.group="A/sub"; auto id=groups.add_feed(f);
+        ParsedFeed parsed; parsed.entries={make_entry("saved","saved",100)}; groups.save_entries(id,parsed);
+        const auto entry_id=groups.entries(View::All,id)[0].id;
+        groups.set_read(entry_id,true); groups.set_starred(entry_id,true); groups.set_position(entry_id,37);
+        Feed sibling; sibling.url="https://groups.test/sibling"; sibling.group="AB/child"; groups.add_feed(sibling);
+        Feed wildcard; wildcard.url="https://groups.test/wildcard"; wildcard.group="%_/child"; groups.add_feed(wildcard);
+        groups.add_group("Target");
+        rejected=false; try { groups.rename_group("A","Target"); } catch(const std::runtime_error&) { rejected=true; }
+        assert(rejected && groups.feeds()[0].group=="A/sub");
+        rejected=false; try { groups.rename_group("A","A/sub/inside"); } catch(const std::runtime_error&) { rejected=true; }
+        assert(rejected && groups.feeds()[0].group=="A/sub");
+        groups.rename_group("A","Moved");
+        assert(groups.feeds()[0].group=="Moved/sub"); assert(groups.feeds()[1].group=="AB/child");
+        assert(groups.entry(entry_id)->read && groups.entry(entry_id)->starred && groups.entry(entry_id)->position==37);
+        groups.add_group("%_/literal"); groups.rename_group("%_","percent");
+        assert(groups.feeds()[2].group=="percent/child");
+        auto listed=groups.groups(); assert(std::find(listed.begin(),listed.end(),"percent/literal")!=listed.end());
+        groups.remove_group("Moved");
+        assert(groups.feeds()[0].group.empty()); assert(groups.entry(entry_id)->starred);
+        groups.add_group("parent/child"); groups.remove_group("parent/child");
+        const auto paths=groups.groups();
+        assert(std::find(paths.begin(),paths.end(),"parent")!=paths.end()); // Parent persists after its last child is removed.
+    }
+    {
+        Store moved(":memory:");
+        moved.add_group("A/B/C/empty");
+        moved.add_group("A/B/empty");
+        Feed nested; nested.url="https://move.test/feed"; nested.title="Nested"; nested.group="A/B/C";
+        const auto feed_id=moved.add_feed(nested);
+        Entry story=make_entry("story","Preserved state",100);ArticleImage reference;reference.url="https://move.test/image.png";story.images={reference};
+        ParsedFeed parsed;parsed.entries={story};moved.save_entries(feed_id,parsed);
+        const auto entry_id=moved.entries(View::All,feed_id).front().id;
+        moved.set_read(entry_id,true);moved.set_starred(entry_id,true);moved.set_position(entry_id,73);
+        ArticleImage cached;cached.url=reference.url;cached.width=2;cached.height=1;cached.pixels={17,239};moved.save_image(entry_id,cached);
+        Feed lookalike;lookalike.url="https://move.test/lookalike";lookalike.group="AB/child";moved.add_feed(lookalike);
+
+        moved.rename_group("A/B","Target/B");
+        auto paths=moved.groups();
+        assert(std::find(paths.begin(),paths.end(),"A")!=paths.end());
+        assert(std::find(paths.begin(),paths.end(),"Target/B/C/empty")!=paths.end());
+        assert(std::find(paths.begin(),paths.end(),"Target/B/empty")!=paths.end());
+        assert(std::find(paths.begin(),paths.end(),"AB/child")!=paths.end());
+        assert(moved.feeds()[0].group=="Target/B/C"&&moved.feeds()[1].group=="AB/child");
+        assert(moved.entries(View::All,0,"",0,std::string("Target")).size()==1);
+        assert(moved.entries(View::All,0,"",0,std::string("A")).empty());
+
+        moved.rename_group("Target/B","B");
+        assert(moved.feeds()[0].group=="B/C");
+        assert(moved.entries(View::All,0,"",0,std::string("B")).size()==1);
+        assert(moved.entries(View::All,0,"",0,std::string("Target")).empty());
+        const auto preserved=moved.entry(entry_id);const auto image=moved.image(entry_id,reference.url);
+        assert(preserved&&preserved->read&&preserved->starred&&preserved->position==73);
+        assert(image&&image->pixels==cached.pixels&&image->width==2&&image->height==1);
+
+        moved.add_group("Conflict/B/child");
+        const auto before=moved.groups();
+        const auto rejected_move=[&](const std::string& target){bool rejected=false;try{moved.rename_group("B",target);}catch(const std::runtime_error&){rejected=true;}return rejected;};
+        assert(rejected_move("B/C/inside"));
+        assert(rejected_move("Conflict"));
+        assert(moved.groups()==before&&moved.feeds()[0].group=="B/C");
+        assert(moved.entry(entry_id)->read&&moved.entry(entry_id)->starred&&moved.entry(entry_id)->position==73);
+
+        std::vector<std::string> imported_groups;
+        const auto imported=parse_opml(export_opml(moved.feeds(),moved.groups()),&imported_groups);
+        assert(std::find(imported_groups.begin(),imported_groups.end(),"B/C/empty")!=imported_groups.end());
+        assert(std::find(imported_groups.begin(),imported_groups.end(),"B/C")!=imported_groups.end());
+        assert(std::find(imported_groups.begin(),imported_groups.end(),"B/empty")!=imported_groups.end());
+        assert(imported.size()==2);
+        const auto restored=std::find_if(imported.begin(),imported.end(),[&](const Feed& feed){return feed.url==nested.url;});
+        assert(restored!=imported.end()&&restored->group=="B/C");
+    }
+
+    {
+        Store updates(":memory:"); Feed first; first.url="https://updates.test/old"; first.title="Before"; first.group="news";
+        const auto id=updates.add_feed(first); Feed second; second.url="https://updates.test/taken"; second.title="Other"; updates.add_feed(second);
+        ParsedFeed parsed; parsed.entries={make_entry("keep","kept",123)}; updates.save_entries(id,parsed);
+        auto entry_id=updates.entries(View::All,id)[0].id; updates.set_read(entry_id,true); updates.set_starred(entry_id,true); updates.set_position(entry_id,37);
+        updates.sync_result(id,"","tag","date",456);
+        first.id=id; first.title=""; updates.update_feed(first);
+        auto cleared=updates.feeds()[0];
+        assert(cleared.title.empty() && cleared.etag.empty() && cleared.modified.empty() && cleared.synced_at==456);
+        assert(updates.entry(entry_id)->read && updates.entry(entry_id)->starred && updates.entry(entry_id)->position==37);
+        parsed.title="Source title"; updates.save_entries(id,parsed);
+        assert(updates.feeds()[0].title=="Source title" && updates.feeds()[0].synced_at==456);
+        first.title="Custom title"; updates.update_feed(first);
+        parsed.title="Later source title"; updates.save_entries(id,parsed);
+        assert(updates.feeds()[0].title=="Custom title");
+        updates.sync_result(id,"","edit-tag","edit-date",789);
+        updates.edit_feed(id,"",first.group);
+        cleared=updates.feeds()[0];
+        assert(cleared.title.empty() && cleared.etag.empty() && cleared.modified.empty() && cleared.synced_at==789);
+        parsed.title="Edit source title"; updates.save_entries(id,parsed);
+        assert(updates.feeds()[0].title=="Edit source title" && updates.feeds()[0].synced_at==789);
+        first.title=std::string(513,'x'); bool failed=false;
+        try { updates.update_feed(first); } catch(const std::runtime_error&) { failed=true; }
+        assert(failed && updates.feeds()[0].title=="Edit source title");
+        first.title="two\nlines"; failed=false; try { updates.update_feed(first); } catch(const std::runtime_error&) { failed=true; }
+        assert(failed && updates.feeds()[0].title=="Edit source title");
+        updates.sync_result(id,"old error","tag","date",999);
+        first.id=id; first.url="https://updates.test/new"; first.title="After"; first.group="new/group"; updates.update_feed(first);
+        auto changed=updates.feeds()[0]; assert(changed.id==id && changed.url==first.url && changed.title=="After" && changed.group=="new/group");
+        assert(changed.error=="old error" && changed.etag.empty() && changed.modified.empty() && changed.synced_at==0);
+        assert(updates.entry(entry_id)->read && updates.entry(entry_id)->starred && updates.entry(entry_id)->position==37 && updates.entries(View::All,id).size()==1);
+        first.url="https://updates.test/taken"; first.title="Must remain"; failed=false;
+        try { updates.update_feed(first); } catch(const std::runtime_error&) { failed=true; }
+        assert(failed && updates.feeds()[0].url=="https://updates.test/new" && updates.feeds()[0].title=="After");
+        first.url="https://updates.test/new"; first.group="invalid//group"; failed=false;
+        try { updates.update_feed(first); } catch(const std::runtime_error&) { failed=true; }
+        assert(failed && updates.feeds()[0].group=="new/group");
+        first.group="new/group";
+        first.url="file:///tmp/x"; failed=false; try { updates.update_feed(first); } catch(const std::runtime_error&) { failed=true; }
+        assert(failed && updates.feeds()[0].url=="https://updates.test/new");
+    }
+    {
+        Store reuse(":memory:");
+        Feed current; current.url="https://reuse.test/current"; current.title="Current name"; current.group="news";
+        const auto current_id=reuse.add_feed(current);
+        ParsedFeed parsed; auto article=make_entry("keep","kept",123);
+        ArticleImage image; image.url="https://reuse.test/image.png"; article.images={image}; parsed.entries={article};
+        reuse.save_entries(current_id,parsed);
+        const auto entry_id=reuse.entries(View::All,current_id)[0].id;
+        reuse.set_read(entry_id,true); reuse.set_starred(entry_id,true); reuse.set_position(entry_id,37);
+        image.width=1; image.height=1; image.pixels={42}; reuse.save_image(entry_id,image);
+        Feed abandoned; abandoned.url="https://reuse.test/empty"; abandoned.title="Abandoned";
+        const auto abandoned_id=reuse.add_feed(abandoned); reuse.remove_feed(abandoned_id);
+        reuse.sync_result(current_id,"","old-tag","old-date",456);
+        current.id=current_id; current.url=abandoned.url; reuse.update_feed(current);
+        auto active=reuse.feeds();
+        assert(active.size()==1 && active[0].id==current_id && active[0].url==abandoned.url);
+        assert(active[0].title=="Current name" && active[0].group=="news");
+        assert(active[0].etag.empty() && active[0].modified.empty() && active[0].synced_at==0);
+        auto kept=reuse.entry(entry_id);
+        assert(kept && kept->read && kept->starred && kept->position==37 && kept->images.size()==1);
+        assert(reuse.image(entry_id,image.url)->pixels==image.pixels);
+        assert(reuse.add_feed(abandoned)==current_id);
+        current.url=abandoned.url; current.title="Renamed"; current.group="archive"; reuse.update_feed(current);
+        assert(reuse.feeds()[0].id==current_id && reuse.feeds()[0].title=="Renamed" && reuse.feeds()[0].group=="archive");
+    }
+    {
+        Store duplicates(":memory:");
+        Feed current; current.url="https://duplicate.test/current"; current.title="Current";
+        const auto current_id=duplicates.add_feed(current);
+        Feed occupied; occupied.url="https://duplicate.test/occupied"; occupied.title="Occupied";
+        const auto occupied_id=duplicates.add_feed(occupied);
+        current.id=current_id; current.url=occupied.url;
+        bool failed=false; std::string error;
+        try { duplicates.update_feed(current); } catch(const std::runtime_error& e) { failed=true; error=e.what(); }
+        assert(failed && error.find("其他订阅")!=std::string::npos);
+        const auto active=duplicates.feeds();
+        assert(active.size()==2 && active[0].id==current_id && active[0].url=="https://duplicate.test/current");
+        assert(active[1].id==occupied_id && active[1].url==occupied.url && active[1].title=="Occupied");
+    }
+    {
+        Store history(":memory:");
+        Feed current; current.url="https://history.test/current"; current.title="Current";
+        const auto current_id=history.add_feed(current);
+        Feed archived; archived.url="https://history.test/archived"; archived.title="Archived";
+        const auto archived_id=history.add_feed(archived);
+        ParsedFeed parsed; parsed.entries={make_entry("starred","saved",321)}; history.save_entries(archived_id,parsed);
+        const auto starred_id=history.entries(View::All,archived_id)[0].id;
+        history.set_starred(starred_id,true); history.set_position(starred_id,51); history.remove_feed(archived_id);
+        current.id=current_id; current.url=archived.url;
+        bool failed=false; std::string error;
+        try { history.update_feed(current); } catch(const std::runtime_error& e) { failed=true; error=e.what(); }
+        assert(failed && error.find("收藏")!=std::string::npos && error.find("恢复")!=std::string::npos);
+        assert(history.feeds().size()==1 && history.feeds()[0].id==current_id && history.feeds()[0].url=="https://history.test/current");
+        const auto saved=history.entry(starred_id);
+        assert(saved && saved->starred && saved->position==51 && saved->title=="saved");
+    }
+    {
+        Store rollback(":memory:");
+        Feed historical; historical.url="https://rollback.test/historical"; historical.title="Historical";
+        const auto historical_id=rollback.add_feed(historical); rollback.remove_feed(historical_id);
+        Feed missing; missing.id=999999; missing.url=historical.url; missing.title="Missing source";
+        bool failed=false; try { rollback.update_feed(missing); } catch(const std::runtime_error&) { failed=true; }
+        assert(failed);
+        assert(rollback.add_feed(historical)==historical_id);
+        assert(rollback.feeds().size()==1 && rollback.feeds()[0].id==historical_id && rollback.feeds()[0].title=="Historical");
     }
 }

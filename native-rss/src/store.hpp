@@ -12,7 +12,12 @@ public:
     Store& operator=(const Store&) = delete;
     std::int64_t add_feed(const Feed& feed); // URL dedup; retain existing custom name/group.
     std::vector<Feed> feeds() const;
+    std::vector<std::string> groups() const;
+    void add_group(const std::string& path);
+    void rename_group(const std::string& old_path, const std::string& new_path);
+    void remove_group(const std::string& path);
     void edit_feed(std::int64_t id, const std::string& title, const std::string& group);
+    void update_feed(const Feed& feed);
     void save_entries(std::int64_t feed_id, const ParsedFeed& parsed); // Transaction, preserves state.
     void sync_result(std::int64_t feed_id, const std::string& error,
                      const std::string& etag, const std::string& modified, std::int64_t now);

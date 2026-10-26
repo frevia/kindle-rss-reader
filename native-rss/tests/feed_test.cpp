@@ -1,8 +1,10 @@
 #include "feed.hpp"
 
 #include <cassert>
+#include <algorithm>
 #include <iostream>
 #include <stdexcept>
+#include <vector>
 
 int main() {
     using namespace rss;
@@ -54,6 +56,14 @@ int main() {
     assert(roundtrip.size() == 2 && roundtrip[0].url == opml[0].url);
     assert(roundtrip[0].title == opml[0].title);
     assert(roundtrip[0].group == opml[0].group);
+    std::vector<std::string> empty_groups;
+    const auto directory_only=parse_opml(R"xml(<opml><body><outline text="Empty &amp; Root"><outline text="Nested"/></outline></body></opml>)xml",&empty_groups);
+    assert(directory_only.empty());
+    assert((empty_groups==std::vector<std::string>{"Empty & Root","Empty & Root/Nested"}));
+    const auto with_empty=parse_opml(export_opml(opml,empty_groups),&empty_groups);
+    assert(with_empty.size()==opml.size());
+    assert(std::find(empty_groups.begin(),empty_groups.end(),"Empty & Root/Nested")!=empty_groups.end());
+    assert(export_opml({},empty_groups).find("Empty &amp; Root")!=std::string::npos);
 
     bool rejected = false;
     try { parse_feed("<!DOCTYPE x [<!ENTITY ext SYSTEM 'file:///etc/passwd'>]><rss><channel><title>&ext;</title></channel></rss>", "https://x.test/"); }
