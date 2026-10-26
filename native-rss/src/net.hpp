@@ -9,5 +9,5 @@ Response fetch(const std::string& url, const std::string& etag, const std::strin
                const std::atomic<bool>& cancel);
 struct SyncProgress { int completed = 0, total = 0, failed = 0; std::string message; };
 void sync_feeds(Store& store, const std::atomic<bool>& cancel,
-                const std::function<void(const SyncProgress&)>& progress);
+                const std::function<void(const SyncProgress&)>& progress, bool failed_only = false);
 }

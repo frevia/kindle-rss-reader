@@ -103,8 +103,10 @@ void Canvas::icon(Icon kind,Rect area,std::uint8_t color){
     switch(kind){
     case Icon::Rss: arc(5,19,7,-pi/2,0);arc(5,19,14,-pi/2,0);arc(5,19,1,0,2*pi);break;
     case Icon::Search:arc(10,10,6,0,2*pi);line(15,15,21,21);break;
-    case Icon::Sync:arc(12,12,8,-pi*.85,pi*.05);arc(12,12,8,pi*.15,pi*1.05);line(20,6,20,12);line(20,12,14,12);line(4,18,4,12);line(4,12,10,12);break;
-    case Icon::Star:for(int i=0;i<10;++i){double a=-pi/2+i*pi/5,b=a+pi/5,r=i%2?4:9,rr=i%2?9:4;line(12+r*std::cos(a),12+r*std::sin(a),12+rr*std::cos(b),12+rr*std::sin(b));}break;
+    case Icon::Sync:
+        arc(12,12,8,0,pi*1.75);line(17.66,6.34,20,8);
+        line(20,3,20,8);line(20,8,15,8);break;
+    case Icon::Star:case Icon::StarFilled:for(int i=0;i<10;++i){double a=-pi/2+i*pi/5,b=a+pi/5,r=i%2?4:9,rr=i%2?9:4;line(12+r*std::cos(a),12+r*std::sin(a),12+rr*std::cos(b),12+rr*std::sin(b));}break;
     case Icon::Back:line(14,5,7,12);line(7,12,14,19);break;
     case Icon::Next:line(10,5,17,12);line(17,12,10,19);break;
     case Icon::Close:line(6,6,18,18);line(18,6,6,18);break;
@@ -118,6 +120,7 @@ void Canvas::icon(Icon kind,Rect area,std::uint8_t color){
     case Icon::Download:case Icon::Upload:{bool down=kind==Icon::Download;int tip=down?15:4,tail=down?4:15,wing=down?10:9;line(12,tail,12,tip);line(7,wing,12,tip);line(12,tip,17,wing);line(4,16,4,21);line(4,21,20,21);line(20,21,20,16);break;}
     case Icon::Exit:line(10,4,4,4);line(4,4,4,20);line(4,20,10,20);line(10,12,21,12);line(16,7,21,12);line(21,12,16,17);break;
     case Icon::Check:line(4,12,9,17);line(9,17,20,6);break;
+    case Icon::Info:arc(12,12,9,0,2*pi);arc(12,7,0.5,0,2*pi);line(12,11,12,17);break;
     case Icon::None:break;
     }
     const double scale=std::min(area.w,area.h)/24.0;
@@ -135,7 +138,12 @@ void Canvas::icon(Icon kind,Rect area,std::uint8_t color){
                 const double ex=px-l.x1-t*l.dx,ey=py-l.y1-t*l.dy;
                 distance=std::min(distance,ex*ex+ey*ey);}
             distance=std::sqrt(distance);
-            double alpha=std::clamp((1-distance)*scale+.5,0.0,1.0);
+            bool inside=false;
+            if(kind==Icon::StarFilled)for(const auto& edge:lines){
+                if((edge.y1>py)!=(edge.y2>py) &&
+                   px<(edge.x2-edge.x1)*(py-edge.y1)/(edge.y2-edge.y1)+edge.x1)inside=!inside;
+            }
+            double alpha=std::clamp((1+(inside?distance:-distance))*scale+.5,0.0,1.0);
             auto& pixel=pixels[y*width+x];pixel=static_cast<std::uint8_t>(pixel*(1-alpha)+color*alpha);
         }
 }

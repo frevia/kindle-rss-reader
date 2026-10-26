@@ -47,7 +47,7 @@ int main(int argc, char** argv) {
         };
         measure("all_switch_and_draw", 3, [&] { app->show_view(rss::View::All); app->draw(); });
         snapshot("list.pgm");
-        measure("navigation_first", 1, [&] { app->tap(100, 150); app->draw(); });
+        measure("navigation_first", 1, [&] { app->tap(150, 50); app->draw(); app->tap(120, 154); app->draw(); });
         snapshot("navigation.pgm");
         measure("navigation_redraw", 10, [&] { app->draw(); });
         app->back(); app->draw();
@@ -55,7 +55,7 @@ int main(int argc, char** argv) {
         measure("list_previous_and_draw", 10, [&] { app->previous(); app->draw(); });
         measure("group_switch_and_draw", 3, [&] { app->show_group("测试"); app->draw(); });
         measure("search_and_draw", 1, [&] {
-            app->tap(950, 150); app->text_input("性能"); app->submit(); app->draw();
+            app->tap(950, 260); app->text_input("性能"); app->submit(); app->draw();
         });
         rss::ArticleImage image; image.url = "https://benchmark.invalid/image";
         rss::Entry picture; picture.guid = "picture"; picture.title = "图片性能测试";
@@ -65,18 +65,20 @@ int main(int argc, char** argv) {
         image.width = 944; image.height = 1000; image.pixels.assign(944 * 1000, 120);
         store.save_image(picture_id, image);
         measure("image_open_and_draw", 1, [&] {
-            app->open(picture_id); app->draw(); app->tap(900, 50); app->draw();
+            app->open(picture_id); app->draw(); app->tap(536, 600); app->draw();
+            app->tap(536, 1380); app->draw();
         });
         measure("image_redraw", 10, [&] { app->draw(); });
-        app->back(); app->back();
+        app->back(); app->back(); app->back();
         const auto eid = store.entries(rss::View::All, fid, "Reader benchmark").front().id;
         measure("long_article_open_and_draw", 1, [&] { app->open(eid); app->draw(); });
         snapshot("reader.pgm");
         measure("reader_next_and_draw", 10, [&] { app->next(); app->draw(); });
-        app->tap(530, 400);
+        app->tap(536, 600); app->draw();
+        app->tap(200, 1380);
         measure("reader_settings_draw", 1, [&] { app->draw(); });
         snapshot("settings.pgm");
-        app->back();
+        app->back(); app->back();
         measure("return_to_list", 1, [&] { app->back(); app->draw(); });
         const auto previous = canvas.pixels;
         canvas.fill({20,20,100,100}, 0);

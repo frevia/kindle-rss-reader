@@ -2,10 +2,14 @@
 #include "render.hpp"
 #include "store.hpp"
 #include <functional>
+#include <set>
 
 namespace rss {
 class App {
 public:
+    enum class ReaderPanel { None, Type, Images, Info };
+    enum class Screen { List, Subscriptions, GroupPicker, Groups, GroupEdit, Opml, Sync, Cache };
+    enum class SyncState { Idle, Running, Complete, Cancelled, Failed };
     App(Store& store, Canvas& canvas);
     void draw();
     void tap(int x, int y);
@@ -18,6 +22,14 @@ public:
     void reload();
     void open(std::int64_t id, bool track = true);
     void notify(const std::string& text);
+    void sync_started();
+    void sync_progress(int completed, int total, int failed, const std::string& message);
+    void sync_finished(bool cancelled, const std::string& error = "");
+    Screen screen() const { return screen_; }
+    SyncState sync_state() const { return sync_state_; }
+    bool menu_open() const { return brand_menu_; }
+    const std::string& query() const { return search_; }
+    const std::optional<std::string>& selected_group() const { return group_; }
     void show_error(const std::string& text);
     void show_view(View view, std::int64_t feed = 0);
     void show_group(const std::string& group);
@@ -26,6 +38,9 @@ public:
     bool reading() const { return current_.has_value(); }
     std::size_t reader_page() const { return page_; }
     std::int64_t current_id() const { return current_ ? current_->id : 0; }
+    bool reader_tools_open() const { return reader_tools_; }
+    ReaderPanel reader_panel() const { return reader_panel_; }
+    std::size_t reader_image_page() const { return image_page_; }
 private:
     struct Hit { Rect rect; std::function<void()> action; };
     Store& store_; Canvas& c_;
@@ -40,11 +55,28 @@ private:
     std::int64_t feed_ = 0;
     std::optional<std::string> group_;
     std::size_t list_page_ = 0, page_ = 0, nav_page_ = 0;
-    int font_size_ = 32, line_gap_ = 20, margin_ = 64;
-    bool navigation_ = false, menu_ = false, info_ = false, shift_ = false;
-    bool storage_ = false;
-    bool groups_ = false;
-    bool images_ = false;
+    int last_tap_x_ = 0;
+    int font_size_ = 32, line_gap_ = 20, margin_ = 32;
+    bool reader_tools_ = false, image_zoom_ = false, shift_ = false, symbols_ = false;
+    ReaderPanel reader_panel_ = ReaderPanel::None;
+    std::size_t info_scroll_ = 0;
+    std::optional<std::int64_t> typography_anchor_;
+    Screen screen_ = Screen::List, edit_origin_ = Screen::Subscriptions;
+    SyncState sync_state_ = SyncState::Idle;
+    int sync_completed_ = 0, sync_total_ = 0, sync_failed_ = 0;
+    std::string sync_message_;
+    bool brand_menu_ = false, source_list_ = false;
+    struct ListContext { View view; std::int64_t feed; std::optional<std::string> group; std::string search; std::size_t page; };
+    std::optional<ListContext> home_;
+    std::vector<std::string> group_names_;
+    std::set<std::string> folded_;
+    std::size_t picker_page_ = 0, groups_page_ = 0, sync_page_ = 0, nav_page_count_ = 1;
+    enum class PickerPurpose { Read, Search, Move, Parent };
+    PickerPurpose picker_purpose_ = PickerPurpose::Read;
+    struct InputContext { std::string mode, value, composing; bool chinese, symbols, shift; std::size_t candidate; };
+    std::optional<InputContext> suspended_input_;
+    std::string picker_query_, editing_group_, group_name_draft_, group_parent_draft_;
+    bool new_group_ = false;
     std::size_t image_page_=0;
     std::optional<Feed> managing_;
     std::string confirmation_;
@@ -60,15 +92,33 @@ private:
     int line_height() const { return font_size_ + line_gap_; }
     void paginate();
     void save_position();
-    void button(Rect rect,const std::string& label,std::function<void()> action,bool filled=false,int size=26,Icon icon=Icon::None);
+    enum class Align { Center, Left, Right };
+    void button(Rect rect,const std::string& label,std::function<void()> action,bool filled=false,int size=26,Icon icon=Icon::None,bool enabled=true,Align align=Align::Center);
     void list_screen();
     void reader_screen();
     void nav_screen();
+    void group_picker_screen();
+    void group_edit_screen();
+    void edit_group(const std::string& path, bool create);
+    void opml_screen();
+    void sync_screen();
+    void app_menu();
+    void open_subscriptions();
+    void restore_home();
+    void open_group_picker(PickerPurpose purpose);
+    void restore_input();
+    void edit_feed(const Feed& feed);
+    void save_feed();
+    void clear_search();
+    std::string source_group(std::int64_t id) const;
+    std::string article_metadata(const Entry& entry) const;
+    int list_top() const { return search_.empty() && !feed_ && !group_ ? 278 : 322; }
+    int list_bottom() const { return c_.height - (status_.empty() ? 104 : 208); }
     void input_screen();
-    void reader_menu();
-    void info_screen();
-    void image_screen();
-    bool draw_image(const ArticleImage& image, Rect area);
+    void reader_tools();
+    void reader_panel_screen();
+    bool draw_image(const ArticleImage& image, Rect area, bool enlarge=false, int clip_bottom=-1);
+    void close_reader_tools();
     int article_heading_height();
     void management_screen();
     void confirmation_screen();

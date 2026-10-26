@@ -7,7 +7,7 @@
 #include FT_FREETYPE_H
 
 namespace rss {
-enum class Icon { None, Rss, Search, Sync, Star, Back, Next, Close, Book, Clock, Inbox, Folder, Plus, Settings, Image, Download, Upload, Exit, Check };
+enum class Icon { None, Rss, Search, Sync, Star, Back, Next, Close, Book, Clock, Inbox, Folder, Plus, Settings, Image, Download, Upload, Exit, Check, StarFilled, Info };
 struct Rect { int x, y, w, h; bool contains(int px, int py) const; };
 struct Line { std::string text; std::size_t start = 0, end = 0; };
 struct InlineImage { std::size_t offset=0,caption_end=0; int index=0,width=0,height=0; };

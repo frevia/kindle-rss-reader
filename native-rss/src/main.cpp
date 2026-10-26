@@ -73,30 +73,40 @@ public:
     UiTasks(rss::Store& store,rss::App& app,const std::string& db):store_(store),app_(app),db_(db){}
     ~UiTasks(){cancel_=true;if(worker_.valid())worker_.wait();}
     void tick(){
-        const auto request=app_.take_request();
-        const auto folder=std::filesystem::path(db_).parent_path();
-        if(request=="sync"){
-            if(worker_.valid()){cancel_=true;app_.notify("正在取消同步…");}
-            else{
-                cancel_=false;app_.notify("正在同步…");
-                worker_=std::async(std::launch::async,[this]{
-                    rss::Store background(db_);
-                    rss::sync_feeds(background,cancel_,[this](const rss::SyncProgress& p){
-                        std::lock_guard<std::mutex> lock(mutex_);progress_=p.message;
-                    });
+        collect();const auto request=app_.take_request();const auto folder=std::filesystem::path(db_).parent_path();
+        if(request=="sync"||request=="retry-sync"){
+            if(!worker_.valid()){
+                cancel_=false;app_.sync_started();const bool failed_only=request=="retry-sync";
+                worker_=std::async(std::launch::async,[this,failed_only]{
+                    rss::Store background(db_);rss::sync_feeds(background,cancel_,[this](const rss::SyncProgress& p){
+                        std::lock_guard<std::mutex> lock(mutex_);progress_=p;
+                    },failed_only);
                 });
             }
+        }else if(request=="cancel-sync"){
+            cancel_=true;if(!worker_.valid())app_.sync_finished(true);else app_.notify("正在取消同步…");
         }else if(request=="import"){
             import_opml(store_,(folder/"feeds.opml").string());app_.reload();app_.notify("订阅已导入，点击同步获取文章");
         }else if(request=="export"){
             write_export(store_,(folder/"subscriptions.opml").string());app_.notify("已导出 subscriptions.opml");
         }
-        {std::lock_guard<std::mutex> lock(mutex_);if(!progress_.empty()){app_.notify(progress_);progress_.clear();}}
-        if(worker_.valid()&&worker_.wait_for(std::chrono::seconds(0))==std::future_status::ready)worker_.get();
+        collect();
     }
 private:
+    void collect(){
+        std::optional<rss::SyncProgress> progress;
+        {std::lock_guard<std::mutex> lock(mutex_);progress=std::move(progress_);progress_.reset();}
+        if(progress)app_.sync_progress(progress->completed,progress->total,progress->failed,progress->message);
+        if(worker_.valid()&&worker_.wait_for(std::chrono::seconds(0))==std::future_status::ready){
+            std::string failure;try{worker_.get();}catch(const std::exception& e){failure=e.what();}
+            // Worker state is committed even when its status page is not visible.
+            {std::lock_guard<std::mutex> lock(mutex_);progress=std::move(progress_);progress_.reset();}
+            if(progress)app_.sync_progress(progress->completed,progress->total,progress->failed,progress->message);
+            app_.sync_finished(cancel_,failure);
+        }
+    }
     rss::Store& store_;rss::App& app_;std::string db_;
-    std::atomic<bool> cancel_{false};std::future<void> worker_;std::mutex mutex_;std::string progress_;
+    std::atomic<bool> cancel_{false};std::future<void> worker_;std::mutex mutex_;std::optional<rss::SyncProgress> progress_;
 };
 volatile std::sig_atomic_t stop_device=0;
 void stop_device_handler(int){stop_device=1;}

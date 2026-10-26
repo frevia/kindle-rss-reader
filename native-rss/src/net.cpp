@@ -109,8 +109,9 @@ Response fetch(const std::string& url, const std::string& etag, const std::strin
     return std::move(t.response);
 }
 void sync_feeds(Store& store, const std::atomic<bool>& cancel,
-                const std::function<void(const SyncProgress&)>& progress) {
-    const auto feeds = store.feeds();
+                const std::function<void(const SyncProgress&)>& progress, bool failed_only) {
+    auto feeds = store.feeds();
+    if(failed_only)feeds.erase(std::remove_if(feeds.begin(),feeds.end(),[](const Feed& f){return f.error.empty();}),feeds.end());
     SyncProgress p; p.total = static_cast<int>(feeds.size());
     progress(p);
     for (const auto& f : feeds) {
@@ -134,6 +135,7 @@ void sync_feeds(Store& store, const std::atomic<bool>& cancel,
     int image_failures=0;
     for(const auto& item:store.pending_images()){
         if(cancel)break;
+        if(failed_only){auto entry=store.entry(item.first,false);if(!entry||std::none_of(feeds.begin(),feeds.end(),[&](const Feed& f){return f.id==entry->feed_id;}))continue;}
         p.message="正在缓存文章图片…";progress(p);
         try{
             auto response=fetch(item.second.url,"","",cancel);
