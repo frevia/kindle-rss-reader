@@ -12,6 +12,22 @@ from build_arm_test import elf
 
 
 class PackageTests(unittest.TestCase):
+    def test_sources_include_project_license_but_exclude_private_artifacts(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder)/"native-rss";root.mkdir()
+            public=("LICENSE","README.md","CONTRIBUTING.md","SECURITY.md","THIRD_PARTY_NOTICES.md","CHANGELOG.md",".github/workflows/release.yml")
+            for name in public:
+                path=root.parent/name;path.parent.mkdir(parents=True,exist_ok=True);path.write_text(name)
+            included=("src/main.cpp","tests/fixtures/colors.png","docs/INSTALL.md","device/INSTALL.txt","device/launch.sh")
+            private=("docs/device-report.txt","docs/session.log","tests/private.sqlite","data/feeds.opml","output/app.zip","tools/__pycache__/package.pyc")
+            for name in (*included,*private):
+                path=root/name;path.parent.mkdir(parents=True,exist_ok=True);path.write_bytes(b"test")
+            files=pack.source_files(root)
+            self.assertEqual(set(files),set(public)|{"native-rss/"+name for name in included})
+            self.assertTrue(files["native-rss/device/launch.sh"][1])
+            (root/"src/link.cpp").symlink_to(root/"src/main.cpp")
+            with self.assertRaises(RuntimeError):pack.source_files(root)
+
     def test_rejects_stale_or_changed_binary(self):
         with tempfile.TemporaryDirectory() as folder:
             binary=Path(folder)/"app";binary.write_bytes(elf())

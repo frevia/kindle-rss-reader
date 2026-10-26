@@ -12,6 +12,8 @@
 
 需要 CMake、pkg-config、C++17 编译器及 libxml2、sqlite3、libcurl（支持 CURLOPT_PROTOCOLS_STR）、freetype2、libwebp、libavif 1.1.0+（启用 libyuv）、sdl2 开发库。
 
+先确认这些库能通过 `pkg-config` 查到；非系统前缀安装时，将对应的 `lib/pkgconfig` 加入 `PKG_CONFIG_PATH`。例如 libavif 安装在自选前缀后，使用 `PKG_CONFIG_PATH=/absolute/prefix/lib/pkgconfig`。不要将 ARM 的依赖目录用于宿主构建。缺少 `libavif` 时 CMake 会停止；已有旧构建目录成功不代表新环境能直接构建。
+
 ```sh
 rtk proxy cmake -S native-rss -B native-rss/build -DCMAKE_BUILD_TYPE=Debug
 rtk proxy cmake --build native-rss/build -j 6
@@ -19,6 +21,8 @@ rtk proxy ctest --test-dir native-rss/build --output-on-failure
 ```
 
 从本仓库根目录运行。测试使用临时数据库与本机 HTTP 服务，不接触 Kindle。Linux 的中文视觉检查需要 `RSS_FONT` 指向合适字体；测试 fallback 字体不代表中文显示验收。
+
+上面的 `rtk proxy` 是本仓库使用的命令代理；没有安装 RTK 时可直接运行其后的命令。仅构建命令行与测试、不需要 SDL 窗口时，可在配置命令追加 `-DRSS_DESKTOP=OFF`。
 
 ## ARM 构建状态
 
@@ -39,6 +43,14 @@ rtk proxy python3 native-rss/tools/package.py
 ```
 
 需要先完成 ARM 构建。工具验证源码及二进制哈希，拒绝过期产物；缺少运行资源时按 `tools/runtime-sources.json` 下载并验证。输出 `output/kindle-rss-kpw3-dev.zip` 和 `output/kindle-rss-source-dev.zip`，不自动安装。包含 Noto Sans SC（OFL 1.1）、Mozilla 根证书（MPL 2.0）、KUAL 入口、第三方许可、安装说明和逐文件 SHA-256 清单。程序使用未修改的可变字体，设置字重为 400。
+
+项目自身的 MIT 许可与第三方组件汇总同时放入安装包；源码包还包含仓库首页、贡献指南、安全反馈和同一组第三方许可。源码按文件类型白名单收集，诊断 TXT、日志、数据库与 OPML 不属于打包输入。发布前仍需核对实际 ZIP 内容，不能只依赖 `.gitignore`。
+
+## GitHub Release
+
+[发布工作流](../.github/workflows/release.yml) 在推送 `v数字.数字.数字` 标签时运行，也可在标签引用上手动重跑。先将 CMake 与 KUAL 版本号、首页下载入口、安装教程及根目录 `CHANGELOG.md` 更新到该版本，再提交并推送标签。工作流使用 Apple Silicon macOS runner，校验固定 Zig 下载哈希，运行宿主 CTest，重新编译 ARM，再调用 `tools/release.py` 整理附件。
+
+例如 `v0.0.2` 产物为 `RSS-Reader-v0.0.2-KPW3.zip`、`RSS-Reader-v0.0.2-source.zip` 和 `SHA256SUMS.txt`。工作流核对安装清单、二进制、许可和文件哈希后，上传草稿并发布；任何前置步骤失败都不会发布 Release。此过程不改变仓库可见性，也不部署 Kindle。GitHub 编译产物仍需另行实机验证。
 
 FreeType 按 FreeType License 使用。Portions of this software are copyright (c) The FreeType Project (www.freetype.org). All rights reserved.
 
@@ -89,7 +101,7 @@ rtk proxy native-rss/build/kindle-rss --db native-rss/output/demo.sqlite --artic
 
 ## 性能排查
 
-本轮已优化列表按需分页、导航图标计算和屏幕差异检测；列表总页数尚未计算完时显示 `…`。桌面性能对照、复测命令及待真机验证项见 [性能报告](docs/PERFORMANCE.md)。
+当前列表首次显示时计算准确总页数，并缓存标题测量结果供后续翻页和视图切换复用；导航图标计算和屏幕差异检测也已优化。[性能报告](docs/PERFORMANCE.md)保留历史对照和复测命令，其中早期按需统计总页数的行为已被后续修改替代。耗时不能据宿主测试推断 Kindle 实屏体验。
 
 ## 验证状态
 

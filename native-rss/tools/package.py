@@ -29,6 +29,30 @@ def write_zip(path, files):
     temporary.replace(path)
 
 
+def source_files(root):
+    files = {}
+    # Only distributable sources: .gitignore does not filter Python directory walks.
+    patterns = (
+        "src/*.cpp", "src/*.hpp", "tests/*.cpp", "tests/*.py",
+        *("tests/fixtures/*." + suffix for suffix in ("avif", "jpg", "png", "webp", "pgm")),
+        "tools/*.py", "tools/*.cpp", "tools/*.json", "device/*.sh", "device/*.json", "device/book-cover.png",
+        "device/INSTALL.txt", "device/kual/*.xml", "device/kual/*.json", "docs/*.md",
+        "third_party/*/LICENSE", "third_party/*/SOURCE.json", "third_party/*/*.h", "third_party/*/*.yaml",
+        "README.md", "CMakeLists.txt", ".gitignore",
+    )
+    for pattern in patterns:
+        for path in sorted(root.glob(pattern)):
+            if path.is_symlink():
+                raise RuntimeError(f"拒绝打包符号链接：{path}")
+            files["native-rss/" + str(path.relative_to(root))] = (path.read_bytes(), path.suffix == ".sh")
+    for name in ("LICENSE", "README.md", "CONTRIBUTING.md", "SECURITY.md", "THIRD_PARTY_NOTICES.md", "CHANGELOG.md", ".github/workflows/release.yml"):
+        path = root.parent / name
+        if path.is_symlink():
+            raise RuntimeError(f"拒绝打包符号链接：{path}")
+        files[name] = (path.read_bytes(), False)
+    return files
+
+
 def main():
     binary = BUILD / "kindle-rss"
     manifest = json.loads((BUILD / "build-info.json").read_text())
@@ -64,8 +88,10 @@ def main():
         add("extensions/native-rss/" + name, ROOT / "device/kual" / name)
     add("native-rss/INSTALL.txt", ROOT / "device/INSTALL.txt")
     add("native-rss/README.md", ROOT / "README.md")
+    add("native-rss/LICENSE", ROOT.parent / "LICENSE")
+    add("native-rss/THIRD_PARTY_NOTICES.md", ROOT.parent / "THIRD_PARTY_NOTICES.md")
     for document in sorted((ROOT / "docs").iterdir()):
-        if document.suffix not in (".md", ".txt"):
+        if document.suffix != ".md":
             continue
         add("native-rss/docs/" + document.name, document)
     add("native-rss/BUILD.json", BUILD / "build-info.json")
@@ -113,16 +139,9 @@ def main():
     output.mkdir(exist_ok=True)
     target = output / "kindle-rss-kpw3-dev.zip"
     write_zip(target, files)
-    source_files = {}
-    for folder in ("src", "tests", "tools", "device", "docs", "third_party"):
-        for path in sorted((ROOT / folder).rglob("*")):
-            if path.is_file() and "__pycache__" not in path.parts:
-                if path.is_symlink():
-                    raise RuntimeError(f"拒绝打包符号链接：{path}")
-                source_files["native-rss/" + str(path.relative_to(ROOT))] = (path.read_bytes(), path.suffix == ".sh")
-    for name in ("README.md", "CMakeLists.txt", ".gitignore"):
-        source_files["native-rss/" + name] = ((ROOT / name).read_bytes(), False)
-    write_zip(output / "kindle-rss-source-dev.zip", source_files)
+    sources = source_files(ROOT)
+    sources.update({name: value for name, value in files.items() if name.startswith("native-rss/licenses/")})
+    write_zip(output / "kindle-rss-source-dev.zip", sources)
     print(f"Development package: {target} ({target.stat().st_size} bytes)")
     print(f"SHA-256: {sha256(target)}")
 

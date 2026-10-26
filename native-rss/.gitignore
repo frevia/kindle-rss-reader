@@ -1,7 +1,10 @@
 /build*/
 /output/
 /vendor/
+/data/
 *.sqlite*
+*.opml
+*.log
 __pycache__/
 *.py[cod]
 /docs/*report*.txt

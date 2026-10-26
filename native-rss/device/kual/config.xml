@@ -2,7 +2,7 @@
 <extension>
   <information>
     <name>Kindle RSS</name>
-    <version>0.1.0-dev</version>
+    <version>0.0.2</version>
     <author>Kindle RSS</author>
     <id>native-rss</id>
   </information>
