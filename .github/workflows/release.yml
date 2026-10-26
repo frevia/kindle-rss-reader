@@ -60,7 +60,8 @@ jobs:
           LOGS.mkdir(parents=True, exist_ok=True)
           UNPACKED.mkdir(parents=True, exist_ok=True)
           lock = json.loads((ROOT / "tools/arm-sources.json").read_text())
-          trees = {name: source_tree(name, lock[name], download(name, lock[name])) for name in ("libyuv", "libavif")}
+          archives = {name: download(name, lock[name]) for name in ("libyuv", "libavif")}
+          trees = {name: source_tree(name, lock[name], archives) for name in archives}
           build = ROOT / "build-host-media"
           prefix = build / "prefix"
           run(["cmake", "-S", str(trees["libyuv"]), "-B", str(build / "yuv"), "-DCMAKE_BUILD_TYPE=Release", "-DUNIT_TEST=OFF", "-DLIBYUV_DISABLE_JPEG=ON"])
