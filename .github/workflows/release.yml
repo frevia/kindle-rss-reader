@@ -56,7 +56,9 @@ jobs:
           import json, shutil, sys
           from pathlib import Path
           sys.path.insert(0, "native-rss/tools")
-          from build_arm import ROOT, download, run, source_tree
+          from build_arm import LOGS, ROOT, UNPACKED, download, run, source_tree
+          LOGS.mkdir(parents=True, exist_ok=True)
+          UNPACKED.mkdir(parents=True, exist_ok=True)
           lock = json.loads((ROOT / "tools/arm-sources.json").read_text())
           trees = {name: source_tree(name, lock[name], download(name, lock[name])) for name in ("libyuv", "libavif")}
           build = ROOT / "build-host-media"
