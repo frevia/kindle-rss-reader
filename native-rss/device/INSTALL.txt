@@ -7,10 +7,11 @@ RSS Reader 安装说明
 打开方式与所需组件
 - 从 KUAL 菜单打开：需要可用的 KUAL，不需要 Scriptlets。
 - 从书库图标打开：需要 Scriptlets / SH_Integration，不需要同时安装 KUAL。
-两种入口都会打开 RSS Reader 自己的程序，不需要微信读书、商店入口或它的字体目录。
-本安装包自带字体和证书，但目前未带用于退出后恢复屏幕的 FBInk。
-Hotfix 可以提供 Scriptlets 和 FBInk；已有可用组件时无需为本应用重装 Hotfix。
-如果启动失败，先生成检查文件，按结果确认原因，不要直接重装补丁。
+两种入口都需要用于退出后恢复屏幕的 FBInk，安装包目前没有附带它。
+连接电脑，检查 Kindle 磁盘的 libkh → bin 中是否有 fbink 文件。
+如果没有：已有 Run Hotfix 时先拔线并打开它运行，再连接电脑检查同一位置。
+没有 Run Hotfix，或运行后仍缺少文件时，按下面的补丁步骤准备。
+文件已存在、但应用仍打不开时，再按文末步骤导出检查文件。
 
 安装
 1. 准备已越狱的 Kindle Paperwhite 3（KPW3，2015 款），先在设置中关闭设备密码锁。
@@ -20,10 +21,9 @@ Hotfix 可以提供 Scriptlets 和 FBInk；已有可用组件时无需为本应�
 4. 安全弹出并拔线，选择自己准备好的入口：
    KUAL → Kindle RSS → RSS Reader，或书库里的 RSS Reader 图标。
 
-书库启动准备（只有选择书库入口且尚未准备好时才需要）
-Scriptlets 让 .sh 应用像一本书一样出现在书库，不需要你自己编写或配置脚本。
-已经能从书库打开 .sh 应用时可跳过这部分；这仅说明书库入口可用。
-只使用 KUAL 时无需安装 Scriptlets。希望使用书库入口、但还未准备好的，可按下面步骤通过 Hotfix 补丁安装：
+准备缺少的组件（FBInk 或书库启动）
+缺少 FBInk，或希望从书库打开但还没有 Scriptlets 时，可按下面步骤通过 Hotfix 补丁准备。
+已有所需组件时可跳过；不需要自己编写或修改启动脚本。
 1. 退出正在运行的越狱应用，回到书库，开启飞行模式。
 2. 在电脑下载 Update_hotfix_universal.bin，不改名、不解压：
    https://github.com/KindleModding/Hotfix/releases/latest/download/Update_hotfix_universal.bin
@@ -31,13 +31,14 @@ Scriptlets 让 .sh 应用像一本书一样出现在书库，不需要你自己�
    同一层其他 .bin 安装文件及 update.bin.tmp.partial 如有，请先移到电脑备份。
 4. 安全弹出并拔线，打开 Kindle 设置 → 全部设置 → 右上角三个点 → 更新 Kindle，确认安装。
 5. 等安装完成回到书库，点开 Run Hotfix，等处理结束。这一步不能省略。
-6. 再按上面的安装步骤复制 RSS Reader 文件，拔线后在书库的“全部”中找到 RSS Reader。
+6. 再连接电脑，确认 libkh → bin → fbink 文件已出现，再复制 RSS Reader 文件。
+   拔线后从 KUAL 打开，或在书库的“全部”中找到 RSS Reader。
    已经复制过的，可以再复制一次安装包中 documents 的内容。仍不显示时先重启 Kindle。
 
 这里“更新 Kindle”用于安装 Hotfix 的 .bin 补丁，RSS Reader 的 ZIP 仍然只需要复制文件。
 不要为了安装本应用下载系统固件，也不要恢复出厂设置。
 如果“更新 Kindle”不可选，完整教程中有位置检查和已有更新阻止工具的处理步骤。
-已能从 KUAL 打开阅读器时，也可以继续使用 KUAL，无需为此重新安装补丁。
+已经能正常打开阅读器时，无需重装补丁。
 
 首次使用
 连接 Wi-Fi，点“添加订阅”，填入网站提供的订阅地址并保存，再点右上角同步图标。

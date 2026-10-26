@@ -17,7 +17,7 @@
 2. 在页面下方的 **Assets（下载文件）** 中，下载文件名以 **`-KPW3.zip`** 结尾的压缩包。
 3. 按[安装教程](native-rss/docs/INSTALL.md)复制文件，再从书库或 KUAL 打开阅读器。
 
-使用已有 KUAL 时，不需要另装 Scriptlets；希望从书库图标打开时，[安装教程](native-rss/docs/INSTALL.md)会说明如何准备 Scriptlets，以及何时需要补装组件。教程按 RSS Reader 自己的运行要求编写，不需要安装微信读书或它的商店入口。已经装好后，[使用指南](native-rss/docs/USAGE.md)会带你添加订阅、下载文章和备份数据。
+首次安装请从[安装教程](native-rss/docs/INSTALL.md)开始，按步骤准备启动入口并复制文件。装好后，[使用指南](native-rss/docs/USAGE.md)会带你添加订阅、下载文章和备份数据。
 
 目前仍是开发中的版本，长期使用和反复休眠、退出还需要更多实际使用验证。
 

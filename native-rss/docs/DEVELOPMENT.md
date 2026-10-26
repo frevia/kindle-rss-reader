@@ -54,6 +54,8 @@ rtk proxy python3 native-rss/tools/package.py
 
 产物为文件名以 `-KPW3.zip`、`-source.zip` 结尾的两个压缩包，以及 `SHA256SUMS.txt`；完整文件名由标签自动生成。工作流核对安装清单、二进制、许可和文件哈希后，上传草稿并发布；任何前置步骤失败都不会发布 Release。此过程不改变仓库可见性，也不部署 Kindle。GitHub 编译产物仍需另行实机验证。
 
+已发布附件若仅修订文档，需保留原程序、非文档源码和 `BUILD.json`，在 `native-rss/DOCUMENTATION.json` 中记录应用提交与文档修订提交，并重算安装清单及附件校验值。发布说明同时标注文档更新，不能把文档修订称为重新编译。GitHub 自动生成的源码归档仍对应原版本标签，后补的文档以自定义源码包及其文档修订记录为准。
+
 FreeType 按 FreeType License 使用。Portions of this software are copyright (c) The FreeType Project (www.freetype.org). All rights reserved.
 
 ## 在电脑上运行

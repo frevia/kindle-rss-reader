@@ -27,7 +27,7 @@
 
 升级前退出应用并备份整个 `native-rss`，保留 `native-rss/data/`。安装包不包含个人数据库；不要整体替换书籍或扩展目录，也不要使用“更新 Kindle”安装 ZIP。
 
-[完整安装、升级与排错教程](native-rss/docs/INSTALL.md)。
+[完整安装、升级与排错教程](https://github.com/frevia/kindle-rss-reader/blob/main/native-rss/docs/INSTALL.md)。
 
 ## 验证与限制
 
