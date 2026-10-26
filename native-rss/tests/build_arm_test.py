@@ -1,7 +1,9 @@
 """Reject incompatible or truncated artifacts before copying anything to Kindle."""
 import importlib.util
+import io
 from pathlib import Path
 import struct
+import tarfile
 import tempfile
 import unittest
 
@@ -22,6 +24,27 @@ def elf():
 
 
 class ArtifactTests(unittest.TestCase):
+    def test_gitiles_checksums_ignore_timestamps_but_verify_source(self):
+        with tempfile.TemporaryDirectory() as folder:
+            def archive(name, timestamp, content=b"source", mode=0o644, duplicate=False):
+                path = Path(folder) / name
+                with tarfile.open(path, "w:gz") as tar:
+                    for _ in range(2 if duplicate else 1):
+                        member = tarfile.TarInfo("src/file.c")
+                        member.size = len(content)
+                        member.mtime = timestamp
+                        member.uid = timestamp
+                        member.mode = mode
+                        tar.addfile(member, io.BytesIO(content))
+                return path
+            spec = {"sha256_type": "tar-content-v1"}
+            original = build_arm.source_sha256(archive("a.tgz", 1), spec)
+            self.assertEqual(original, build_arm.source_sha256(archive("b.tgz", 2), spec))
+            self.assertNotEqual(original, build_arm.source_sha256(archive("c.tgz", 2, b"changed"), spec))
+            self.assertNotEqual(original, build_arm.source_sha256(archive("d.tgz", 2, mode=0o755), spec))
+            with self.assertRaises(ValueError):
+                build_arm.source_sha256(archive("duplicate.tgz", 2, duplicate=True), spec)
+
     def verify(self, data):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "app"

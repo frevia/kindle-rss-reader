@@ -63,11 +63,39 @@ def build_inputs() -> dict[str, str]:
     return {str(path.relative_to(ROOT)): sha256(path) for path in paths}
 
 
+def source_sha256(path: Path, source: dict[str, str]) -> str:
+    kind = source.get("sha256_type", "archive")
+    if kind == "archive":
+        return sha256(path)
+    if kind != "tar-content-v1":
+        raise ValueError(f"Unknown source checksum type: {kind}")
+    # Gitiles archives stamp each entry with the download time; verify files and modes instead.
+    digest = hashlib.sha256()
+    with tarfile.open(path) as archive:
+        members = sorted(archive.getmembers(), key=lambda item: item.name)
+        if len({member.name for member in members}) != len(members):
+            raise ValueError("Duplicate source archive paths")
+        for member in members:
+            metadata = json.dumps([member.name, member.type.decode("latin1"), member.mode,
+                                   member.size, member.linkname], separators=(",", ":")).encode()
+            digest.update(len(metadata).to_bytes(8, "big"))
+            digest.update(metadata)
+            if member.isfile():
+                with archive.extractfile(member) as data:
+                    for block in iter(lambda: data.read(1024 * 1024), b""):
+                        digest.update(block)
+    return digest.hexdigest()
+
+
 def download(name: str, source: dict[str, str]) -> Path:
     ARCHIVES.mkdir(parents=True, exist_ok=True)
     path = ARCHIVES / Path(source["url"]).name
-    if path.exists() and sha256(path) == source["sha256"]:
-        return path
+    if path.exists():
+        try:
+            if source_sha256(path, source) == source["sha256"]:
+                return path
+        except (tarfile.TarError, EOFError, ValueError):
+            pass
     path.unlink(missing_ok=True)
     partial = path.with_suffix(path.suffix + ".part")
     for attempt in range(1, 4):
@@ -77,12 +105,12 @@ def download(name: str, source: dict[str, str]) -> Path:
                  "--connect-timeout", "15", "--max-time", "300", "--proto", "=https", "--proto-redir", "=https",
                  "--retry-all-errors", "--output", str(partial), source["url"]],
                 log_name=f"download-{name}.log")
-            actual = sha256(partial)
+            actual = source_sha256(partial, source)
             if actual != source["sha256"]:
                 raise ValueError(f"SHA-256 mismatch for {name}: expected {source['sha256']}, got {actual}")
             partial.replace(path)
             return path
-        except (OSError, subprocess.CalledProcessError, ValueError) as error:
+        except (OSError, subprocess.CalledProcessError, ValueError, tarfile.TarError, EOFError) as error:
             partial.unlink(missing_ok=True)
             if attempt == 3:
                 raise RuntimeError(f"Unable to fetch verified {name} source after 3 clean attempts: {error}") from error
@@ -162,16 +190,21 @@ set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE ONLY)
     return cc, cxx, toolchain
 
 
-def cmake_build(name: str, source: Path, toolchain: Path, options: list[str], env: dict[str, str]) -> None:
+def cmake_build(name: str, source: Path, toolchain: Path, options: list[str], env: dict[str, str],
+                *, targets: list[str] | None = None, install: bool = True) -> None:
     build_dir = BUILD / "deps" / name
     build_dir.mkdir(parents=True, exist_ok=True)
     run(["cmake", "-S", str(source), "-B", str(build_dir), "-DCMAKE_BUILD_TYPE=Release",
          f"-DCMAKE_INSTALL_PREFIX={PREFIX}", f"-DCMAKE_TOOLCHAIN_FILE={toolchain}",
          "-DBUILD_SHARED_LIBS=OFF", "-DCMAKE_POSITION_INDEPENDENT_CODE=ON", *options],
         env=env, log_name=f"{name}-configure.log")
-    run(["cmake", "--build", str(build_dir), "--parallel", str(max(2, min(os.cpu_count() or 2, 8)))],
-        env=env, log_name=f"{name}-build.log")
-    run(["cmake", "--install", str(build_dir)], env=env, log_name=f"{name}-install.log")
+    build_command = ["cmake", "--build", str(build_dir)]
+    if targets:
+        build_command.extend(["--target", *targets])
+    build_command.extend(["--parallel", str(max(2, min(os.cpu_count() or 2, 8)))])
+    run(build_command, env=env, log_name=f"{name}-build.log")
+    if install:
+        run(["cmake", "--install", str(build_dir)], env=env, log_name=f"{name}-install.log")
 
 
 def build_sqlite(source: Path, cc: Path) -> None:
@@ -284,6 +317,32 @@ def main() -> int:
         "-DCURL_USE_GSSAPI=OFF", "-DCURL_USE_LIBRTMP=OFF", "-DCURL_USE_MBEDTLS=OFF",
         "-DCURL_USE_WOLFSSL=OFF", "-DCURL_USE_GNUTLS=OFF", "-DCURL_USE_RUSTLS=OFF"], env)
 
+    print("Building decoder-only libaom", flush=True)
+    cmake_build("aom", trees["aom"], toolchain, [
+        "-DAOM_TARGET_CPU=generic", "-DCONFIG_AV1_DECODER=1", "-DCONFIG_AV1_ENCODER=0",
+        "-DCONFIG_AV1_HIGHBITDEPTH=1", "-DCONFIG_MULTITHREAD=0",
+        "-DCONFIG_WEBM_IO=0", "-DENABLE_DOCS=OFF", "-DENABLE_TESTS=OFF",
+        "-DENABLE_EXAMPLES=OFF", "-DENABLE_TOOLS=OFF"], env)
+
+    print("Building libyuv without NEON, JPEG, tests, or tools", flush=True)
+    yuv_env = env.copy()
+    yuv_flags = f"-Os -mcpu={CPU} -DLIBYUV_DISABLE_NEON"
+    yuv_env.update({"CFLAGS": yuv_flags, "CXXFLAGS": yuv_flags})
+    cmake_build("libyuv", trees["libyuv"], toolchain, [
+        "-DUNIT_TEST=OFF", "-DLIBYUV_DISABLE_JPEG=ON", f"-DCMAKE_C_FLAGS={yuv_flags}",
+        f"-DCMAKE_CXX_FLAGS={yuv_flags}"], yuv_env, targets=["yuv"], install=False)
+    (PREFIX / "lib").mkdir(parents=True, exist_ok=True)
+    shutil.copy2(BUILD / "deps" / "libyuv" / "libyuv.a", PREFIX / "lib" / "libyuv.a")
+    shutil.copytree(trees["libyuv"] / "include", PREFIX / "include", dirs_exist_ok=True)
+
+    print("Building libavif with system decoder dependencies", flush=True)
+    cmake_build("libavif", trees["libavif"], toolchain, [
+        f"-DCMAKE_PREFIX_PATH={PREFIX}", "-DAVIF_CODEC_AOM=SYSTEM", "-DAVIF_CODEC_AOM_DECODE=ON",
+        "-DAVIF_CODEC_AOM_ENCODE=OFF", "-DAVIF_CODEC_DAV1D=OFF", "-DAVIF_CODEC_LIBGAV1=OFF",
+        "-DAVIF_CODEC_RAV1E=OFF", "-DAVIF_CODEC_SVT=OFF", "-DAVIF_CODEC_AVM=OFF",
+        "-DAVIF_LIBYUV=SYSTEM", "-DAVIF_BUILD_APPS=OFF", "-DAVIF_BUILD_TESTS=OFF",
+        "-DAVIF_JPEG=OFF", "-DAVIF_ZLIBPNG=OFF"], env)
+
     print("Linking native RSS statically for ARMv7 soft-float ABI", flush=True)
     cmake_build("webp", trees["webp"], toolchain, [
         "-DBUILD_SHARED_LIBS=OFF", "-DWEBP_BUILD_ANIM_UTILS=OFF", "-DWEBP_BUILD_CWEBP=OFF",
@@ -296,7 +355,8 @@ def main() -> int:
              "-I", str(PREFIX / "include"), "-I", str(PREFIX / "include" / "libxml2"),
              "-I", str(PREFIX / "include" / "freetype2"), *(str(source) for source in sources),
              "-L", str(PREFIX / "lib"), "-Wl,--start-group", "-lcurl", "-lssl", "-lcrypto", "-lz",
-             "-lxml2", "-lfreetype", "-lsqlite3", "-lwebp", "-lsharpyuv", "-Wl,--end-group", "-ldl", "-lm", "-o", str(binary)]
+             "-lxml2", "-lfreetype", "-lsqlite3", "-lwebp", "-lsharpyuv", "-lavif", "-laom", "-lyuv",
+             "-Wl,--end-group", "-ldl", "-lm", "-o", str(binary)]
     run([str(ZIG), "c++", *flags], log_name="app-link.log")
     binary.chmod(0o755)
     verify_elf(binary)

@@ -40,5 +40,24 @@
     "url": "https://storage.googleapis.com/downloads.webmproject.org/releases/webp/libwebp-1.6.0.tar.gz",
     "sha256": "e4ab7009bf0629fd11982d4c2aa83964cf244cffba7347ecd39019a9e38c4564",
     "verification": "SHA-256 computed from official WebM project archive fetched over TLS"
+  },
+  "aom": {
+    "version": "3.13.2",
+    "url": "https://storage.googleapis.com/aom-releases/libaom-3.13.2.tar.gz",
+    "sha256": "634039cc79c3a3307206b6c25ea759abc0e734c6f4ac14f6dbea5694e46af837",
+    "verification": "SHA-256 computed from official AOM release archive fetched over TLS"
+  },
+  "libyuv": {
+    "version": "47ba8e2160b71a7cf95c0720cd8944ab771e533e",
+    "url": "https://chromium.googlesource.com/libyuv/libyuv/+archive/47ba8e2160b71a7cf95c0720cd8944ab771e533e.tar.gz",
+    "sha256": "d7189a498347732caed9782b55b9e68e2478f66d35b7b88fb3f69c50bd75d466",
+    "verification": "SHA-256 over sorted tar paths, types, modes, sizes, link targets and file contents from fixed official Gitiles commit; excludes variable archive timestamps and owner metadata",
+    "sha256_type": "tar-content-v1"
+  },
+  "libavif": {
+    "version": "1.4.2",
+    "url": "https://github.com/AOMediaCodec/libavif/archive/refs/tags/v1.4.2.tar.gz",
+    "sha256": "2b645287340ba5a631d268b551dc2d72bd73ac33335962dd36dcdb6d8366921d",
+    "verification": "SHA-256 computed from official archive fetched over TLS"
   }
 }

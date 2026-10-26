@@ -74,6 +74,11 @@ def main():
     licenses = {
         "libwebp.txt": UNPACKED / "webp-1.6.0/COPYING",
         "libwebp-PATENTS.txt": UNPACKED / "webp-1.6.0/PATENTS",
+        "libavif.txt": UNPACKED / "libavif-1.4.2/LICENSE",
+        "libaom.txt": UNPACKED / "aom-3.13.2/LICENSE",
+        "libaom-PATENTS.txt": UNPACKED / "aom-3.13.2/PATENTS",
+        "libyuv.txt": UNPACKED / "libyuv-47ba8e2160b71a7cf95c0720cd8944ab771e533e/LICENSE",
+        "libyuv-PATENTS.txt": UNPACKED / "libyuv-47ba8e2160b71a7cf95c0720cd8944ab771e533e/PATENTS",
         "OpenSSL.txt": UNPACKED / "openssl-3.5.9/LICENSE.txt",
         "curl.txt": UNPACKED / "curl-8.23.0/COPYING",
         "libxml2.txt": UNPACKED / "libxml2-2.15.4/Copyright",
@@ -100,7 +105,8 @@ def main():
         b"Portions of this software are copyright (c) The FreeType Project (www.freetype.org). All rights reserved.\n"
         b"FreeType is used under the FreeType License. stb_image is used under its MIT license.\n"
         b"The bundled Noto Sans SC font is unmodified and licensed under SIL OFL 1.1.\n"
-        b"The unmodified Mozilla CA bundle is obtained from curl.se and is covered by MPL 2.0.\n", False)
+        b"The unmodified Mozilla CA bundle is obtained from curl.se and is covered by MPL 2.0.\n"
+        b"libavif, libaom, and libyuv are distributed under their included BSD licenses and patent notices.\n", False)
     checksums = {name: hashlib.sha256(data).hexdigest() for name, (data, _) in files.items()}
     files["native-rss/MANIFEST.json"] = (json.dumps({"development_only": True, "device_tested": False, "files": checksums}, indent=2).encode(), False)
     output = ROOT / "output"

@@ -182,18 +182,20 @@ class NativeRSSNetworkTests(unittest.TestCase):
 
     def test_images_are_cached_offline_and_failure_does_not_remove_text(self):
         png=(pathlib.Path(__file__).parent/"fixtures/colors.png").read_bytes()
-        body=RSS.replace(b"<p>cached body</p>",b"<p>cached body</p><img src='/photo.png' alt='photo'><img src='/missing.png'>")
+        body=RSS.replace(b"<p>cached body</p>",b"<p>cached body</p><img src='/photo.png' alt='photo'><img src='/large.webp'><img src='/large.avif'><img src='/missing.png'>")
         with FeedHandler.lock:
             FeedHandler.responses["/photos"]=(200,{},body)
             FeedHandler.responses["/photo.png"]=(200,{"Content-Type":"image/png"},png)
+            for path, fixture, mime in [("/large.webp","large-colors.webp","image/webp"),("/large.avif","large-10bit.avif","image/avif")]:
+                FeedHandler.responses[path]=(200,{"Content-Type":mime},(pathlib.Path(__file__).parent/"fixtures"/fixture).read_bytes())
         self.add("/photos");result=self.cli("sync")
         self.assertIn("1 张图片未缓存",result.stdout)
         self.assertEqual(self.rows("SELECT text FROM entries"),[("cached body",)])
         rows=self.rows("SELECT width,height,length(pixels),error FROM article_images ORDER BY ordinal")
-        self.assertEqual(rows[0],(2,2,4,""));self.assertTrue(rows[1][3])
-        requests=len(FeedHandler.seen_headers["/photo.png"])
+        self.assertEqual(rows[0],(2,2,4,""));self.assertEqual(rows[1],(944,3,2832,""));self.assertEqual(rows[2],(944,20,18880,""));self.assertTrue(rows[3][3])
+        requests={path:len(FeedHandler.seen_headers[path]) for path in ["/photo.png","/large.webp","/large.avif"]}
         self.cli("sync")
-        self.assertEqual(len(FeedHandler.seen_headers["/photo.png"]),requests)
+        self.assertEqual({path:len(FeedHandler.seen_headers[path]) for path in requests},requests)
 
 
 if __name__ == "__main__":
