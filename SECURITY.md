@@ -1,17 +1,31 @@
-# 安全反馈
+# 安全与隐私
 
-当前为开发验证版，维护对象是 `main` 和最新开发 Release；尚未承诺旧版长期维护或响应时限。
+如果发现别人可能因此读取你的数据、让阅读器执行异常操作，或破坏阅读记录，请私下联系维护者。
 
-RSS、OPML 和远程图片均是不可信输入。程序会联网访问用户配置的 HTTP(S) 地址，HTTPS 验证开启；订阅 URL 及其参数可能包含凭据。Kindle 启动器需要较高设备权限，并暂时接管系统界面，因此解析、下载、文件写入和生命周期恢复问题均应作为安全相关问题评估。
+## 怎么反馈安全问题
 
-## 报告方式
+发送邮件到 [freviax@gmail.com](mailto:freviax@gmail.com)，尽量说明：
 
-如仓库 Security 页面提供 [Report a vulnerability](https://github.com/frevia/kindle-rss-reader/security/advisories/new)，请通过该入口私下提交受影响版本、最小复现、可能影响及脱敏后的日志。
+1. 设备型号，以及下载的安装包文件名。
+2. 做了哪些操作后出现问题。
+3. 可能影响哪些数据；如果有截图或检查文件，先去掉私人内容。
 
-若该入口尚未启用，请发送邮件至 [freviax@gmail.com](mailto:freviax@gmail.com)，附上受影响版本、最小复现和脱敏日志。不要在公开 Issue 中提交密钥、私人地址、数据库、完整 OPML 或可直接利用的攻击输入。
+如果仓库页面提供 [Report a vulnerability（私密报告安全问题）](https://github.com/frevia/kindle-rss-reader/security/advisories/new)，也可以通过这个入口发送。
 
-## 用户数据
+**请不要把访问口令、完整私人订阅地址、阅读数据或能直接利用的问题细节发到公开的问题反馈区。** 不确定哪些内容能公开时，可以先发邮件描述现象。
 
-应用没有服务器账号或遥测；订阅与图片请求会直接到达对应源站，源站仍可看到正常网络请求。数据库和 OPML 保存在 Kindle 用户盘，设备密码锁启用时启动器拒绝运行。运行日志可能包含请求错误及地址；公开前应人工检查。备份与卸载步骤见[安装教程](native-rss/docs/INSTALL.md)。
+## 阅读数据放在哪里
 
-依赖版本与来源固定在 `native-rss/tools/arm-sources.json`、`native-rss/tools/runtime-sources.json` 和 `native-rss/third_party/*/SOURCE.json`。固定版本和哈希只验证来源一致性，不代表没有已知漏洞。
+订阅、收藏、阅读位置和下载好的文章保存在 Kindle 的 `native-rss` → `data` 文件夹。导出的订阅列表也可能包含私人地址，不要随意公开分享。
+
+阅读器没有自己的服务器账号，也不收集使用统计。下载文章和图片时，它会直接访问你订阅的网站；这些网站能看到正常的访问请求。
+
+应用运行时会临时接管 Kindle 屏幕，设备开启密码锁时不能启动。连接电脑备份、升级或卸载前，请先退出阅读器；具体步骤见[安装教程](native-rss/docs/INSTALL.md)。
+
+当前仍是开发中的版本，优先维护最新版和正在开发的代码，暂未承诺旧版维护期限或固定回复时间。
+
+## 给开发者
+
+外部文章、订阅列表和图片都需要先检查再处理。修改这部分代码时，请保留下载限制、连接安全检查，以及避免损坏数据的处理。
+
+程序所用组件的固定来源见 `native-rss/tools/arm-sources.json`、`native-rss/tools/runtime-sources.json` 和 `native-rss/third_party` 下的来源文件。文件校验一致并不代表没有漏洞；更新组件时也要检查它们公布的安全问题。

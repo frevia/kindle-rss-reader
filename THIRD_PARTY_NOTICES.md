@@ -1,5 +1,7 @@
 # 第三方组件与许可
 
+阅读器用到了一些其他项目提供的代码、字体和词库。这份清单说明它们来自哪里、按什么规则使用。正常安装和阅读无需逐项处理；自己修改或再次分发应用时，再按下表核对完整许可。
+
 项目原创代码与文档采用根目录 [MIT License](LICENSE)。下列第三方代码、数据、字体和证书保留各自许可，不因项目选择 MIT 而改变。此表用于导航，完整条款以随包许可及上游文件为准。源码链接指向在线仓库；仅有安装包时，可离线查看 `native-rss/licenses/` 中的完整条款。
 
 ## 随源码提供
@@ -37,6 +39,6 @@ macOS 的系统字体仅在本机读取，不随项目分发。SDL2 仅用于宿
 
 ## 设备外部依赖
 
-KUAL、Scriptlets 和 FBInk 由用户另行安装，本项目不分发其程序。启动器调用 `/mnt/us/libkh/bin/fbink` 命令进行系统界面恢复刷新，没有链接 FBInk 库。FBInk 上游采用 [GPL-3.0-or-later](https://github.com/NiLuJe/FBInk)；若以后将其二进制或其他外部工具加入安装包，必须先核对许可和对应源码分发要求。
+启动入口可选择 KUAL 或 Scriptlets，无需同时安装；Scriptlets 仅用于书库图标入口，KUAL 启动不需要它。两种入口共用的 RSS 启动器仍需要 FBInk。这些外部程序不包含在 RSS 安装包中；Universal Hotfix 是 Scriptlets 和 FBInk 的一种提供方式，已有可用环境无需重装。启动器调用 `/mnt/us/libkh/bin/fbink` 命令进行系统界面恢复刷新，没有链接 FBInk 库。FBInk 上游采用 [GPL-3.0-or-later](https://github.com/NiLuJe/FBInk)；若以后将其二进制或其他外部工具加入安装包，必须先核对许可和对应源码分发要求。
 
 设备 ABI 与系统服务参考来源见 [DEVICE.md](https://github.com/frevia/kindle-rss-reader/blob/main/native-rss/docs/DEVICE.md)。本项目不包含 Kindle 固件或 Amazon 系统组件。订阅文章和图片的权利归各自权利人，MIT 许可不授予对这些内容的再发布权利。

@@ -1,54 +1,64 @@
-RSS Reader — KPW3 开发版安装说明
+RSS Reader 安装说明
 
-完整安装教程（含升级、订阅导入和排查）：
-https://github.com/frevia/kindle-rss-reader/blob/main/native-rss/docs/INSTALL.md
-本包也包含 native-rss/docs/INSTALL.md，可离线阅读。
+完整教程：本包 native-rss/docs/INSTALL.md
+在线教程：https://github.com/frevia/kindle-rss-reader/blob/main/native-rss/docs/INSTALL.md
+最新版下载：https://github.com/frevia/kindle-rss-reader/releases/latest
 
-运行条件
-已具备自制程序运行环境的 Kindle Paperwhite 3（KPW3），已验证固件 5.16.2.1.1。
-需要 KUAL；书库启动另需配置 Scriptlets。本包不提供越狱或这些工具的安装，不依赖 KOReader。
-设备需已有 /mnt/us/libkh/bin/fbink、timeout、flock 及系统 LIPC 等工具；诊断入口可辅助检查。
-刚越狱完成时，先按完整教程准备 KUAL、适合 Kindle 的 FBInk 及必需工具，再复制本包。
-启用设备密码锁时启动器会拒绝运行；需要保持密码锁时请暂不使用本应用。
-当前为开发版本，基本图文阅读和退出恢复已有实机验证，长期使用及其他机型仍未完整验收。
+打开方式与所需组件
+- 从 KUAL 菜单打开：需要可用的 KUAL，不需要 Scriptlets。
+- 从书库图标打开：需要 Scriptlets / SH_Integration，不需要同时安装 KUAL。
+两种入口都会打开 RSS Reader 自己的程序，不需要微信读书、商店入口或它的字体目录。
+本安装包自带字体和证书，但目前未带用于退出后恢复屏幕的 FBInk。
+Hotfix 可以提供 Scriptlets 和 FBInk；已有可用组件时无需为本应用重装 Hotfix。
+如果启动失败，先生成检查文件，按结果确认原因，不要直接重装补丁。
 
-首次安装
-1. 下载 Release 的 KPW3 安装 ZIP；源码 ZIP 不能直接安装。不要使用“更新 Kindle”。
-2. 已有安装时，先退出阅读器，将整个 native-rss 文件夹备份到电脑。
-3. 解压 ZIP，将 native-rss、extensions、documents 三个目录的内容合并到 Kindle 用户盘根目录。
-   根目录是直接包含 documents 的位置，即设备内的 /mnt/us。不要额外套一层解压文件夹。
-   不要整体替换 documents 或 extensions，以免删除已有书籍和扩展。
-4. 安全弹出 USB 用户盘，打开 KUAL，在 RSS Reader 菜单中选择 RSS Reader。
-   已配置 Scriptlets 时也可从书库打开 RSS Reader（documents/RSS阅读器.sh）。
+安装
+1. 准备已越狱的 Kindle Paperwhite 3（KPW3，2015 款），先在设置中关闭设备密码锁。
+2. 下载最新版中名称以 -KPW3.zip 结尾的安装包，在电脑上解压。
+3. 连接 Kindle，把 native-rss、documents、extensions 三个文件夹合并复制到 Kindle 磁盘。
+   放在打开磁盘后直接看到 documents 的这一层。不要先删除原来的书籍或文件夹。
+4. 安全弹出并拔线，选择自己准备好的入口：
+   KUAL → Kindle RSS → RSS Reader，或书库里的 RSS Reader 图标。
+
+书库启动准备（只有选择书库入口且尚未准备好时才需要）
+Scriptlets 让 .sh 应用像一本书一样出现在书库，不需要你自己编写或配置脚本。
+已经能从书库打开 .sh 应用时可跳过这部分；这仅说明书库入口可用。
+只使用 KUAL 时无需安装 Scriptlets。希望使用书库入口、但还未准备好的，可按下面步骤通过 Hotfix 补丁安装：
+1. 退出正在运行的越狱应用，回到书库，开启飞行模式。
+2. 在电脑下载 Update_hotfix_universal.bin，不改名、不解压：
+   https://github.com/KindleModding/Hotfix/releases/latest/download/Update_hotfix_universal.bin
+3. 连接 Kindle，把该文件与 documents 文件夹并排放置，不要放进 documents 或 mrpackages。
+   同一层其他 .bin 安装文件及 update.bin.tmp.partial 如有，请先移到电脑备份。
+4. 安全弹出并拔线，打开 Kindle 设置 → 全部设置 → 右上角三个点 → 更新 Kindle，确认安装。
+5. 等安装完成回到书库，点开 Run Hotfix，等处理结束。这一步不能省略。
+6. 再按上面的安装步骤复制 RSS Reader 文件，拔线后在书库的“全部”中找到 RSS Reader。
+   已经复制过的，可以再复制一次安装包中 documents 的内容。仍不显示时先重启 Kindle。
+
+这里“更新 Kindle”用于安装 Hotfix 的 .bin 补丁，RSS Reader 的 ZIP 仍然只需要复制文件。
+不要为了安装本应用下载系统固件，也不要恢复出厂设置。
+如果“更新 Kindle”不可选，完整教程中有位置检查和已有更新阻止工具的处理步骤。
+已能从 KUAL 打开阅读器时，也可以继续使用 KUAL，无需为此重新安装补丁。
 
 首次使用
-连接 Wi-Fi，在界面添加 RSS/Atom 订阅地址并同步。
-批量导入：退出后把 feeds.opml 放到 native-rss/data/feeds.opml（目录不存在时创建）；
-重新启动，点击左上角 RSS Reader → 订阅 → 底部 OPML → 导入 OPML，确认后返回列表同步。
-导出的订阅列表位于 native-rss/data/subscriptions.opml，仅含订阅和分组。
-完整数据位于 native-rss/data/rss.sqlite；备份前退出应用，复制整个 data 目录。
+连接 Wi-Fi，点“添加订阅”，填入网站提供的订阅地址并保存，再点右上角同步图标。
+下载完成后可以离线阅读。日常操作、批量导入和备份见 native-rss/docs/USAGE.md。
 
-升级与退出
-升级前退出并备份；合并覆盖程序文件，保留 native-rss/data，切勿先删除旧目录。
-退出入口：文章列表左上角 RSS Reader → 退出 → 确认“退出应用”。
-运行期间暂时抑制 USB 磁盘模式，退出后恢复；休眠会结束应用，再次启动可继续阅读。
-不要强杀会话启动器，也不要设置 RSS_UI_GUARD 绕过检查。
-
-故障排查
-KUAL 中选择“导出 RSS 诊断报告”；已配置 Scriptlets 时也可运行 RSS设备诊断.sh。
-报告位于 documents/RSS-device-report.txt。反馈时提供版本、机型、固件和复现步骤。
-报告可能含私人订阅地址和错误上下文，公开前检查脱敏，不要上传数据库或 OPML。
-字体与证书位于 fonts、certs，请保留完整目录。数据库和 OPML 可能含私人订阅地址。
+升级
+1. 阅读器左上角 RSS Reader → 退出，确认回到 Kindle 系统书库。
+2. 连接电脑，备份整个 native-rss 文件夹，再用最新版合并覆盖程序文件。
+3. 保留 native-rss/data，订阅、收藏和阅读记录都在里面。升级应用不需要重装 Hotfix。
+4. 安全弹出并拔线，再次打开检查原有数据。
 
 卸载
-退出并备份 data 后，移除 native-rss、extensions/native-rss，以及 documents 下的
-RSS阅读器.sh、RSS设备诊断.sh。不要删除整个 documents 或 extensions。
-删除 native-rss/data 会丢失订阅、缓存和阅读记录。
+退出并备份后，删除 native-rss、extensions 里的 native-rss，
+以及 documents 里的 RSS阅读器.sh 和 RSS设备诊断.sh。
+不要删除整个 documents 或 extensions，也不要删除共享的 Hotfix、Scriptlets 或 KUAL。
 
-校验
-安装包外部的 SHA256SUMS.txt 用于校验 Release 附件；包内 MANIFEST.json 记录资源哈希，
-BUILD.json 记录二进制与源码对应关系。功能以所下载的 Release 说明为准。
+日志反馈
+书库打开 RSS设备诊断入口，或 KUAL → Kindle RSS → 导出 RSS 诊断报告。
+连接电脑后，复制 documents 里的 RSS-device-report.txt。
+附上设备型号、安装包文件名、故障时间和操作步骤；公开前遮住私人地址。
+不要上传整个 data 文件夹或完整订阅列表。
 
 许可
-本项目原创代码与文档采用 MIT，条款见 LICENSE。第三方组件保留原许可，
-完整条款见 licenses/；来源汇总见 THIRD_PARTY_NOTICES.md。
+本项目采用 MIT 许可证，见 LICENSE；其他组件许可在 licenses 文件夹。

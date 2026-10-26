@@ -1,142 +1,124 @@
-# 安装、升级与使用
+# RSS Reader 安装说明
 
-面向 Kindle Paperwhite 3（KPW3），已验证固件为 5.16.2.1.1。本文说明越狱完成后的环境准备、安装、升级和卸载；不包含越狱过程。
+适用于**已越狱的 Kindle Paperwhite 3（KPW3，2015 款）**。其他机型暂未验证。开始前，请在 Kindle 设置中关闭设备密码锁；阅读器目前不能在开启密码锁时运行。
 
-本文对应 [v0.0.2](https://github.com/frevia/kindle-rss-reader/releases/tag/v0.0.2) 的安装结构与界面，包含多级分组、准确分页和 AVIF 缓存。`main` 可能继续更新，下载时以对应 Release 说明为准；第 4 节另列旧版入口供升级用户参考。
+## 先选一种打开方式
 
-## 1. 确认运行条件
+RSS Reader 是独立应用，不需要先安装微信读书、KOReader 或应用商店。字体和联网需要的证书已经放进本安装包。
 
-这是原生自制应用，需要设备已经具备运行自制程序的环境：
-
-- 已越狱的 KPW3，以及可用的 **KUAL**；书库启动另需已经配置 **Scriptlets**。
-- 设备上已有 `/mnt/us/libkh/bin/fbink`，以及可用的 `timeout`、`flock`、`stat`、`pidof`、`awk`、`dd`、`mktemp`、`mkfifo` 和系统 LIPC 工具。诊断入口可辅助检查环境，不能自动补齐依赖。
-- 启动器检测到设备启用了密码锁时会拒绝启动。如果需要保持密码锁，请暂不运行本应用。
-
-本包不提供越狱、KUAL、Scriptlets 或上述系统工具的安装，也不依赖 KOReader。尚未配置这些环境的原厂 Kindle，不能仅复制本 ZIP 就运行。其他 Kindle 型号和固件尚未验证。
-
-**不要将 ZIP 放进“更新 Kindle”的固件更新流程。** 当前为开发版本，长期耗电和反复休眠、退出等场景仍需更多验证。
-
-### 刚越狱完成，从哪里开始？
-
-按以下顺序准备，已经完成的步骤可跳过：
-
-1. **完成所用越狱方案的收尾步骤。** 按该方案要求处理 Hotfix 等组件，确认设备可正常回到书库。无需为了本应用更新固件。
-2. **安装并打开 KUAL。** 根据设备和固件选择上游兼容版本。可参考 [KUAL 上游说明](https://github.com/NiLuJe/KUAL_Booklet)与[社区 KUAL / MRPI 安装指南](https://github.com/KindleModding/kindlemodding.github.io/blob/main/content/jailbreaking/Legacy/post-jailbreak/installing-kual-mrpi/__index.md)；下载来源另见 [NiLuJe 工具发布帖](https://www.mobileread.com/forums/showthread.php?t=225030)。先确认书库中的 KUAL 可以打开，再安装本应用。MRPI 是某些 KUAL 安装方式使用的工具，本应用的 ZIP 不放进 `mrpackages`。
-3. **准备 FBInk 命令。** 启动器固定查找用户盘的 `libkh/bin/fbink`。已存在时保留原文件；不存在时从 [FBInk 上游](https://github.com/NiLuJe/FBInk)指向的 [Kindle 二进制发布帖](https://www.mobileread.com/forums/showthread.php?t=299620)获取适合该设备的 Kindle 构建，解压后将其中的 `fbink` 可执行文件放到这个位置。不要下载 Kobo 构建，也不要只把压缩包放进去。该目录名是本项目目前沿用的路径约定，不要求安装其他阅读应用。
-4. **核对必需工具。** `timeout`、`flock` 等通常来自设备现有环境，但越狱本身不保证全部存在；LIPC 是 Kindle 系统工具。按后文复制本包后，先通过 KUAL 运行“导出 RSS 诊断报告”，确认 `probe_exit=0`、`fbink=present`、`timeout_seconds_syntax=available`，且报告中列出的工具均有路径。当前诊断不会逐项列出所有必需工具，启动器仍会检查第 1 节的完整工具列表。缺失时按原越狱环境的工具说明补齐，不要用电脑上的 macOS / Windows 程序替代。
-5. **选择启动入口。** KUAL 已足够；希望从书库直接打开时，再按自己的越狱环境配置 Scriptlets。Scriptlets 不是首次运行的必选项。
-
-前置环境下载内容和安装方式可能变化，以上链接以其维护者说明为准；本项目尚未从全新越狱设备完整复测这些第三方工具的安装过程。遇到密码锁或屏幕参数不符时，不要绕过启动器检查。
-
-## 2. 下载正确附件
-
-打开 [Release 页面](https://github.com/frevia/kindle-rss-reader/releases/tag/v0.0.2)，在 Assets 中选择：
-
-| 附件 | 用途 |
+| 你想怎样打开 | 需要准备什么 |
 |---|---|
-| `RSS-Reader-v0.0.2-KPW3.zip` | 安装到 Kindle，普通用户下载这个 |
-| `RSS-Reader-v0.0.2-source.zip` | 开发源码，不能直接安装 |
-| `SHA256SUMS.txt` | 检查下载文件的 SHA-256 |
-| GitHub 自动生成的 Source code | 源码归档，不能直接安装 |
+| 从 KUAL 菜单打开 | 已有可用的 KUAL 即可使用这个入口，**不需要 Scriptlets**。 |
+| 在书库里点图标打开 | 需要 **Scriptlets / SH_Integration**。没有时，按下方的“书库启动准备”操作。 |
 
-可选校验：在电脑上计算安装 ZIP 的 SHA-256，与 `SHA256SUMS.txt` 中同名文件的一行比较。macOS 使用 `shasum -a 256 文件名`，Linux 使用 `sha256sum 文件名`，Windows PowerShell 使用 `Get-FileHash 文件名 -Algorithm SHA256`。
+选择一种入口就够了，不需要把两套启动工具都装上。已经能正常打开 RSS Reader 时，也不需要为它重装 Hotfix。
 
-如果页面显示 404，先确认账号有该仓库的访问权限。
+**还有一项独立的运行组件：FBInk。** RSS Reader 用它在退出后恢复 Kindle 屏幕，当前安装包没有附带它。部分越狱环境已由 Hotfix 等工具准备好；如果复制后打不开，请先按文末步骤生成检查文件，再确认缺少什么。选好了启动入口，并不代表这项组件一定已经安装。
 
-## 3. 复制到 Kindle 用户盘
+## 安装
 
-1. 如果已装过 RSS Reader，先在应用内退出，连接 USB 后把整个 `native-rss` 文件夹备份到电脑。
-2. 在电脑上解压安装 ZIP，再通过 USB 打开 Kindle 用户盘。这里的“根目录”是能直接看到 `documents` 文件夹的位置，设备内部对应 `/mnt/us`。
-3. 将解压得到的 `native-rss`、`extensions`、`documents` 三个文件夹的内容，**合并**到 Kindle 用户盘的同名目录。
-4. 安全弹出 Kindle 用户盘，断开 USB 磁盘连接，再启动应用。
+1. 在电脑上打开[最新版下载页面](https://github.com/frevia/kindle-rss-reader/releases/latest)，展开 **Assets（下载文件）**，下载名称以 **`-KPW3.zip`** 结尾的安装包并解压。
+2. 用数据线连接 Kindle，把解压后的 **`native-rss`、`documents`、`extensions`** 三个文件夹，合并复制到 Kindle 磁盘中。复制到的位置，就是打开磁盘后能直接看到 `documents` 的那一层。
+3. 安全弹出并拔掉数据线。使用 KUAL 的用户，点 **KUAL → Kindle RSS → RSS Reader**；已准备好书库启动的用户，在书库点 **RSS Reader**。首次使用连接 Wi-Fi，再按[使用指南](USAGE.md)添加订阅、下载文章。
 
-复制后的关键路径应为：
+如果只想从 KUAL 打开，可以跳过下面的 Scriptlets 安装部分。**只有想用书库图标、且设备还没有这种启动支持时，才需要准备 Scriptlets。**
+
+名字里带 `source` 或 `Source code` 的是源码，不能用来安装。`SHA256SUMS.txt` 是下载校验文件，正常安装不需要打开。
+
+### 文件要放成这样
 
 ```text
-Kindle 用户盘/
-├── native-rss/
-│   ├── bin/kindle-rss
-│   ├── launch.sh
-│   ├── book-cover.png
-│   ├── fonts/reader.ttf
-│   ├── certs/ca-bundle.pem
-│   └── INSTALL.txt
-├── extensions/
-│   └── native-rss/
-│       ├── config.xml
-│       └── menu.json
-└── documents/
-    ├── RSS阅读器.sh
-    └── RSS设备诊断.sh
+Kindle 磁盘
+├── documents
+│   ├── 原有的书籍……
+│   ├── RSS阅读器.sh
+│   └── RSS设备诊断.sh
+├── extensions
+│   └── native-rss
+└── native-rss
+    ├── bin
+    ├── fonts
+    ├── certs
+    └── 其他随包文件……
 ```
 
-不要多套一层 `RSS-Reader-v0.0.2-KPW3/`，也不要把整个安装包放进 `documents`。**不要用空目录替换整个 `documents` 或 `extensions`**，其中可能有书籍或其他扩展。
+不要先删除 Kindle 上原有的 `documents` 或 `extensions`。遇到同名文件夹请选择“合并”；如果电脑只提供“替换整个文件夹”，请取消，再打开同名文件夹，分别复制里面的内容。升级时也要保留 `native-rss` 中的 `data` 文件夹。
 
-如果电脑提示只能“替换文件夹”而不能合并，请进入各文件夹，只复制包内的文件和子目录，避免删除设备上原有内容。
+不要多套一层解压文件夹，不要只把 ZIP 放进 Kindle。**RSS Reader 的 ZIP 用复制文件的方式安装，不用“更新 Kindle”。**
 
-## 4. 启动与首次订阅
+## 书库启动准备：Scriptlets（按需安装）
 
-- **KUAL 入口：** 打开 KUAL，在 RSS Reader 菜单中选择 `RSS Reader`。
-- **书库入口：** 已配置 Scriptlets 的设备，可在书库打开 `RSS Reader`，对应 `documents/RSS阅读器.sh`。没有 Scriptlets 时，复制脚本本身不会获得书库启动能力，使用 KUAL 入口即可。
+Scriptlets 是让 `.sh` 应用像一本书一样出现在书库里的启动功能，由 SH_Integration 提供。**它只负责入口，不负责 RSS Reader 的文章下载、排版或阅读功能。** RSS Reader 已提供 `documents/RSS阅读器.sh`，你不需要自己创建、编辑或配置这个文件。
 
-首次没有订阅时，使用添加入口输入 RSS / Atom 的 HTTP(S) 地址并保存，再点击同步。这里需要订阅源地址，不一定是网站首页地址；同步需要 Kindle 已连接可用网络。
+下面介绍通过 Universal Hotfix 准备这项功能的方法。Hotfix 是组件的提供方，不是 RSS Reader 在每次启动时都要调用的插件，也不是所有用户都必须额外安装的项目。
 
-| 操作 | `v0.0.1` 安装包 | `v0.0.2` / 当前 `main` |
-|---|---|---|
-| 管理订阅 | 左上角标题 →“我的阅读” | 左上角 `RSS Reader` →“订阅” |
-| 导入 / 导出 | “我的阅读”→“导入订阅”/“导出 OPML” | “订阅”页底部“OPML”→“导入 OPML”/“导出 OPML” |
-| 退出 | “我的阅读”→“退出应用” | 左上角 `RSS Reader` →“退出”→确认“退出应用” |
+### 先看能不能跳过
 
-已有 OPML 时：
+- 如果你已经能从书库打开 `.sh` 形式的应用，说明书库启动支持已经可用，可以跳过 Scriptlets 的安装。这只能确认入口可用，不能代替 RSS Reader 自己的运行检查。
+- 如果越狱教程已让你安装 Universal Hotfix，但书库里的 **Run Hotfix** 还没有运行过，先打开它，等处理完成并回到书库，再复制 RSS Reader 的文件。
+- 如果还没有这种启动方式，而且希望从书库打开 RSS Reader，再按下面的步骤准备。只使用 KUAL 时不需要这部分。
 
-1. 退出阅读器，连接 USB。
-2. 把 OPML 文件命名为 `feeds.opml`，放到 `native-rss/data/feeds.opml`。`data` 不存在时可手动创建。
-3. 安全弹出后打开应用，按上表找到对应版本的导入入口；`v0.0.2` 需要确认导入，再返回列表同步。
+### 选择书库入口，但还没有 Scriptlets
 
-“导出 OPML”生成 `native-rss/data/subscriptions.opml`，只含订阅和分组。完整备份仍需保留 `data` 目录。
+以下步骤从“设备已越狱”开始。先退出正在运行的越狱应用，回到 Kindle 书库，并开启飞行模式，避免同时下载系统更新。
 
-搜索、订阅名称和分组支持拼音输入：输入完整拼音后点候选词，再确定；ü 使用 v。已同步的文章可离线阅读，摘要型订阅不保证有完整正文。
+1. 在电脑上[下载 Universal Hotfix 补丁](https://github.com/KindleModding/Hotfix/releases/latest/download/Update_hotfix_universal.bin)。下载到的文件名应为 **`Update_hotfix_universal.bin`**，不要改名，也不用解压。下载链接失效时，到[补丁的最新版页面](https://github.com/KindleModding/Hotfix/releases/latest)找这个文件。
+2. 连接 Kindle，把这个 `.bin` 文件复制到 Kindle 磁盘，**与 `documents` 文件夹并排放置**，不要放进 `documents` 或 `mrpackages`。
+3. 如果这一层还有其他 `.bin` 安装文件，或 `update.bin.tmp.partial`，先移到电脑备份。本次只保留刚下载的 Hotfix 安装文件；不要混放其他系统更新文件。
+4. 在电脑上安全弹出 Kindle，再拔掉数据线。
+5. 打开 Kindle 的 **设置 → 全部设置 → 右上角三个点 → 更新 Kindle**；确认安装，等处理完成。不同界面的入口位置可能略有区别，找的是“更新 Kindle”这一项。
+6. 回到书库，找到 **Run Hotfix**，点开运行。等它处理完并回到书库；**复制并安装 `.bin` 后，还要完成这一步，不能省略。**
+7. 按本文开头的“安装”步骤复制 RSS Reader 的三个文件夹，安全弹出并拔线。在书库中等待列表刷新，看到 **RSS Reader** 后点开。
 
-## 5. 退出与保留数据升级
+这里使用“更新 Kindle”是为了安装 **Hotfix 补丁 `.bin`**；RSS Reader 安装包本身仍然只需要复制文件。无需下载 Amazon 的系统固件来安装本应用。
 
-退出：返回文章列表，按第 4 节对应版本的退出入口操作。阅读器运行期间会暂时抑制 USB 磁盘导出，退出后恢复；若电脑看不到 Kindle 用户盘，先确认应用已退出。
+上游 Universal Hotfix 的安装流程会准备 Scriptlets 和 FBInk；已经通过其他方式准备好所需组件的设备，不需要为了 RSS Reader 再装一次。以上步骤依据 [Hotfix 项目说明](https://github.com/KindleModding/Hotfix)、[社区安装步骤](https://github.com/KindleModding/kindlemodding.github.io/blob/main/content/jailbreaking/Legacy/post-jailbreak/setting-up-a-hotfix/__index.md)和 [Scriptlets 说明](https://kindlemodding.org/kindle-dev/scriptlets.html)整理；本项目不把补丁打进 RSS Reader 安装包，也不会在后台替你安装它。
 
-升级时：
+### “更新 Kindle”是灰色的，怎么办
 
-1. 退出应用，再备份设备的 `native-rss` 文件夹。
-2. 下载新 Release 的 **KPW3 安装包**，按第 3 节合并覆盖程序文件。
-3. 保留 `native-rss/data/`，不要先删除旧的 `native-rss` 目录。
-4. 安全弹出并重新启动，检查订阅、收藏和阅读位置。
+先检查是否已拔掉 USB 数据线，以及 `Update_hotfix_universal.bin` 是否与 `documents` 并排放置。
 
-`v0.0.2` 安装包不带 `data` 目录，正确合并不会覆盖个人数据库。以后升级仍应先查看对应版本的迁移说明。
+如果之前在 KUAL 中用 **Rename OTA binaries** 关闭过更新，先保持飞行模式，打开该菜单并选择 **Restore**，再安装 Hotfix。补丁安装并运行完成后，回到同一菜单选择 **Rename**，恢复原来的更新阻止设置。没有使用过这个工具，就不要额外安装它。
 
-| 路径 | 内容 |
+仍然无法安装时，先停在这里，按上方的社区安装说明检查，或反馈设备型号和提示文字。不要通过升级系统或恢复出厂设置碰运气；已经可用的 KUAL 入口仍可继续使用。
+
+### 文件复制了，书库里仍没有图标
+
+1. 检查 Kindle 磁盘的 `documents` 中确实有 **`RSS阅读器.sh`**，并且 `native-rss` 文件夹也已完整复制。
+2. 安全弹出并拔线，回到书库，把筛选切到 **全部**，不要只显示“书籍”，再等待列表刷新。
+3. 如果刚装好 Hotfix，确认已经运行过书库里的 **Run Hotfix**。然后重新连接电脑，把安装包中的 `documents` 内容再复制一次，安全弹出并拔线。
+4. 仍不出现时，在 Kindle 设置中选择**重新启动**，回到书库再看。这里是重启，不是恢复出厂设置。
+
+如果其他 `.sh` 应用也没有入口，先检查 Hotfix 是否完成安装和运行；如果只有 RSS Reader 没有入口，先检查文件是否放对位置。
+
+## 升级
+
+1. 在阅读器中点 **RSS Reader → 退出**，确认回到 Kindle 系统书库。连接电脑，把整个 `native-rss` 文件夹复制到电脑备份。
+2. 下载最新版，按“安装”步骤合并覆盖文件，**保留 `native-rss/data`**。安装包不带这个文件夹，里面保存你的订阅、收藏和阅读记录。
+3. 安全弹出并拔线，再次打开 RSS Reader，确认原有数据还在。升级阅读器本身无需重装 Scriptlets 或 Hotfix。
+
+## 卸载
+
+1. 正常退出阅读器；如果还想保留阅读数据，先把整个 `native-rss` 文件夹备份到电脑。
+2. 删除 Kindle 上的 `native-rss`、`extensions` 里的 `native-rss`，以及 `documents` 里的 `RSS阅读器.sh` 和 `RSS设备诊断.sh`。
+
+只删除本应用的文件，不要删除整个 `documents` 或 `extensions`，也不要删除其他应用的启动文件。卸载本应用不需要卸载共享的 Hotfix、Scriptlets 或 KUAL。删除 `native-rss/data` 会丢失本地阅读数据。
+
+## 打不开或用不了怎么办
+
+| 遇到的情况 | 先这样做 |
 |---|---|
-| `native-rss/data/rss.sqlite` | 订阅、缓存文章与图片、已读、收藏、阅读位置及设置 |
-| `native-rss/data/feeds.opml` | 待导入的订阅列表 |
-| `native-rss/data/subscriptions.opml` | 导出的订阅列表 |
+| KUAL 里没有阅读器 | 检查 Kindle 的 `extensions` → `native-rss` 中有 `menu.json`，安全弹出后重新打开 KUAL。 |
+| 点开后马上退出 | 先检查设备密码锁是否关闭、三个文件夹是否完整复制，再按下方步骤生成检查文件。也可能缺少 FBInk 等运行组件，需要按检查结果确认，不要直接重装 Hotfix。 |
+| 打开后没有文章 | 先添加订阅并同步；以前的文章可以在“全部”中查看。 |
+| 下载失败 | 检查 Wi-Fi，以及填入的是否是网站提供的订阅地址。 |
+| 图片没有显示 | 先重新同步。部分图片格式、特别大的图片或网站限制可能导致图片无法下载，不影响已经下载的文字。 |
+| 电脑看不到 Kindle 磁盘 | 先从阅读器里退出，再重新连接，并确认数据线能传文件。 |
 
-备份数据库前先退出应用，最好直接复制整个 `data` 目录。数据库和 OPML 可能包含私人订阅地址，不要公开上传。
+### 日志反馈
 
-## 6. 常见问题
+1. 在书库打开 **RSS设备诊断**，或在 **KUAL → Kindle RSS** 中选择 **导出 RSS 诊断报告**。
+2. 连接电脑，在 `documents` 中找到 **`RSS-device-report.txt`**。
+3. 到[问题反馈页面](https://github.com/frevia/kindle-rss-reader/issues)提交问题，说明设备型号、安装包文件名、故障时间，以及做了什么操作、看到了什么。系统版本能找到时也请一并提供。
 
-| 现象 | 检查方法 |
-|---|---|
-| KUAL 没有 RSS Reader | 检查 `extensions/native-rss/menu.json` 是否在正确层级，安全弹出后重新打开 KUAL |
-| 书库没有入口或点击脚本无效 | 确认已配置 Scriptlets；未配置时通过 KUAL 启动 |
-| 点击后返回、提示缺少工具 | 从 KUAL 执行“导出 RSS 诊断报告”，查看报告中的缺失工具、fbink 和密码锁状态 |
-| `fbink=missing` | 检查用户盘 `libkh/bin/fbink`，按第 1 节获取适合 Kindle 的可执行文件；本应用安装包不包含 FBInk |
-| 标题为空或没有文章 | 先导入/添加订阅，再联网同步；未读为空时切换“全部文章” |
-| 同步失败 | 检查 Wi-Fi、订阅地址和订阅管理页错误；检查 `native-rss/certs/ca-bundle.pem` 是否完整复制 |
-| 图片未缓存 | 重新同步；`v0.0.1` 支持 JPEG、PNG、静态 WebP，`v0.0.2` 另支持 AVIF 与大 WebP 缩放。超出对应版本安全限制、GIF、动态 WebP、SVG 等仍会失败 |
-| 连接 USB 后电脑看不到用户盘 | 先从阅读器退出；应用运行期间 USB 磁盘导出被暂时抑制 |
-
-诊断报告位于 `documents/RSS-device-report.txt`。可通过 KUAL 的“导出 RSS 诊断报告”生成；已配置 Scriptlets 时也可运行 `RSS设备诊断.sh`。诊断本身不接管屏幕或暂停系统进程。
-
-反馈问题时说明机型、固件、Release 版本、启动入口、复现步骤，并附上检查过的诊断报告。报告含系统信息和运行日志，可能出现私人地址或错误上下文；公开前先脱敏，不要上传数据库或 OPML。不要通过强杀启动器或手动设置 `RSS_UI_GUARD` 来绕过启动检查。
-
-## 7. 卸载
-
-先退出应用并备份 `native-rss/data`，再移除 `extensions/native-rss`、`native-rss`、`documents/RSS阅读器.sh` 和 `documents/RSS设备诊断.sh`。仅删除这些应用自身文件，不要删除整个 `extensions` 或 `documents`。
-
-删除 `native-rss/data` 会丢失本地文章与阅读记录。卸载本应用不会卸载 KUAL、Scriptlets 或其他扩展。
+公开发送前先检查报告，遮住私人订阅地址等内容，不要上传整个 `data` 文件夹或完整订阅列表。拿不准时，可先邮件联系 [freviax@gmail.com](mailto:freviax@gmail.com)。
