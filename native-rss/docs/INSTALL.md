@@ -109,7 +109,7 @@ Kindle 用户盘/
 | 点击后返回、提示缺少工具 | 从 KUAL 执行“导出 RSS 诊断报告”，查看报告中的缺失工具、fbink 和密码锁状态 |
 | 标题为空或没有文章 | 先导入/添加订阅，再联网同步；未读为空时切换“全部文章” |
 | 同步失败 | 检查 Wi-Fi、订阅地址和订阅管理页错误；检查 `native-rss/certs/ca-bundle.pem` 是否完整复制 |
-| 图片未缓存 | 重新同步；目前支持 JPEG、PNG、静态 WebP，不支持 GIF、动态 WebP、SVG 等 |
+| 图片未缓存 | 重新同步；支持 JPEG、PNG、静态 WebP 和 AVIF，大 WebP 解码时缩小；超出安全像素或内存上限、GIF、动态 WebP、SVG 等仍会给出失败提示 |
 | 连接 USB 后电脑看不到用户盘 | 先从阅读器退出；应用运行期间 USB 磁盘导出被暂时抑制 |
 
 诊断报告位于 `documents/RSS-device-report.txt`。可通过 KUAL 的“导出 RSS 诊断报告”生成；已配置 Scriptlets 时也可运行 `RSS设备诊断.sh`。诊断本身不接管屏幕或暂停系统进程。
