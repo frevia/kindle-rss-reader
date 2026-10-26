@@ -50,14 +50,27 @@ App::App(Store& store,Canvas& canvas):store_(store),c_(canvas){
     reload();
 }
 int App::row_height(const Entry& e){
-    const int width=c_.width-108,meta=static_cast<int>(std::min<std::size_t>(2,c_.wrap(article_metadata(e),24,width).size()));
-    const int cap=std::max(1,(list_bottom()-list_top()-meta*36-58)/50);
-    return std::max(176,static_cast<int>(std::min<std::size_t>(cap,c_.wrap(e.title,36,width).size()))*50+meta*36+58);
+    const int width=c_.width-108;const auto metadata=article_metadata(e);
+    auto found=row_metrics_.find(e.id);
+    if(found==row_metrics_.end()||found->second.width!=width||found->second.title!=e.title||found->second.metadata!=metadata){
+        // shortcut: over 10,000 unique rows can recompute metrics; use LRU if large libraries become common.
+        if(found==row_metrics_.end()&&row_metrics_.size()>=10000)row_metrics_.clear();
+        found=row_metrics_.insert_or_assign(e.id,RowMetrics{e.title,metadata,width,
+            static_cast<int>(c_.wrap(e.title,36,width).size()),static_cast<int>(std::min<std::size_t>(2,c_.wrap(metadata,24,width).size()))}).first;
+    }
+    const auto& metrics=found->second;
+    const int cap=std::max(1,(list_bottom()-list_top()-metrics.meta_lines*36-58)/50);
+    return std::max(176,std::min(cap,metrics.title_lines)*50+metrics.meta_lines*36+58);
 }
 void App::ensure_list_page(std::size_t page){
+    const int top=list_top(),bottom=list_bottom();
+    if(list_layout_width_!=c_.width||list_layout_top_!=top||list_layout_bottom_!=bottom){
+        list_starts_={0};list_complete_=false;
+        list_layout_width_=c_.width;list_layout_top_=top;list_layout_bottom_=bottom;
+    }
     while(!list_complete_&&list_starts_.size()<=page){
-        const auto start=list_starts_.back();int y=list_top();std::size_t i=start;
-        for(;i<list_.size();++i){const int height=row_height(list_[i]);if(y+height>list_bottom()&&i>start)break;y+=height;}
+        const auto start=list_starts_.back();int y=top;std::size_t i=start;
+        for(;i<list_.size();++i){const int height=row_height(list_[i]);if(y+height>bottom&&i>start)break;y+=height;}
         if(i==list_.size())list_complete_=true;else list_starts_.push_back(i);
     }
 }
@@ -120,7 +133,9 @@ void App::draw(){
     dirty=false;
 }
 void App::list_screen(){
-    ensure_list_page(list_page_+1);const int w=c_.width,h=c_.height,m=32;
+    // Cache all page boundaries once so the first footer includes the exact total.
+    ensure_list_page(std::max<std::size_t>(1,list_.size()));list_page_=std::min(list_page_,list_starts_.size()-1);
+    const int w=c_.width,h=c_.height,m=32;
     c_.text(32,76,"RSS Reader",36,30);down(c_,32+c_.measure("RSS Reader",36)+20,58);
     hits_.push_back({{32,8,310,88},[this]{brand_menu_=true;}});
     c_.icon(Icon::Sync,{w-66,43,34,34});
@@ -185,7 +200,7 @@ void App::list_screen(){
     if(!status_.empty())button({m,h-204,w-64,88},status_,[this]{status_.clear();reload();},false,22);
     c_.rule(32,h-104,w-64,210);
     button({32,h-100,220,96},"上一页",[this]{previous();},false,26,Icon::Back,list_page_>0,Align::Left);
-    const auto page="第 "+std::to_string(list_page_+1)+" / "+(list_complete_?std::to_string(list_starts_.size()):"…")+" 页";
+    const auto page="第 "+std::to_string(list_page_+1)+" / "+std::to_string(list_starts_.size())+" 页";
     c_.text(w/2-c_.measure(page,24)/2,h-42,page,24,90);
     button({w-252,h-100,220,96},"下一页",[this]{next();},false,26,Icon::Next,list_page_+1<list_starts_.size(),Align::Right);
 }

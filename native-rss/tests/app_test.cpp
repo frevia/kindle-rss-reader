@@ -11,6 +11,37 @@ int main(){
     std::string font=std::getenv("RSS_FONT")?std::getenv("RSS_FONT"):"/System/Library/Fonts/STHeiti Light.ttc";
     if(!std::filesystem::exists(font))font="/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf";
     rss::Store store(":memory:");rss::Canvas canvas(1072,1448,font);
+    const auto expect_pager=[&](const std::vector<std::uint8_t>& paper,int page,int total){
+        rss::Canvas footer(1072,1448,font);
+        const auto label="第 "+std::to_string(page)+" / "+std::to_string(total)+" 页";
+        footer.text(536-footer.measure(label,24)/2,1406,label,24,90);
+        for(int y=1348;y<1448;++y)for(int x=300;x<772;++x)
+            assert(paper[y*1072+x]==footer.pixels[y*1072+x]);
+    };
+    {
+        rss::Store totals(":memory:");rss::Feed source;source.url="https://page-total.test/rss";source.title="分页测试";source.group="目录";
+        const auto fid=totals.add_feed(source);rss::ParsedFeed batch;
+        for(int i=0;i<24;++i){rss::Entry item;item.guid=std::to_string(i);item.title="测试文章 "+std::to_string(i);item.text="正文";batch.entries.push_back(item);}
+        totals.save_entries(fid,batch);rss::App pager(totals,canvas);
+        pager.draw();expect_pager(canvas.pixels,1,4); // Exact total is available before visiting later pages.
+        pager.next();pager.next();pager.draw();expect_pager(canvas.pixels,3,4);
+        pager.notify("同步已完成，点击更新列表");pager.draw();expect_pager(canvas.pixels,3,5);
+        pager.tap(960,50);assert(pager.take_request()=="sync");pager.back();pager.draw();expect_pager(canvas.pixels,3,4);
+        pager.sync_finished(true);pager.draw();expect_pager(canvas.pixels,3,5);
+        pager.tap(200,1288);pager.draw();expect_pager(canvas.pixels,3,4);
+        pager.show_group("目录");pager.draw();expect_pager(canvas.pixels,1,5);
+        pager.show_view(rss::View::All);pager.draw();pager.tap(950,234);pager.text_input("没有匹配");pager.submit();pager.draw();expect_pager(canvas.pixels,1,1);
+        for(const auto& entry:totals.entries(rss::View::All))totals.set_read(entry.id,true);
+        pager.show_view(rss::View::Unread);pager.draw();expect_pager(canvas.pixels,1,1);
+        pager.show_view(rss::View::All);pager.draw();expect_pager(canvas.pixels,1,4);
+        if(auto dir=std::getenv("RSS_TEST_SNAPSHOTS")){std::filesystem::create_directories(dir);canvas.write_pgm((std::filesystem::path(dir)/"list-exact-page-total.pgm").string());}
+        source.id=fid;source.title.clear();for(int i=0;i<140;++i)source.title+="长";
+        totals.update_feed(source);pager.reload();pager.draw();expect_pager(canvas.pixels,1,5);
+        source.title="分页测试";totals.update_feed(source);pager.reload();pager.draw();expect_pager(canvas.pixels,1,4);
+        for(auto& entry:batch.entries){entry.title.clear();for(int i=0;i<100;++i)entry.title+="长";}
+        totals.save_entries(fid,batch);pager.reload();pager.draw();const auto changed_titles=canvas.pixels;
+        rss::App fresh(totals,canvas);fresh.show_view(rss::View::All);fresh.draw();assert(canvas.pixels==changed_titles);
+    }
     {
         rss::Store pages_store(":memory:");rss::Feed feed;feed.url="https://pages.example/feed";
         const auto feed_id=pages_store.add_feed(feed);rss::ParsedFeed batch;
@@ -31,6 +62,7 @@ int main(){
         };
         std::vector<std::vector<std::int64_t>> seen_pages;
         std::set<std::int64_t> seen;
+        pages.draw();const auto first_list_page=canvas.pixels;
         auto visible=scan_page();
         for(;;){
             assert(!visible.empty());
@@ -42,6 +74,7 @@ int main(){
             visible=std::move(candidate);
         }
         assert(seen.size()==ordered.size());
+        expect_pager(first_list_page,1,static_cast<int>(seen_pages.size()));
         for(std::size_t p=seen_pages.size()-1;p>0;--p){pages.previous();assert(scan_page().front()==seen_pages[p-1].front());}
         pages.previous();assert(scan_page().front()==ordered.front().id);
         // Navigation may arrive before the next draw, and reload preserves the ordinal.

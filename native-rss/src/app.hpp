@@ -2,6 +2,7 @@
 #include "render.hpp"
 #include "store.hpp"
 #include <functional>
+#include <map>
 #include <set>
 
 namespace rss {
@@ -48,6 +49,9 @@ private:
     std::vector<Entry> list_;
     std::vector<std::size_t> list_starts_{0};
     bool list_complete_ = false;
+    int list_layout_width_=0,list_layout_top_=0,list_layout_bottom_=0;
+    struct RowMetrics { std::string title, metadata; int width, title_lines, meta_lines; };
+    std::map<std::int64_t,RowMetrics> row_metrics_;
     std::vector<Page> pages_;
     std::vector<Hit> hits_;
     std::optional<Entry> current_;
