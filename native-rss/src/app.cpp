@@ -47,6 +47,7 @@ App::App(Store& store,Canvas& canvas):store_(store),c_(canvas){
     font_size_=read_int(store_,"font_size",34,24,48);
     line_gap_=read_int(store_,"line_gap",24,10,42);
     margin_=read_int(store_,"margin",32,32,100);
+    cre_requested_=store_.setting("reader_engine")=="cre"&&CreReader::available();
     reload();
 }
 int App::row_height(const Entry& e){
@@ -209,6 +210,16 @@ int App::article_heading_height(){
 }
 void App::paginate(){
     if(!current_)return;
+    if(cre_){
+        try{
+            cre_->layout(c_.width-2*margin_,c_.height-252,font_size_,line_gap_);
+            const auto count=cre_->page_count();
+            if(!count)throw std::runtime_error("新版排版没有可显示的页面");
+            pages_.assign(count,Page{});
+            page_=std::min(cre_->restore(store_.setting("reader_cre:"+std::to_string(current_->id))),pages_.size()-1);
+            return;
+        }catch(const std::exception& e){cre_.reset();show_error(std::string("新版排版无法重排，已回到原排版：")+e.what());}
+    }
     std::vector<InlineImage> inline_images;
     if(!current_->html.empty()&&html_to_text(current_->html)==current_->text){
         std::string base=current_->url;
@@ -235,7 +246,17 @@ void App::paginate(){
 void App::open(std::int64_t id,bool track){
     auto entry=store_.entry(id);if(!entry)throw std::runtime_error("文章已不在缓存中");
     if(entry->text.empty()&&entry->images.empty())throw std::runtime_error("这篇文章尚无可阅读的正文");
-    current_=std::move(entry);paginate();
+    cre_.reset();current_=std::move(entry);
+    if(cre_requested_){
+        try{
+            std::string base=current_->url;
+            if(base.empty())for(const auto& feed:feeds_)if(feed.id==current_->feed_id){base=feed.url;break;}
+            cre_=std::make_unique<CreReader>(store_,c_.font_path());
+            cre_->open(*current_,base,source(current_->feed_id)+"  ·  "+date(current_->published),
+                       c_.width-2*margin_,c_.height-252,font_size_,line_gap_);
+            paginate();
+        }catch(const std::exception& e){cre_.reset();paginate();show_error(std::string("新版排版无法打开，已回到原排版：")+e.what());}
+    }else paginate();
     if(track){
         store_.set_read(id,true);current_->read=true;
         store_.set_position(id,current_->position);
@@ -245,33 +266,58 @@ void App::open(std::int64_t id,bool track){
 }
 void App::save_position(){
     if(!current_||pages_.empty())return;
+    if(cre_){
+        store_.set_setting("reader_cre:"+std::to_string(current_->id),cre_->anchor(page_));
+        store_.set_position(current_->id,current_->position);
+        return;
+    }
     current_->position=static_cast<std::int64_t>(pages_[page_].start);
     store_.set_position(current_->id,current_->position);
     // Consecutive image-only pages share a text offset; retain their occurrence separately.
     store_.set_setting("reader_image:"+std::to_string(current_->id),
                        std::to_string(current_->position)+":"+std::to_string(pages_[page_].image_anchor));
 }
+void App::set_reader_engine(bool use_cre){
+    if(!current_||use_cre==static_cast<bool>(cre_))return;
+    save_position();
+    try{
+        if(use_cre){
+            std::string base=current_->url;
+            if(base.empty())for(const auto& feed:feeds_)if(feed.id==current_->feed_id){base=feed.url;break;}
+            auto next=std::make_unique<CreReader>(store_,c_.font_path());
+            next->open(*current_,base,source(current_->feed_id)+"  ·  "+date(current_->published),
+                       c_.width-2*margin_,c_.height-252,font_size_,line_gap_);
+            const auto restored=next->restore(store_.setting("reader_cre:"+std::to_string(current_->id)));
+            std::vector<Page> pages(next->page_count());
+            if(pages.empty())throw std::runtime_error("新版排版没有可显示的页面");
+            store_.set_setting("reader_engine","cre");
+            cre_=std::move(next);pages_=std::move(pages);page_=std::min(restored,pages_.size()-1);cre_requested_=true;
+        }else{store_.set_setting("reader_engine","classic");cre_.reset();cre_requested_=false;paginate();}
+        typography_anchor_.reset();
+    }catch(const std::exception& e){show_error(std::string("排版切换失败，已保留当前阅读位置：")+e.what());}
+}
 void App::reader_screen(){
     const int w=c_.width,h=c_.height;
-    button({32,8,230,88},"返回列表",[this]{save_position();current_.reset();pages_.clear();reader_tools_=false;reader_panel_=ReaderPanel::None;},false,26,Icon::Back,true,Align::Left);
+    button({32,8,230,88},"返回列表",[this]{save_position();cre_.reset();current_.reset();pages_.clear();reader_tools_=false;reader_panel_=ReaderPanel::None;},false,26,Icon::Back,true,Align::Left);
     button({w-262,8,230,88},current_->starred?"已收藏":"未收藏",[this]{
         current_->starred=!current_->starred;store_.set_starred(current_->id,current_->starred);
     },false,26,current_->starred?Icon::StarFilled:Icon::Star,true,Align::Right);
     c_.rule(32,108,w-64);
-    const int heading=page_==0?article_heading_height():0;
+    const int heading=cre_?0:page_==0?article_heading_height():0;
     const int top=148+heading;
-    if(page_==0){
+    if(!cre_&&page_==0){
         const auto title=c_.wrap(current_->title,48,w-2*margin_);
         for(std::size_t i=0;i<std::min<std::size_t>(3,title.size());++i)
             c_.text(margin_,174+static_cast<int>(i)*60,i==2&&title.size()>3?c_.ellipsize(title[i].text+"…",48,w-2*margin_):title[i].text,48,15);
         const auto meta=source(current_->feed_id)+"  ·  "+date(current_->published);
         c_.text(margin_,174+static_cast<int>(std::min<std::size_t>(3,title.size()))*60+8,c_.ellipsize(meta,24,w-2*margin_),24,75);
-    }else{
+    }else if(!cre_){
         c_.text(margin_,135,c_.ellipsize(current_->title,24,w-2*margin_),24,90);
     }
     const int panel_height=reader_panel_==ReaderPanel::Type?420:reader_panel_==ReaderPanel::Images?(image_zoom_?764:662):reader_panel_==ReaderPanel::Info?520:0;
     const int cover_top=reader_panel_==ReaderPanel::None?(reader_tools_?h-120:h-104):h-120-panel_height;
-    for(const auto& item:pages_[page_].elements){
+    if(cre_)cre_->draw(c_,page_,margin_,148,cover_top);
+    if(!cre_)for(const auto& item:pages_[page_].elements){
         const Rect area{margin_+item.rect.x,top+item.rect.y,item.rect.w,item.rect.h};
         if(area.y>=cover_top||(item.image<0&&area.y+area.h>cover_top))continue;
         if(item.image>=0){
@@ -291,10 +337,11 @@ void App::reader_screen(){
         c_.text((w-c_.measure(footer,24))/2,h-35,footer,24,100);
         if(page_+1<pages_.size())button({w-262,h-100,230,96},"下一页",[this]{next();},false,26,Icon::Next,true,Align::Right);
         else button({w-262,h-100,230,96},"下一篇",[this]{
+            store_.set_setting("reader_cre:"+std::to_string(current_->id),"");
             store_.finish_reading(current_->id);
             auto it=std::find_if(list_.begin(),list_.end(),[this](const Entry& e){return e.id==current_->id;});
             if(it!=list_.end()&&++it!=list_.end())open(it->id);
-            else{current_.reset();pages_.clear();notify("本次列表已读完");}
+            else{cre_.reset();current_.reset();pages_.clear();notify("本次列表已读完");}
         },false,26,Icon::Next,true,Align::Right);
     }
     const int content_bottom=reader_panel_==ReaderPanel::None?(reader_tools_?h-120:h-104):cover_top;
@@ -304,7 +351,7 @@ void App::reader_screen(){
         if(reader_tools_){close_reader_tools();return;}
         if(x<w/4)previous();else if(x>=3*w/4)next();else{reader_tools_=true;}
     }});
-    if(reader_panel_==ReaderPanel::None&&!reader_tools_){
+    if(!cre_&&reader_panel_==ReaderPanel::None&&!reader_tools_){
         for(const auto& item:pages_[page_].elements)if(item.image>=0){
             const Rect area{margin_+item.rect.x,top+item.rect.y,item.rect.w,item.rect.h};
             if(area.y+area.h<=content_bottom)hits_.push_back({area,[this,index=item.image,w]{
@@ -343,6 +390,10 @@ void App::reader_panel_screen(){
     const auto close=[this]{reader_panel_=ReaderPanel::None;image_zoom_=false;typography_anchor_.reset();};
     const char* title=reader_panel_==ReaderPanel::Type?"排版":reader_panel_==ReaderPanel::Images?"图片":"文章信息";
     c_.text(32,y+54,title,28);
+    if(reader_panel_==ReaderPanel::Type&&CreReader::available()){
+        button({200,y,250,88},"原排版",[this]{set_reader_engine(false);},!cre_,22);
+        button({466,y,300,88},cre_?"新版排版·实验":"新版排版",[this]{set_reader_engine(true);},static_cast<bool>(cre_),22);
+    }
     button({w-264,y,232,88},"收起面板",close,false,24,Icon::Close,true,Align::Right);
     auto adjust=[this](int& value,int next,const std::string& key){
         if(value==next)return;
@@ -832,7 +883,7 @@ void App::back(){
     else if(screen_==Screen::GroupEdit)screen_=Screen::Groups;
     else if(current_&&reader_panel_!=ReaderPanel::None){reader_panel_=ReaderPanel::None;image_zoom_=false;typography_anchor_.reset();}
     else if(current_&&reader_tools_)close_reader_tools();
-    else if(current_){save_position();current_.reset();pages_.clear();}
+    else if(current_){save_position();cre_.reset();current_.reset();pages_.clear();}
     else if(screen_==Screen::Subscriptions)restore_home();
     else if(screen_==Screen::Groups||screen_==Screen::Opml)screen_=Screen::Subscriptions;
     else if(screen_==Screen::Cache)screen_=Screen::Sync;

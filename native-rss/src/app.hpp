@@ -1,8 +1,10 @@
 #pragma once
 #include "render.hpp"
 #include "store.hpp"
+#include "cre_reader.hpp"
 #include <functional>
 #include <map>
+#include <memory>
 #include <set>
 
 namespace rss {
@@ -39,6 +41,7 @@ public:
     bool reading() const { return current_.has_value(); }
     std::size_t reader_page() const { return page_; }
     std::int64_t current_id() const { return current_ ? current_->id : 0; }
+    bool using_cre() const { return static_cast<bool>(cre_); }
     bool reader_tools_open() const { return reader_tools_; }
     ReaderPanel reader_panel() const { return reader_panel_; }
     std::size_t reader_image_page() const { return image_page_; }
@@ -55,6 +58,8 @@ private:
     std::vector<Page> pages_;
     std::vector<Hit> hits_;
     std::optional<Entry> current_;
+    std::unique_ptr<CreReader> cre_;
+    bool cre_requested_ = false;
     View view_ = View::Unread;
     std::int64_t feed_ = 0;
     std::optional<std::string> group_;
@@ -96,6 +101,7 @@ private:
     int line_height() const { return font_size_ + line_gap_; }
     void paginate();
     void save_position();
+    void set_reader_engine(bool use_cre);
     enum class Align { Center, Left, Right };
     void button(Rect rect,const std::string& label,std::function<void()> action,bool filled=false,int size=26,Icon icon=Icon::None,bool enabled=true,Align align=Align::Center);
     void list_screen();

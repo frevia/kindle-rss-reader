@@ -9,7 +9,7 @@
 ## 大图与 AVIF 缓存（2026-10-26）
 
 - 图片解码保持最终灰度缓存不超过944×1130；大尺寸有损WebP使用libwebp解码内缩放，避免创建原尺寸RGBA缓冲，保留比例与白底透明度合成。
-- 新增libavif / decoder-only libaom / libyuv，支持实际订阅中的3000×2000、10位YUV444 AVIF；先缩放YUV，再分配小RGBA。单线程、单图8MP和最大边长16384的约束在解码前生效。无损WebP及JPEG/PNG限制8MP，STB分配预算32MiB；有损WebP限制64MP，所有输入继续限制8MiB。
+- 新增libavif / decoder-only libaom / libyuv，支持实际订阅中的3000×2000、10位YUV444 AVIF；先缩放YUV，再分配小RGBA。单线程、单图8MP和最大边长16384的约束在解码前生效。无损WebP及JPEG/PNG限制8MP，STB分配预算64MiB（PNG扫描行与RGBA可同时驻留）；有损WebP限制64MP，所有输入继续限制8MiB。
 - 当前失败的7张WebP（最大4640×6960）和1张AVIF已在独立Kindle解码进程中逐张验证，进程地址空间上限192MiB；WebP耗时0.9–2.3秒、峰值3.6–6.2MiB，AVIF耗时约10.5秒、峰值约111MiB。缓存成功后沿用既有正文和图片面板读取灰度数据，不修改阅读状态。
 
 ## 编辑地址复用空历史订阅（2026-10-26）

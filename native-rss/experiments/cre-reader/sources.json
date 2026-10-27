@@ -1,0 +1,27 @@
+{
+  "cre": {
+    "repo": "koreader/crengine",
+    "revision": "f335f7a97e240f505bb8a0dfb721fcb7912a7824",
+    "sha256": "ed485ef96d971667c3bf688f8d73a12c1a0684c06629dd1dad1b93ea7de78900"
+  },
+  "xxhash": {
+    "repo": "Cyan4973/xxHash",
+    "revision": "v0.8.4",
+    "sha256": "5738270935e7c3d38a79b3adf7c9692566ce7895a25f67de43ad52ab504acd32"
+  },
+  "unibreak": {
+    "repo": "adah1972/libunibreak",
+    "revision": "libunibreak_6_1",
+    "sha256": "890674996168ef5ba143d80d49ab8b61594a4eb70198dcac76caf6e1bd264a41"
+  },
+  "png": {
+    "repo": "pnggroup/libpng",
+    "revision": "v1.6.59",
+    "sha256": "2540302a1844ad2b2b501977abecfa850f265f97b78f065a712ab4074a89f5b5"
+  },
+  "harfbuzz": {
+    "repo": "harfbuzz/harfbuzz",
+    "revision": "14.6.0",
+    "sha256": "eca8581e5ad8e21dbda31556c0363f764b1a754c9c1bb33ca7cd56ca1c07ddc9"
+  }
+}

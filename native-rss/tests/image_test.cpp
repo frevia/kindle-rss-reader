@@ -13,6 +13,10 @@ int main(){
     const auto png=rss::decode_image(ref,read("colors.png"));
     assert(png.width==2&&png.height==2&&png.pixels.size()==4);
     assert(png.pixels[0]==77&&png.pixels[1]==149&&png.pixels[2]==29&&png.pixels[3]==255);
+    // A 2600x1740 RGBA PNG needs both inflated scanlines and output pixels during decoding.
+    const auto medium=rss::decode_image(ref,read("medium-alpha.png"));
+    assert(medium.width==944&&medium.height==631&&medium.pixels.size()==944*631);
+    for(auto gray:medium.pixels)assert(gray==185);
     const auto jpeg=rss::decode_image(ref,read("colors.jpg"));assert(jpeg.width==2&&jpeg.height==2);
     const auto webp=rss::decode_image(ref,read("colors.webp"));assert(webp.pixels==png.pixels);
     for(const auto* name:{"large-colors.png","large-colors.jpg","large-colors.webp","large-alpha.webp","large-10bit.avif"}){

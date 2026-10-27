@@ -21,6 +21,7 @@ public:
     Canvas(const Canvas&) = delete;
     Canvas& operator=(const Canvas&) = delete;
     int width, height;
+    const std::string& font_path() const { return font_path_; }
     std::vector<std::uint8_t> pixels;
     void clear(std::uint8_t color = 255);
     void fill(Rect r, std::uint8_t color);
@@ -36,6 +37,7 @@ public:
     std::string ellipsize(const std::string& value, int size, int max_width);
     void write_pgm(const std::string& path) const;
 private:
+    std::string font_path_;
     FT_Library library_ = nullptr;
     FT_Face face_ = nullptr;
     std::map<std::pair<int, std::uint32_t>, Glyph> cache_;

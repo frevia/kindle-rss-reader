@@ -40,7 +40,7 @@ bool no_line_end(std::uint32_t c) {
 }
 }
 bool Rect::contains(int px,int py) const {return px>=x&&py>=y&&px<x+w&&py<y+h;}
-Canvas::Canvas(int w,int h,const std::string& font):width(w),height(h) {
+Canvas::Canvas(int w,int h,const std::string& font):width(w),height(h),font_path_(font) {
     if(w<100||h<100||w>4096||h>4096) throw std::runtime_error("无效屏幕尺寸");
     pixels.assign(static_cast<std::size_t>(w)*h,255);
     if(FT_Init_FreeType(&library_)) throw std::runtime_error("字体引擎初始化失败");

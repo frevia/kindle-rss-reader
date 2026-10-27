@@ -8,7 +8,8 @@
 #include <webp/decode.h>
 #include <avif/avif.h>
 namespace {
-constexpr std::size_t decode_budget=32*1024*1024;
+// PNG holds inflated scanlines and RGBA pixels together, even for a 4.5MP screenshot.
+constexpr std::size_t decode_budget=64*1024*1024;
 thread_local std::size_t decode_allocated=0;
 struct alignas(std::max_align_t) Allocation {std::size_t size;};
 void* image_alloc(std::size_t size){
