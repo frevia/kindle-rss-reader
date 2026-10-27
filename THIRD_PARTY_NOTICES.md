@@ -11,12 +11,25 @@
 | stb_image | JPEG / PNG 解码，选择其 MIT 许可 | [LICENSE](https://github.com/frevia/kindle-rss-reader/blob/main/native-rss/third_party/stb/LICENSE)、[固定来源](https://github.com/frevia/kindle-rss-reader/blob/main/native-rss/third_party/stb/SOURCE.json) |
 | Rime pinyin-simp | 原始词库及生成的只读候选表；生成时合并音节空格并按词频排序 | Apache-2.0；[LICENSE](https://github.com/frevia/kindle-rss-reader/blob/main/native-rss/third_party/pinyin/LICENSE)、[固定来源](https://github.com/frevia/kindle-rss-reader/blob/main/native-rss/third_party/pinyin/SOURCE.json)；上游词库注明源自 Android PinyinIME |
 
+## CREngine 正文排版
+
+当前开发构建已在正式RSS入口接入 [KOReader CREngine](https://github.com/koreader/crengine)，固定来源见 `native-rss/tools/reader-sources.json` 和 `native-rss/third_party/crengine/SOURCE.json`。上游 README.TXT 标注 GPL version 2；完整许可随包保存为 `CREngine-GPL-2.0.txt`，qimagescale 的其他声明另存。
+
+项目原创源码继续保留 MIT，但此声明不能覆盖含CREngine的组合二进制。现有OpenSSL和拼音词库含Apache-2.0组件，组合许可兼容尚未确认；当前仅生成本地开发安装包，`public_release_ready=false`，发布工具拒绝将其生成公开Release附件。此说明不改变已发布的原排版版本。上游声明及组件关系需要在公开分发前完成核对，不以附上许可文本代替兼容性审查。
+
+构建脚本校验每个源码归档，源码包包含构建脚本、锁文件及RSS集成代码；本地安装包没有声称满足GPL组合产物的完整公开源码分发要求。
+
 ## ARM 安装包组件
 
 版本、下载地址与校验值见 [arm-sources.json](https://github.com/frevia/kindle-rss-reader/blob/main/native-rss/tools/arm-sources.json) 和 [runtime-sources.json](https://github.com/frevia/kindle-rss-reader/blob/main/native-rss/tools/runtime-sources.json)。完整许可放入安装包的 `native-rss/licenses/`；源码开发包也包含同一组许可文件。
 
 | 组件 | 许可 / 随包文件 |
 |---|---|
+| CREngine | 上游标注GPLv2；`CREngine-GPL-2.0.txt`、`CREngine-README.txt`、`CREngine-qimagescale.txt` |
+| HarfBuzz | MIT类许可及上游版权说明；`HarfBuzz.txt` |
+| libpng | PNG Reference Library License；`libpng.txt` |
+| libunibreak | zlib类许可；`libunibreak.txt` |
+| xxHash | BSD-2-Clause；`xxHash.txt` |
 | OpenSSL | Apache-2.0；`OpenSSL.txt` |
 | curl | curl license；`curl.txt` |
 | libxml2 | MIT 类许可及上游版权说明；`libxml2.txt` |

@@ -18,8 +18,13 @@ class PackageTests(unittest.TestCase):
             public=("LICENSE","README.md","CONTRIBUTING.md","SECURITY.md","THIRD_PARTY_NOTICES.md","CHANGELOG.md",".github/workflows/release.yml")
             for name in public:
                 path=root.parent/name;path.parent.mkdir(parents=True,exist_ok=True);path.write_text(name)
-            included=("src/main.cpp","tests/fixtures/colors.png","docs/INSTALL.md","device/INSTALL.txt","device/launch.sh")
-            private=("docs/device-report.txt","docs/session.log","tests/private.sqlite","data/feeds.opml","output/app.zip","tools/__pycache__/package.pyc")
+            included=("src/main.cpp","tests/fixtures/colors.png","docs/INSTALL.md","device/INSTALL.txt","device/launch.sh",
+                      "tools/reader.cmake","tools/reader-sources.json","third_party/crengine/LICENSE",
+                      "experiments/cre-reader/CMakeLists.txt","experiments/cre-reader/engine.cmake",
+                      "experiments/cre-reader/build.py","experiments/cre-reader/probe.cpp","experiments/cre-reader/README.txt")
+            private=("docs/device-report.txt","docs/session.log","tests/private.sqlite","data/feeds.opml","output/app.zip","reader-deps/unibreak/linebreak.o","tools/__pycache__/package.pyc",
+                     "experiments/cre-reader/device-report.txt","experiments/cre-reader/results.json",
+                     "experiments/cre-reader/__pycache__/build.pyc")
             for name in (*included,*private):
                 path=root/name;path.parent.mkdir(parents=True,exist_ok=True);path.write_bytes(b"test")
             files=pack.source_files(root)

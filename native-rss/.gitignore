@@ -1,4 +1,5 @@
 /build*/
+/reader-deps/
 /output/
 /vendor/
 /data/

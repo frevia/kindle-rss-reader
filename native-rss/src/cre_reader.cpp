@@ -112,7 +112,7 @@ struct CreReader::Impl {
         const auto session = std::getenv("RSS_CRE_CACHE");
         const auto guard = std::getenv("RSS_UI_GUARD");
         if (guard && std::string(guard) == "1" && (!session || std::string(session).rfind("/tmp/rss-cre-session.", 0) != 0))
-            throw std::runtime_error("请从 RSS 新排版测试入口启动");
+            throw std::runtime_error("请从 RSS 阅读器入口启动");
         if (session) {
             struct stat info{};
             if (::lstat(session, &info) || !S_ISDIR(info.st_mode) || info.st_uid != ::geteuid() || (info.st_mode & 0777) != 0700)

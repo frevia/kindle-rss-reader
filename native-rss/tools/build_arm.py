@@ -59,7 +59,9 @@ def sha256(path: Path) -> str:
 
 def build_inputs() -> dict[str, str]:
     paths = [*sorted((ROOT / "src").glob("*.cpp")), *sorted((ROOT / "src").glob("*.hpp")),
-             *sorted((ROOT / "third_party").rglob("*.h")), ROOT / "tools/arm-sources.json", Path(__file__).resolve()]
+             *sorted((ROOT / "third_party").rglob("*.h")), ROOT / "CMakeLists.txt",
+             ROOT / "tools/arm-sources.json", ROOT / "tools/reader-sources.json",
+             ROOT / "tools/build_reader.py", ROOT / "tools/reader.cmake", Path(__file__).resolve()]
     return {str(path.relative_to(ROOT)): sha256(path) for path in paths}
 
 
@@ -349,15 +351,10 @@ def main() -> int:
         "-DWEBP_BUILD_DWEBP=OFF", "-DWEBP_BUILD_GIF2WEBP=OFF", "-DWEBP_BUILD_IMG2WEBP=OFF",
         "-DWEBP_BUILD_VWEBP=OFF", "-DWEBP_BUILD_WEBPINFO=OFF", "-DWEBP_BUILD_WEBPMUX=OFF",
         "-DWEBP_BUILD_EXTRAS=OFF", "-DWEBP_USE_THREAD=OFF", "-DWEBP_ENABLE_SIMD=OFF"], env)
-    sources = sorted((ROOT / "src").glob("*.cpp"))
+    from build_reader import build_app, sources as reader_sources
     binary = BUILD / "kindle-rss"
-    flags = ["-target", TARGET, f"-mcpu={CPU}", "-static", "-Os", "-std=c++17", "-pthread",
-             "-I", str(PREFIX / "include"), "-I", str(PREFIX / "include" / "libxml2"),
-             "-I", str(PREFIX / "include" / "freetype2"), *(str(source) for source in sources),
-             "-L", str(PREFIX / "lib"), "-Wl,--start-group", "-lcurl", "-lssl", "-lcrypto", "-lz",
-             "-lxml2", "-lfreetype", "-lsqlite3", "-lwebp", "-lsharpyuv", "-lavif", "-laom", "-lyuv",
-             "-Wl,--end-group", "-ldl", "-lm", "-o", str(binary)]
-    run([str(ZIG), "c++", *flags], log_name="app-link.log")
+    compiled = build_app("arm", BUILD / "app", PREFIX, toolchain)
+    shutil.copy2(compiled, binary)
     binary.chmod(0o755)
     verify_elf(binary)
     if build_inputs() != inputs:
@@ -365,6 +362,8 @@ def main() -> int:
     (BUILD / "build-info.json").write_text(json.dumps({
         "target": TARGET, "cpu": CPU, "zig": "0.15.2", "binary_sha256": sha256(binary),
         "inputs": inputs, "device_tested": False,
+        "reader": {"name": "crengine", "revision": reader_sources()["cre"]["revision"],
+                   "public_release_ready": False},
     }, indent=2) + "\n")
     return 0
 

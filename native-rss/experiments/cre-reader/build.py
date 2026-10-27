@@ -36,7 +36,7 @@ def main():
     arm.LOGS = OUT / (target + "-logs")
     for folder in (prefix / "include", prefix / "lib", arm.BUILD, arm.LOGS):
         folder.mkdir(parents=True, exist_ok=True)
-    lock = json.loads((HERE / "sources.json").read_text())
+    lock = json.loads((ROOT / "tools/reader-sources.json").read_text())
     trees = {}
     for name in (lock if target == "arm" else ("cre", "xxhash", "unibreak")):
         source = lock[name]

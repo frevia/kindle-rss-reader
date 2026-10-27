@@ -2,7 +2,7 @@
 
 这份文档用于修改代码、编译程序和排查实现问题。首次接触本项目，请先读[安装教程](INSTALL.md)和[使用指南](USAGE.md)。自行编译需要下载名称带 `-source.zip` 的源码包；下面的命令从解压后能看到 `native-rss` 的那一层运行。固定工具链版本、系统路径和技术限制供开发时核对。
 
-面向 KPW3 的独立原生 RSS 阅读器。C++17、FreeType 灰度渲染、SQLite 离线存储、libxml2 订阅解析和 libcurl 联网；桌面使用 SDL 展示相同的渲染结果。不是 KOReader 插件，也不是网页套壳。
+面向 KPW3 的独立原生 RSS 阅读器。C++17、CREngine 正文排版与 FreeType 灰度渲染、SQLite 离线存储、libxml2 订阅解析和 libcurl 联网；桌面使用 SDL 展示相同的渲染结果。不是 KOReader 插件，也不是网页套壳。
 
 **当前是开发验证版，尚不是真机验收完成的 Kindle 成品。** ARM 静态构建已安装到 KPW3；开发包提供中文字体和证书。单次启动退出、休眠、应用及启动器强杀恢复已有真机证据，拼音搜索选词经用户确认。离线连续翻页、USB 退出、OPML、阅读位置、字号与收藏已通过用户实机验证；长期使用仍待验收。完整范围见[实施计划](PLAN.md)，设备证据见 [DEVICE.md](DEVICE.md)。
 
@@ -12,15 +12,16 @@
 
 ## 本机构建
 
-需要 CMake、pkg-config、C++17 编译器及 libxml2、sqlite3、libcurl（支持 CURLOPT_PROTOCOLS_STR）、freetype2、libwebp、libavif 1.1.0+（启用 libyuv）、sdl2 开发库。
+需要 CMake、pkg-config、C++17 编译器及 libxml2、sqlite3、libcurl（支持 CURLOPT_PROTOCOLS_STR）、freetype2、HarfBuzz、libpng、libwebp、libavif 1.1.0+（启用 libyuv）、sdl2 开发库。
 
 先确认这些库能通过 `pkg-config` 查到；非系统前缀安装时，将对应的 `lib/pkgconfig` 加入 `PKG_CONFIG_PATH`。例如 libavif 安装在自选前缀后，使用 `PKG_CONFIG_PATH=/absolute/prefix/lib/pkgconfig`。不要将 ARM 的依赖目录用于宿主构建。缺少 `libavif` 时 CMake 会停止；已有旧构建目录成功不代表新环境能直接构建。
 
 ```sh
-rtk proxy cmake -S native-rss -B native-rss/build -DCMAKE_BUILD_TYPE=Debug
-rtk proxy cmake --build native-rss/build -j 6
+rtk proxy python3 native-rss/tools/build_reader.py host
 rtk proxy ctest --test-dir native-rss/build --output-on-failure
 ```
+
+默认构建启用 CREngine。`tools/reader-sources.json` 固定上游版本与归档校验；`tools/build_reader.py host` 下载并校验源码、在 `build-host-reader/prefix` 准备依赖后构建正式应用。无需通过 experiments 目录构建。需要单独验证原渲染器时，配置 `-DRSS_CRE=OFF`；`RSS_CRE_SOURCE` 可显式指定已校验源码位置。
 
 从本仓库根目录运行。测试使用临时数据库与本机 HTTP 服务，不接触 Kindle。Linux 的中文视觉检查需要 `RSS_FONT` 指向合适字体；测试 fallback 字体不代表中文显示验收。
 
@@ -34,6 +35,8 @@ Apple Silicon macOS 上的依赖构建脚本为 `tools/build_arm.py`，依赖版
 rtk proxy python3 native-rss/tools/build_arm.py
 ```
 
+`build_arm.py` 在基础依赖之后调用 `build_reader.py` 的同一构建流程，默认链接固定版本的 CREngine；`BUILD.json` 同时记录引擎提交和包含构建脚本/CMake/依赖锁的输入指纹。
+
 产物为 `build-arm/kindle-rss`，目标 ARMv7 Cortex-A9、EABI5 soft-float、静态链接。脚本检查 ELF 类型、浮点 ABI、程序段边界及动态链接段；这些检查不证明旧内核兼容性。已在 KPW3 5.16.2.1.1 运行并验证图文渲染。设备端 `device` 运行循环与 `device/launch.sh` 会话启动器已接通；不要绕过启动器的入口检查。KUAL 入口位于 `device/kual/`，仍非完成验收的安装包。
 
 ARM 网络访问使用开发包中的 `/mnt/us/native-rss/certs/ca-bundle.pem`，也可通过 `RSS_CA_BUNDLE` 指定。不能依赖构建主机上的 OpenSSL 证书路径。
@@ -46,9 +49,14 @@ rtk proxy python3 native-rss/tools/package.py
 
 需要先完成 ARM 构建。工具验证源码及二进制哈希，拒绝过期产物；缺少运行资源时按 `tools/runtime-sources.json` 下载并验证。输出 `output/kindle-rss-kpw3-dev.zip` 和 `output/kindle-rss-source-dev.zip`，不自动安装。包含 Noto Sans SC（OFL 1.1）、Mozilla 根证书（MPL 2.0）、KUAL 入口、第三方许可、安装说明和逐文件 SHA-256 清单。程序使用未修改的可变字体，设置字重为 400。
 
+当前含 CREngine 的组合二进制只作为本地开发包：上游标注 GPLv2，现有 OpenSSL 和词库含 Apache-2.0 组件，许可兼容尚未确认。安装清单明确记录 `public_release_ready=false`，`release.py` 在生成版本附件前拒绝此类包；不能把此组合产物直接按 MIT 公开分发。
+
 项目自身的 MIT 许可与第三方组件汇总同时放入安装包；源码包还包含仓库首页、贡献指南、安全反馈和同一组第三方许可。源码按文件类型白名单收集，诊断 TXT、日志、数据库与 OPML 不属于打包输入。发布前仍需核对实际 ZIP 内容，不能只依赖 `.gitignore`。
 
 ## GitHub Release
+
+当前开发分支的 CREngine 组合包尚不允许公开发布，版本附件整理和自动发布流程会拒绝 `public_release_ready` 未明确为 true 的安装包。本轮集成不升级版本号、不创建标签或 Release。下述为原有发布流程，解决组合许可后再恢复使用。
+
 
 [发布工作流](../../.github/workflows/release.yml) 在推送 `v数字.数字.数字` 标签时运行，也可在标签引用上手动重跑。发布前更新 CMake 与 KUAL 版本号，以及根目录 `CHANGELOG.md`，再提交并推送标签。安装与使用文档始终指向最新版，无需随应用版本改写。工作流使用 Apple Silicon macOS runner，校验固定 Zig 下载哈希，运行宿主 CTest，重新编译 ARM，再调用 `tools/release.py` 整理附件。
 
@@ -97,7 +105,8 @@ rtk proxy native-rss/build/kindle-rss --db native-rss/output/demo.sqlite --artic
 - RSS 2/RDF/Atom、嵌套 OPML 导入导出；导入按 URL 去重，保留已有名称和分组。
 - 同步使用 ETag/Last-Modified；TLS 校验开启；单源失败不删除旧数据，不阻止其他源更新。
 - 单份订阅限制 8 MiB，连接超时 10 秒，总请求超时 35 秒。
-- 正文按原文顺序图文分页：图片等比缩放，放不下时整张移到下一页；短 figcaption 与图片保持同页，较长图注继续分页。点击正文图片可打开对应大图，返回保持当前页。保留旧文字阅读位置，额外记录连续图片页的位置。未做通用网页全文提取，不能保证摘要源的全文离线。
+- 默认正文使用 CREngine，原排版仍可在面板切回；独立书签存入 `reader_cre:<ID>`，原版 `entries.position` 保留。未设置过引擎且已有旧进度的文章先沿用原排版。HTML剥离源属性、脚本及外部样式，仅加载受控CSS和缓存图片；最多512KiB正文、512页、200图片节点及16MiB图片预算，失败提示并回退。
+- 原排版按原文顺序图文分页：图片等比缩放，放不下时整张移到下一页；短 figcaption 与图片保持同页，较长图注继续分页。点击正文图片可打开对应大图，返回保持当前页。保留旧文字阅读位置，额外记录连续图片页的位置。未做通用网页全文提取，不能保证摘要源的全文离线。
 - 同步缓存正文 `<img>` 的 HTTP(S) 地址，支持相对地址和 `data-src`，每篇最多 20 张、每次同步处理最多 100 张。支持 JPEG/PNG/静态 WebP/AVIF；JPEG/PNG 最多 8MP，STB 解码分配预算 64 MiB（PNG扫描行与RGBA可同时驻留）；AVIF 单文件最多 8 MiB、单图 8MP、最大边长 16384、单线程解码，使用 libavif、decoder-only libaom 和 libyuv 在 YUV 色彩空间缩放到最多 944×1130 后转换为 RGB。WebP 有损图最多 64MP、无损图最多 8MP，并在解码时缩放。图像解码均离线运行并缩小为适合屏幕的灰度缓存，透明像素合成白底。动态 WebP、GIF、SVG、srcset 和 enclosure 图片尚不支持。
 - 图片失败单独记录并显示原因，不删除文字；下次同步重试。已缓存的相同 URL 不重复下载；源站在同一 URL 替换图片时暂不自动失效。图片与文章一起清理，收藏图片随收藏保留。缓存放在 SQLite 中，删除释放的页面会被后续写入复用，文件未必立即缩小。
 - 已读、收藏、字符位置独立于正文更新。列表只加载元数据，打开文章时再读正文。
@@ -120,6 +129,8 @@ rtk proxy native-rss/build/kindle-rss --db native-rss/output/demo.sqlite --artic
 ## 维护设备启动环境
 
 这一节供定位启动失败时核对，不需要让安装用户逐项执行或记住命令。先按真实调用链区分入口问题与运行环境问题：KUAL 菜单和 `reader-scriptlet.sh` 最终都调用 `launch.sh`，后者只在选择书库入口时需要 SH_Integration。`launch.sh` 不调用或检查 Hotfix、Scriptlets、微信读书或商店；它单独检查并调用 FBInk。Universal Hotfix 可以提供 Scriptlets 和 FBInk，但不是唯一来源，不应无条件要求安装或重装。用户侧按[安装教程](INSTALL.md)复制并打开应用，只有入口缺失或启动失败时才进入[启动问题排查](TROUBLESHOOTING.md)，按对应现象检查环境或导出检查文件。
+
+启动器在 guardian fork 前创建 `/tmp/rss-cre-session.*` 私有目录并导出 `RSS_CRE_CACHE`。退出时先关闭阅读器并删除本会话缓存，再恢复服务及USB；启动器被杀时由独立监护进程执行同样的清理。原会话锁、数据库路径及系统恢复保护继续使用，不需要额外测试入口。
 
 启动器的实际条件以 `device/launch.sh` 为准：需要 `/mnt/us/libkh/bin/fbink` 可执行，以及 `timeout`、`flock`、`stat`、`pidof`、`awk`、`dd`、`mktemp`、`mkfifo` 和系统 LIPC 工具；设备密码锁开启时会拒绝启动。当前只验证过 KPW3，屏幕和触摸布局校验不应绕过。
 

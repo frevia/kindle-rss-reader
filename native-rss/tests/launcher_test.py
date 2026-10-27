@@ -10,7 +10,7 @@ import unittest
 
 SOURCE = Path(__file__).resolve().parents[1] / "device/launch.sh"
 FAKE = r'''
-import fcntl, os, pathlib, signal, subprocess, sys, time
+import fcntl, os, pathlib, signal, subprocess, sys, tempfile, time
 root=pathlib.Path(os.environ["FIXTURE"])
 name=pathlib.Path(sys.argv[0]).name
 args=sys.argv[1:]
@@ -19,6 +19,25 @@ def log(text):
     with (root/"events").open("a") as f:f.write(text+"\n")
 if name=="stat":
     print("2700:0" if mode=="inherited-setgid" else "700:0")
+elif name=="mktemp":
+    if args[0]=="-d":
+        if mode=="cache-create-error":sys.exit(1)
+        path=pathlib.Path(args[1]).parent
+        prefix=pathlib.Path(args[1]).name.removesuffix("XXXXXX")
+        cache=pathlib.Path(tempfile.mkdtemp(prefix=prefix,dir=path))
+        (root/"cache-path").write_text(str(cache))
+        print(cache)
+    else:
+        path=pathlib.Path(args[0]);fd,name=tempfile.mkstemp(prefix=path.name.split("XXXXXX")[0],dir=path.parent)
+        os.close(fd);print(name)
+elif name=="rm":
+    target=pathlib.Path(args[-1])
+    if (root/"cache-path").exists() and str(target)==(root/"cache-path").read_text():
+        log("cache-rm")
+        if mode=="cache-cleanup-error":sys.exit(1)
+    import shutil
+    for arg in (item for item in args if not item.startswith("-")):
+        shutil.rmtree(arg,ignore_errors=True) if pathlib.Path(arg).is_dir() else pathlib.Path(arg).unlink(missing_ok=True)
 elif name=="flock":
     try:fcntl.flock(9,fcntl.LOCK_EX|fcntl.LOCK_NB)
     except OSError:sys.exit(1)
@@ -49,6 +68,10 @@ elif name=="app":
         print("width=1072\nheight=1448\nstride=1088\nbpp=8\nxoffset=0\nyoffset=0\nrotation=3\ndriver=mxc_epdc_fb\nlayout=accepted")
     else:
         assert os.environ["RSS_UI_GUARD"]=="1"
+        cache=pathlib.Path(os.environ["RSS_CRE_CACHE"])
+        assert cache.is_dir() and cache.stat().st_uid==os.geteuid()
+        assert cache.stat().st_mode & 0o777 == 0o700
+        (cache/"article-test").write_text("private article cache")
         (root/"started").touch()
         with (root/"fb").open("r+b") as f:f.write(b"!")
         log("app-start")
@@ -76,7 +99,7 @@ class LauncherTests(unittest.TestCase):
                 (root/"protected").write_text("untouched")
                 (root/"state/session.log").unlink()
                 (root/"state/session.log").symlink_to(root/"protected")
-            for name in ("stat","flock","timeout","pidof","get","set","refresh","kill","app"):
+            for name in ("stat","flock","timeout","pidof","get","set","refresh","kill","app","mktemp","rm"):
                 tool=root/"bin"/name;tool.write_text("#!"+sys.executable+"\n"+FAKE);tool.chmod(0o755)
             for pid,name in ((900001,"awesome"),(900002,"JunoStatusBarDr"),(900003,"volumd")):
                 p=root/"proc"/str(pid);p.mkdir(parents=True)
@@ -88,6 +111,10 @@ class LauncherTests(unittest.TestCase):
             values={"STATE":root/"state","APP":root/"bin/app","DB":root/"rss.sqlite","FB":root/"fb",
                     "PROC":root/"proc","GET":root/"bin/get","SET":root/"bin/set","REFRESH":root/"bin/refresh","KILL":root/"bin/kill","PASSCODE":root/"passcode"}
             script=SOURCE.read_text().splitlines()
+            (root/"cache").mkdir()
+            source="\n".join(script)+"\n"
+            source=source.replace("/tmp/rss-cre-session.",str(root/"cache/rss-cre-session."))
+            script=source.splitlines()
             for i,line in enumerate(script):
                 key=line.split("=",1)[0]
                 if key in values:script[i]=key+"='"+str(values[key])+"'"
@@ -123,7 +150,16 @@ class LauncherTests(unittest.TestCase):
                 self.assertEqual((root/"state/session.previous.log").read_text(),"previous session fixture\n")
                 log=(root/"state/session.log").read_text()
                 self.assertIn("session_start",log);self.assertIn("session_end",log)
+                if mode=="cache-cleanup-error":self.assertIn("系统界面恢复不完整",log)
             if mode=="log-symlink":self.assertEqual((root/"protected").read_text(),"untouched")
+            if (root/"cache-path").exists():
+                cache=Path((root/"cache-path").read_text())
+                if mode=="cache-cleanup-error":self.assertTrue(cache.exists())
+                else:self.assertFalse(cache.exists())
+                if "-CONT 900003" in events:
+                    self.assertLess(events.index("cache-rm"),events.index("-CONT 900003"))
+                if "app-terminated" in events:
+                    self.assertLess(events.index("app-terminated"),events.index("cache-rm"))
             return result,events,(root/"fb").read_bytes()[0:1]
 
     def test_normal_and_crash_restore(self):
@@ -200,6 +236,18 @@ class LauncherTests(unittest.TestCase):
                 self.assertLess(events.index("refresh"),events.index("-CONT 900003"))
                 if mode=="launcher-killed":
                     self.assertLess(events.index("app-terminated"),events.index("-CONT 900001"))
+
+    def test_cache_creation_failure_prevents_takeover(self):
+        result,events,pixel=self.run_case("cache-create-error")
+        self.assertEqual(result.returncode,1)
+        self.assertNotIn("app-start",events)
+        self.assertEqual(pixel,b"x")
+
+    def test_cache_cleanup_failure_is_reported(self):
+        result,events,pixel=self.run_case("cache-cleanup-error")
+        self.assertEqual(result.returncode,1)
+        self.assertIn("cache-rm",events)
+        for pid in (900001,900002,900003):self.assertIn("-CONT "+str(pid),events)
 
 
 if __name__=="__main__":unittest.main()

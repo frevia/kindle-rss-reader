@@ -8,7 +8,7 @@
 int main(){
     std::string font=std::getenv("RSS_FONT")?std::getenv("RSS_FONT"):"/System/Library/Fonts/STHeiti Light.ttc";
     if(!std::filesystem::exists(font))font="/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf";
-    rss::Canvas canvas(1072,1448,font);rss::Store store(":memory:");
+    rss::Canvas canvas(1072,1448,font);rss::Store store(":memory:");store.set_setting("reader_engine","classic");
     const std::vector<std::string> names={"科技手记","开源观察","城市慢读","自然来信","设计日常","书页之间"};
     const std::vector<std::string> groups={"科技/数字生活","科技/开源与工具","人文与城市","自然与科学","科技/数字生活","人文与城市"};
     std::vector<std::int64_t> feeds;
@@ -80,7 +80,7 @@ int main(){
     touch(150,50);touch(140,260);touch(100,900);assert(!app.quit);
     touch(150,50);touch(140,260);touch(780,484);assert(app.quit);
     {
-        rss::Store empty_store(":memory:");rss::App empty_app(empty_store,canvas);
+        rss::Store empty_store(":memory:");empty_store.set_setting("reader_engine","classic");rss::App empty_app(empty_store,canvas);
         auto capture=[&](const char* name){empty_app.draw();if(auto dir=std::getenv("RSS_TEST_SNAPSHOTS"))canvas.write_pgm((std::filesystem::path(dir)/(std::string("empty-")+name+".pgm")).string());};
         auto action=[&]{
             empty_app.draw();
@@ -99,7 +99,7 @@ int main(){
 
     {
         // Manage a complete tree through the same touch targets used on Kindle.
-        rss::Store tree(":memory:");tree.add_group("Alpha/Existing/Deep");tree.add_group("Beta");
+        rss::Store tree(":memory:");tree.set_setting("reader_engine","classic");tree.add_group("Alpha/Existing/Deep");tree.add_group("Beta");
         rss::App nested(tree,canvas);
         auto tap=[&](int x,int y){nested.draw();nested.tap(x,y);};
         auto capture=[&](const char* name){nested.draw();if(auto dir=std::getenv("RSS_TEST_SNAPSHOTS"))canvas.write_pgm((std::filesystem::path(dir)/(std::string("tree-")+name+".pgm")).string());};

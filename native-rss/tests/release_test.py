@@ -1,4 +1,7 @@
 import hashlib
+import io
+import json
+import zipfile
 from pathlib import Path
 import sys
 import tempfile
@@ -9,12 +12,19 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 import release
 
 
+def device_zip(public_release_ready):
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, "w") as archive:
+        archive.writestr("native-rss/MANIFEST.json", json.dumps({"public_release_ready": public_release_ready}))
+    return out.getvalue()
+
+
 class ReleaseTests(unittest.TestCase):
     def test_stages_named_archives_without_changing_inputs_and_writes_checksums(self):
         with tempfile.TemporaryDirectory() as folder:
             output = Path(folder)
             contents = {
-                "kindle-rss-kpw3-dev.zip": b"device zip bytes",
+                "kindle-rss-kpw3-dev.zip": device_zip(True),
                 "kindle-rss-source-dev.zip": b"source zip bytes",
             }
             for name, data in contents.items():
@@ -35,6 +45,16 @@ class ReleaseTests(unittest.TestCase):
                 (destination / "SHA256SUMS.txt").read_text(encoding="ascii"),
                 "".join(f"{hashlib.sha256(data).hexdigest()}  {name}\n" for name, data in expected.items()),
             )
+
+    def test_local_or_unreviewed_package_cannot_be_staged_for_publication(self):
+        for approved in (False, None, "true"):
+            with self.subTest(approved=approved), tempfile.TemporaryDirectory() as folder:
+                output = Path(folder)
+                (output / "kindle-rss-kpw3-dev.zip").write_bytes(device_zip(approved))
+                (output / "kindle-rss-source-dev.zip").write_bytes(b"source")
+                with self.assertRaisesRegex(ValueError, "不能进入公开 Release"):
+                    release.stage_release(output, "v0.0.3")
+                self.assertFalse((output / "release-v0.0.3").exists())
 
     def test_invalid_tag_is_rejected_before_package_or_filesystem_changes(self):
         for tag in ("", "0.0.2", "v0.0.2-rc1", "v1.2", "v1.2.3/escape", "v1.2.3 "):

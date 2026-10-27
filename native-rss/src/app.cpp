@@ -47,7 +47,7 @@ App::App(Store& store,Canvas& canvas):store_(store),c_(canvas){
     font_size_=read_int(store_,"font_size",34,24,48);
     line_gap_=read_int(store_,"line_gap",24,10,42);
     margin_=read_int(store_,"margin",32,32,100);
-    cre_requested_=store_.setting("reader_engine")=="cre"&&CreReader::available();
+    cre_requested_=store_.setting("reader_engine")!="classic"&&CreReader::available();
     reload();
 }
 int App::row_height(const Entry& e){
@@ -247,7 +247,9 @@ void App::open(std::int64_t id,bool track){
     auto entry=store_.entry(id);if(!entry)throw std::runtime_error("文章已不在缓存中");
     if(entry->text.empty()&&entry->images.empty())throw std::runtime_error("这篇文章尚无可阅读的正文");
     cre_.reset();current_=std::move(entry);
-    if(cre_requested_){
+    const bool keep_classic_position=store_.setting("reader_engine").empty()&&current_->position>0&&
+        store_.setting("reader_cre:"+std::to_string(id)).empty();
+    if(cre_requested_&&!keep_classic_position){
         try{
             std::string base=current_->url;
             if(base.empty())for(const auto& feed:feeds_)if(feed.id==current_->feed_id){base=feed.url;break;}
@@ -257,6 +259,7 @@ void App::open(std::int64_t id,bool track){
             paginate();
         }catch(const std::exception& e){cre_.reset();paginate();show_error(std::string("新版排版无法打开，已回到原排版：")+e.what());}
     }else paginate();
+    if(cre_requested_&&keep_classic_position)notify("已保留原排版阅读位置，可在排版中切换新版");
     if(track){
         store_.set_read(id,true);current_->read=true;
         store_.set_position(id,current_->position);
@@ -392,7 +395,7 @@ void App::reader_panel_screen(){
     c_.text(32,y+54,title,28);
     if(reader_panel_==ReaderPanel::Type&&CreReader::available()){
         button({200,y,250,88},"原排版",[this]{set_reader_engine(false);},!cre_,22);
-        button({466,y,300,88},cre_?"新版排版·实验":"新版排版",[this]{set_reader_engine(true);},static_cast<bool>(cre_),22);
+        button({466,y,300,88},"新版排版",[this]{set_reader_engine(true);},static_cast<bool>(cre_),22);
     }
     button({w-264,y,232,88},"收起面板",close,false,24,Icon::Close,true,Align::Right);
     auto adjust=[this](int& value,int next,const std::string& key){

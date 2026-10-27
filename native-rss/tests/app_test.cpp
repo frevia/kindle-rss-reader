@@ -10,7 +10,7 @@
 int main(){
     std::string font=std::getenv("RSS_FONT")?std::getenv("RSS_FONT"):"/System/Library/Fonts/STHeiti Light.ttc";
     if(!std::filesystem::exists(font))font="/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf";
-    rss::Store store(":memory:");rss::Canvas canvas(1072,1448,font);
+    rss::Store store(":memory:");store.set_setting("reader_engine","classic");rss::Canvas canvas(1072,1448,font);
     const auto expect_pager=[&](const std::vector<std::uint8_t>& paper,int page,int total){
         rss::Canvas footer(1072,1448,font);
         const auto label="第 "+std::to_string(page)+" / "+std::to_string(total)+" 页";
@@ -19,7 +19,7 @@ int main(){
             assert(paper[y*1072+x]==footer.pixels[y*1072+x]);
     };
     {
-        rss::Store totals(":memory:");rss::Feed source;source.url="https://page-total.test/rss";source.title="分页测试";source.group="目录";
+        rss::Store totals(":memory:");totals.set_setting("reader_engine","classic");rss::Feed source;source.url="https://page-total.test/rss";source.title="分页测试";source.group="目录";
         const auto fid=totals.add_feed(source);rss::ParsedFeed batch;
         for(int i=0;i<24;++i){rss::Entry item;item.guid=std::to_string(i);item.title="测试文章 "+std::to_string(i);item.text="正文";batch.entries.push_back(item);}
         totals.save_entries(fid,batch);rss::App pager(totals,canvas);
@@ -43,7 +43,7 @@ int main(){
         rss::App fresh(totals,canvas);fresh.show_view(rss::View::All);fresh.draw();assert(canvas.pixels==changed_titles);
     }
     {
-        rss::Store pages_store(":memory:");rss::Feed feed;feed.url="https://pages.example/feed";
+        rss::Store pages_store(":memory:");pages_store.set_setting("reader_engine","classic");rss::Feed feed;feed.url="https://pages.example/feed";
         const auto feed_id=pages_store.add_feed(feed);rss::ParsedFeed batch;
         for(int i=0;i<45;++i){rss::Entry item;item.guid=std::to_string(i);
             item.title=i%3==0?std::string(110,'x'):"文章 "+std::to_string(i);item.text="正文";batch.entries.push_back(item);}
@@ -95,7 +95,7 @@ int main(){
         assert(ordered.size()==45);
     }
     {
-        rss::Store scoped(":memory:");rss::Feed local;local.url="https://scope.example/feed";local.title="本地源";local.group="科技";
+        rss::Store scoped(":memory:");scoped.set_setting("reader_engine","classic");rss::Feed local;local.url="https://scope.example/feed";local.title="本地源";local.group="科技";
         const auto local_id=scoped.add_feed(local);rss::Feed remote;remote.url="https://other.example/feed";remote.title="其他源";
         const auto remote_id=scoped.add_feed(remote);
         rss::Entry a;a.guid="local";a.title="needle 本地文章";a.text="正文";a.published=100;
@@ -116,7 +116,7 @@ int main(){
         assert(filtered.current_id()==local_entry);
     }
     {
-        rss::Store room(":memory:");rss::Feed feed;feed.url="https://room.example/feed";
+        rss::Store room(":memory:");room.set_setting("reader_engine","classic");rss::Feed feed;feed.url="https://room.example/feed";
         const auto fid=room.add_feed(feed);rss::Entry story;story.guid="room";story.title="正文空间";
         for(int i=0;i<100;++i)story.text+="正文\n";
         rss::ParsedFeed batch;batch.entries={story};room.save_entries(fid,batch);
@@ -130,7 +130,7 @@ int main(){
         reader.draw();reader.tap(900,1380);assert(!reader.reading()); // Last page keeps the next-article action in the same footer.
     }
     {
-        rss::Store preferences(":memory:");rss::Feed feed;feed.url="https://prefs.example/feed";
+        rss::Store preferences(":memory:");preferences.set_setting("reader_engine","classic");rss::Feed feed;feed.url="https://prefs.example/feed";
         const auto fid=preferences.add_feed(feed);rss::Entry story;story.guid="saved";story.title="已保存排版";story.text=std::string(3000,'x');
         rss::ParsedFeed batch;batch.entries={story};preferences.save_entries(fid,batch);
         preferences.set_setting("font_size","30");preferences.set_setting("line_gap","18");preferences.set_setting("margin","60");
@@ -218,7 +218,7 @@ int main(){
     tap(100,400);assert(app.current_id()==current);app.back();assert(app.reading());
     // An image-only article must reopen the exact image page despite identical text offsets.
     {
-        rss::Store image_store(":memory:");rss::Feed feed;feed.url="https://example.test/rss";
+        rss::Store image_store(":memory:");image_store.set_setting("reader_engine","classic");rss::Feed feed;feed.url="https://example.test/rss";
         const auto fid=image_store.add_feed(feed);
         rss::Entry story;story.guid="photos";story.title="图文阅读";story.url="https://example.test/post";
         story.html="<img src='/one'><img src='/two'><img src='/one'>";
@@ -241,7 +241,7 @@ int main(){
     }
     {
         // Reader overlays replace the footer, isolate touches, and keep a stable live typography anchor.
-        rss::Store controls(":memory:");rss::Feed feed;feed.url="https://controls.example/rss";feed.title="独立界面样例";
+        rss::Store controls(":memory:");controls.set_setting("reader_engine","classic");rss::Feed feed;feed.url="https://controls.example/rss";feed.title="独立界面样例";
         const auto fid=controls.add_feed(feed);rss::Entry story;story.guid="controls";
         story.title="当工具退后一步，文字就有了自己的速度";
         for(int i=0;i<5;++i)story.title+="：长标题在正文顶栏限行，在信息面板完整阅读";
@@ -287,7 +287,7 @@ int main(){
     }
     std::cout<<"app checks passed\n";
     // Touch-only Chinese input: compose, correct, select, page candidates, and commit a feed name.
-    rss::Store typing_store(":memory:");rss::Feed typing_feed;typing_feed.url="https://example.test/rss";typing_feed.title="旧名";
+    rss::Store typing_store(":memory:");typing_store.set_setting("reader_engine","classic");rss::Feed typing_feed;typing_feed.url="https://example.test/rss";typing_feed.title="旧名";
     const auto typing_id=typing_store.add_feed(typing_feed);rss::App typing(typing_store,canvas);
     auto touch=[&](int x,int y){typing.draw();typing.tap(x,y);};
     auto keys=[&](const std::string& value){
@@ -317,7 +317,7 @@ int main(){
     commit();assert(typing_store.feeds()[0].title=="@");
     edit_title();typing.text_input(std::string(3000,'a'));typing.submit();assert(typing_store.feeds()[0].title=="@");typing.back();typing.submit();assert(typing_store.feeds()[0].title=="@");
     {
-        rss::Store names(":memory:");rss::App optional(names,canvas);
+        rss::Store names(":memory:");names.set_setting("reader_engine","classic");rss::App optional(names,canvas);
         auto tap=[&](int x,int y){optional.draw();optional.tap(x,y);};
         auto shot=[&](const char* name){optional.draw();if(const auto folder=std::getenv("RSS_TEST_SNAPSHOTS"))canvas.write_pgm((std::filesystem::path(folder)/name).string());};
         tap(150,50);tap(140,154);tap(950,50); // Add a feed without entering a name.

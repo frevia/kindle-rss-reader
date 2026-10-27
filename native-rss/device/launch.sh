@@ -37,6 +37,7 @@ fi
 exec >"$STATE/session.log" 2>&1 || fail '无法创建运行日志'
 printf 'session_start '; date -u
 snapshot=
+CRE_CACHE=
 stopped=
 pillow=0
 child=
@@ -78,6 +79,7 @@ cleanup() {
     trap - 0 HUP INT TERM
     stop_child
     restore_failed=0
+    if [ -n "$CRE_CACHE" ]; then rm -rf "$CRE_CACHE" || restore_failed=1; fi
     # Never overwrite a screensaver after powerd has taken the screen.
     if [ -n "$snapshot" ] && [ -n "$stopped" ] && same "$wm_pid" awesome "$wm_born" && awake; then
         dd if="$snapshot" of="$FB" bs=1088 count=1448 conv=notrunc 2>/dev/null || restore_failed=1
@@ -140,6 +142,8 @@ snapshot=$(mktemp "$STATE/frame.XXXXXX") || fail '无法保存屏幕'
 dd if="$FB" of="$snapshot" bs=1088 count=1448 2>/dev/null || fail '保存屏幕失败'
 [ "$(wc -c <"$snapshot")" -eq 1575424 ] || fail '屏幕快照不完整'
 awake || fail '设备已休眠'
+CRE_CACHE=$(mktemp -d /tmp/rss-cre-session.XXXXXX) || fail '无法创建新版排版缓存'
+export RSS_CRE_CACHE=$CRE_CACHE
 done_file=$snapshot.done
 live_fifo=$snapshot.live
 mkfifo -m 600 "$live_fifo" || fail '无法创建会话生命周期通道'

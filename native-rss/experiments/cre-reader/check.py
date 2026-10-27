@@ -16,7 +16,7 @@ def main():
     fixtures = OUT / "fixtures"
     subprocess.run([sys.executable, str(HERE / "make_fixtures.py"), str(fixtures)], check=True)
     font = ROOT / "vendor/runtime/reader.ttf"
-    revision = json.loads((HERE / "sources.json").read_text())["cre"]["revision"]
+    revision = json.loads((ROOT / "tools/reader-sources.json").read_text())["cre"]["revision"]
     css = ROOT / "vendor/reader-sources" / ("cre-" + revision) / "cr3gui/data/epub.css"
     results = []
     for case in ("chinese", "mixed", "code", "images"):

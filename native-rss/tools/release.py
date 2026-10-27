@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Stage the two development ZIPs as versioned release attachments."""
 import re
+import json
 import shutil
 import sys
 from pathlib import Path
+import zipfile
 
 import package
 
@@ -20,6 +22,10 @@ def stage_release(output: Path, tag: str) -> Path:
     for source, _ in sources:
         if not source.is_file():
             raise FileNotFoundError(f"Missing release input: {source}")
+    with zipfile.ZipFile(sources[0][0]) as archive:
+        manifest = json.loads(archive.read("native-rss/MANIFEST.json"))
+    if manifest.get("public_release_ready") is not True:
+        raise ValueError("当前为本地 CREngine 集成包，GPLv2/Apache-2.0 许可兼容尚未确认，不能进入公开 Release")
 
     destination = output / f"release-{tag}"
     destination.mkdir(parents=True, exist_ok=True)

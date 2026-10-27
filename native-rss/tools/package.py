@@ -7,6 +7,7 @@ import zipfile
 import urllib.request
 
 from build_arm import ROOT, BUILD, UNPACKED, VENDOR, build_inputs, sha256, verify_elf
+import build_reader
 
 
 def verify_build(binary, manifest, inputs):
@@ -35,9 +36,11 @@ def source_files(root):
     patterns = (
         "src/*.cpp", "src/*.hpp", "tests/*.cpp", "tests/*.py",
         *("tests/fixtures/*." + suffix for suffix in ("avif", "jpg", "png", "webp", "pgm")),
-        "tools/*.py", "tools/*.cpp", "tools/*.json", "device/*.sh", "device/*.json", "device/book-cover.png",
+        "tools/*.py", "tools/*.cpp", "tools/*.json", "tools/*.cmake", "device/*.sh", "device/*.json", "device/book-cover.png",
         "device/INSTALL.txt", "device/kual/*.xml", "device/kual/*.json", "docs/*.md",
         "third_party/*/LICENSE", "third_party/*/SOURCE.json", "third_party/*/*.h", "third_party/*/*.yaml",
+        "experiments/cre-reader/*.cpp", "experiments/cre-reader/*.py", "experiments/cre-reader/*.cmake",
+        "experiments/cre-reader/CMakeLists.txt", "experiments/cre-reader/README.txt",
         "README.md", "CMakeLists.txt", ".gitignore",
     )
     for pattern in patterns:
@@ -57,6 +60,9 @@ def main():
     binary = BUILD / "kindle-rss"
     manifest = json.loads((BUILD / "build-info.json").read_text())
     verify_build(binary, manifest, build_inputs())
+    reader = manifest.get("reader", {})
+    if reader.get("name") != "crengine" or reader.get("revision") != build_reader.sources()["cre"]["revision"]:
+        raise RuntimeError("当前安装包要求正式构建的固定版本 CREngine，请重新运行 tools/build_arm.py")
     runtime = json.loads((ROOT / "tools/runtime-sources.json").read_text())
     for name, spec in runtime.items():
         path = VENDOR / "runtime" / name
@@ -121,20 +127,33 @@ def main():
         "libcxxabi.txt": VENDOR / "zig-aarch64-macos-0.15.2/lib/libcxxabi/LICENSE.TXT",
         "libunwind.txt": VENDOR / "zig-aarch64-macos-0.15.2/lib/libunwind/LICENSE.TXT",
         "Zig.txt": VENDOR / "zig-aarch64-macos-0.15.2/LICENSE",
+        "CREngine-GPL-2.0.txt": ROOT / "third_party/crengine/LICENSE",
+        "CREngine-README.txt": build_reader.source_path("cre") / "README.TXT",
+        "CREngine-qimagescale.txt": build_reader.source_path("cre") / "crengine/qimagescale/QIMAGETRANSFORM_LICENSE.txt",
+        "HarfBuzz.txt": build_reader.source_path("harfbuzz") / "COPYING",
+        "libpng.txt": build_reader.source_path("png") / "LICENSE",
+        "libunibreak.txt": build_reader.source_path("unibreak") / "LICENCE",
+        "xxHash.txt": build_reader.source_path("xxhash") / "LICENSE",
     }
     for name, source in licenses.items():
         add("native-rss/licenses/" + name, source)
     add("native-rss/licenses/pinyin-Apache-2.0.txt", ROOT / "third_party/pinyin/LICENSE")
     add("native-rss/licenses/pinyin-SOURCE.json", ROOT / "third_party/pinyin/SOURCE.json")
+    add("native-rss/licenses/reader-sources.json", ROOT / "tools/reader-sources.json")
+    add("native-rss/licenses/CREngine-SOURCE.json", ROOT / "third_party/crengine/SOURCE.json")
     files["native-rss/licenses/SQLite.txt"] = ("SQLite is in the public domain.\nhttps://www.sqlite.org/copyright.html\n".encode(), False)
     files["native-rss/licenses/NOTICE.txt"] = (
         b"Portions of this software are copyright (c) The FreeType Project (www.freetype.org). All rights reserved.\n"
         b"FreeType is used under the FreeType License. stb_image is used under its MIT license.\n"
         b"The bundled Noto Sans SC font is unmodified and licensed under SIL OFL 1.1.\n"
         b"The unmodified Mozilla CA bundle is obtained from curl.se and is covered by MPL 2.0.\n"
-        b"libavif, libaom, and libyuv are distributed under their included BSD licenses and patent notices.\n", False)
+        b"libavif, libaom, and libyuv are distributed under their included BSD licenses and patent notices.\n"
+        b"This local development executable includes CREngine (GPLv2), HarfBuzz, libpng, libunibreak and xxHash.\n"
+        b"The MIT license applies to original RSS sources, not to the combined executable.\n"
+        b"Public redistribution is disabled pending review of the GPLv2/Apache-2.0 combination.\n", False)
     checksums = {name: hashlib.sha256(data).hexdigest() for name, (data, _) in files.items()}
-    files["native-rss/MANIFEST.json"] = (json.dumps({"development_only": True, "device_tested": False, "files": checksums}, indent=2).encode(), False)
+    files["native-rss/MANIFEST.json"] = (json.dumps({"development_only": True, "device_tested": False,
+        "reader": reader, "public_release_ready": False, "files": checksums}, indent=2).encode(), False)
     output = ROOT / "output"
     output.mkdir(exist_ok=True)
     target = output / "kindle-rss-kpw3-dev.zip"

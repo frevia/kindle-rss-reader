@@ -1,0 +1,8 @@
+{
+  "repo": "koreader/crengine",
+  "revision": "f335f7a97e240f505bb8a0dfb721fcb7912a7824",
+  "sha256": "ed485ef96d971667c3bf688f8d73a12c1a0684c06629dd1dad1b93ea7de78900",
+  "license": "GPL-2.0 (upstream README.TXT)",
+  "license_path": "android/res/raw/license.txt",
+  "license_sha256": "ad29d3535b6181b3c73c099f2b9c32e4c3fe0442482c6f72668cd94b7941789d"
+}

@@ -26,6 +26,20 @@ int main(){
     const auto ordered=store.entries(rss::View::All,feed_id);
     assert(ordered.size()==2&&ordered[0].title==first.title&&ordered[1].title==second.title);
     const auto first_id=ordered[0].id,second_id=ordered[1].id;
+    {
+        rss::App defaults(store,canvas);defaults.show_view(rss::View::All,feed_id);
+        defaults.open(first_id);defaults.draw();
+        assert(defaults.using_cre());
+        assert(store.setting("reader_engine").empty());
+    }
+    store.set_position(first_id,1000);
+    {
+        rss::App migrated(store,canvas);migrated.open(first_id);migrated.draw();
+        assert(!migrated.using_cre());
+        assert(store.entry(first_id)->position==1000);
+    }
+    store.set_position(first_id,0);
+    store.set_setting("reader_engine","classic");
     rss::App app(store,canvas);app.show_view(rss::View::All,feed_id);
     auto tap=[&](int x,int y){app.draw();app.tap(x,y);};
     tap(100,400);assert(app.reading()&&app.current_id()==first_id&&!app.using_cre());

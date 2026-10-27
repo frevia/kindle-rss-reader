@@ -21,7 +21,7 @@ rtk proxy python3 native-rss/experiments/cre-reader/build.py arm
 ARM 构建复用本仓库已有的 Zig 和 build-arm/prefix 静态依赖，要求它们已准备好。
 新依赖安装到 output/cre-reader-20261027/arm-prefix，不修改正式构建目录。
 host 使用已安装的 FreeType、HarfBuzz、libpng、libxml2；xxHash 和 libunibreak 单独构建。
-sources.json 固定上游版本与下载归档 SHA-256，下载、解包与 ELF 验证复用 tools/build_arm.py。
+tools/reader-sources.json 固定上游版本与下载归档 SHA-256，下载、解包与 ELF 验证复用 tools/build_arm.py。
 构建输出均位于已被 .gitignore 排除的 output/、vendor/，不加入发布包。
 
 程序
@@ -84,7 +84,7 @@ libpng: https://github.com/pnggroup/libpng
 xxHash: https://github.com/Cyan4973/xxHash
 
 应用内实验接入（2026-10-27）
-默认 CMake 构建仍使用原排版。显式传入 RSS_CRE_SOURCE 才启用 CREngine；
+本节记录最初的可选接入；正式构建现已默认启用CREngine，原排版使用 RSS_CRE=OFF 验证；
 build.py 使用已校验的固定源码和独立依赖前缀：
 rtk proxy python3 native-rss/experiments/cre-reader/build.py host app
 rtk proxy python3 native-rss/experiments/cre-reader/build.py arm app
@@ -130,3 +130,5 @@ reader_engine 保存选择；reader_cre:<文章ID> 保存“正文修订号:DOM�
 新版真机截图显示第2/9页图片；正文、已读、收藏与原排版进度对比备份无变化，完整性ok。
 修复后二进制SHA-256为f4da15dc04160a70ad8757ca28ed1b33b58c912fd4293675345be99dcf311cb0。
 仅更新独立测试入口的二进制，正式入口未覆盖；一次性修复工具已从设备移除。
+
+正式接入已移至 tools/build_reader.py、tools/reader.cmake 和 tools/reader-sources.json；此目录仅保留对照样机。
