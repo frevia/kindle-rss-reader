@@ -1,63 +1,48 @@
 RSS Reader 安装说明
 
-完整教程：本包 native-rss/docs/INSTALL.md
-在线教程：https://github.com/frevia/kindle-rss-reader/blob/main/native-rss/docs/INSTALL.md
-最新版下载：https://github.com/frevia/kindle-rss-reader/releases/latest
-
-打开方式与所需组件
-- 从 KUAL 菜单打开：需要可用的 KUAL，不需要 Scriptlets。
-- 从书库图标打开：需要 Scriptlets / SH_Integration，不需要同时安装 KUAL。
-两种入口都需要用于退出后恢复屏幕的 FBInk，安装包目前没有附带它。
-连接电脑，检查 Kindle 磁盘的 libkh → bin 中是否有 fbink 文件。
-如果没有：已有 Run Hotfix 时先拔线并打开它运行，再连接电脑检查同一位置。
-没有 Run Hotfix，或运行后仍缺少文件时，按下面的补丁步骤准备。
-文件已存在、但应用仍打不开时，再按文末步骤导出检查文件。
+适用于已越狱的 Kindle Paperwhite 3（KPW3，2015 款），其他机型暂未验证。
+请先完成所用越狱教程中的后续环境设置，并在 Kindle 设置中关闭设备密码锁。
 
 安装
-1. 准备已越狱的 Kindle Paperwhite 3（KPW3，2015 款），先在设置中关闭设备密码锁。
-2. 下载最新版中名称以 -KPW3.zip 结尾的安装包，在电脑上解压。
-3. 连接 Kindle，把 native-rss、documents、extensions 三个文件夹合并复制到 Kindle 磁盘。
-   放在打开磁盘后直接看到 documents 的这一层。不要先删除原来的书籍或文件夹。
-4. 安全弹出并拔线，选择自己准备好的入口：
-   KUAL → Kindle RSS → RSS Reader，或书库里的 RSS Reader 图标。
+1. 在电脑解压名称以 -KPW3.zip 结尾的安装包。
+2. 用能传文件的 USB 数据线连接 Kindle。
+3. 把 native-rss、documents、extensions 三个文件夹合并复制到 Kindle 磁盘，
+   放在打开磁盘后能直接看到 documents 的这一层，不要多套一层解压文件夹。
+   不要先删除原有文件夹。选择“合并”，不要替换整个文件夹；
+   没有合并选项时，打开同名文件夹，分别复制里面的内容，保留原有书籍和插件。
+4. 在电脑安全弹出 Kindle，再拔掉数据线，从已有的入口打开：
+   书库里的 RSS Reader，或 KUAL → Kindle RSS → RSS Reader。选择一种方式即可。
 
-准备缺少的组件（FBInk 或书库启动）
-缺少 FBInk，或希望从书库打开但还没有 Scriptlets 时，可按下面步骤通过 Hotfix 补丁准备。
-已有所需组件时可跳过；不需要自己编写或修改启动脚本。
-1. 退出正在运行的越狱应用，回到书库，开启飞行模式。
-2. 在电脑下载 Update_hotfix_universal.bin，不改名、不解压：
-   https://github.com/KindleModding/Hotfix/releases/latest/download/Update_hotfix_universal.bin
-3. 连接 Kindle，把该文件与 documents 文件夹并排放置，不要放进 documents 或 mrpackages。
-   同一层其他 .bin 安装文件及 update.bin.tmp.partial 如有，请先移到电脑备份。
-4. 安全弹出并拔线，打开 Kindle 设置 → 全部设置 → 右上角三个点 → 更新 Kindle，确认安装。
-5. 等安装完成回到书库，点开 Run Hotfix，等处理结束。这一步不能省略。
-6. 再连接电脑，确认 libkh → bin → fbink 文件已出现，再复制 RSS Reader 文件。
-   拔线后从 KUAL 打开，或在书库的“全部”中找到 RSS Reader。
-   已经复制过的，可以再复制一次安装包中 documents 的内容。仍不显示时先重启 Kindle。
+本应用通过复制文件安装，不用点“更新 Kindle”。
+入口没出现或点开后马上退出时，再看本包 native-rss/docs/TROUBLESHOOTING.md。
+不同越狱环境附带的工具可能不同，排查页保留了检查和补装步骤。
 
-这里“更新 Kindle”用于安装 Hotfix 的 .bin 补丁，RSS Reader 的 ZIP 仍然只需要复制文件。
-不要为了安装本应用下载系统固件，也不要恢复出厂设置。
-如果“更新 Kindle”不可选，完整教程中有位置检查和已有更新阻止工具的处理步骤。
-已经能正常打开阅读器时，无需重装补丁。
+首次阅读
+连接 Wi-Fi，点“添加订阅”，填入网站提供的 RSS / Atom 订阅地址并保存。
+返回文章列表，点右上角同步图标，等下载完成后打开一篇文章。
+网站首页地址不一定是订阅地址。下载完成后可以离线阅读文字和图片。
+日常操作、批量导入和备份见本包 native-rss/docs/USAGE.md。
 
-首次使用
-连接 Wi-Fi，点“添加订阅”，填入网站提供的订阅地址并保存，再点右上角同步图标。
-下载完成后可以离线阅读。日常操作、批量导入和备份见 native-rss/docs/USAGE.md。
-
-升级
-1. 阅读器左上角 RSS Reader → 退出，确认回到 Kindle 系统书库。
-2. 连接电脑，备份整个 native-rss 文件夹，再用最新版合并覆盖程序文件。
-3. 保留 native-rss/data，订阅、收藏和阅读记录都在里面。升级应用不需要重装 Hotfix。
-4. 安全弹出并拔线，再次打开检查原有数据。
+退出、备份与升级
+1. 在文章列表点 RSS Reader → 退出，确认回到 Kindle 系统书库，再连接电脑。
+2. 把整个 native-rss 文件夹复制到电脑备份，再用最新版合并覆盖程序文件。
+3. 保留 native-rss/data，订阅、收藏和阅读记录都在里面，删除后会丢失本地数据。
+   安装包不带这个文件夹；不要用整个文件夹替换的方式覆盖它。
+4. 安全弹出并拔线，再次打开检查原有数据。能正常使用时，无需重装启动工具。
 
 卸载
 退出并备份后，删除 native-rss、extensions 里的 native-rss，
 以及 documents 里的 RSS阅读器.sh 和 RSS设备诊断.sh。
-不要删除整个 documents 或 extensions，也不要删除共享的 Hotfix、Scriptlets 或 KUAL。
+只删除本应用的文件，不要删除整个 documents 或 extensions，也不要删除其他应用的共享工具。
 
-日志反馈
-书库打开 RSS设备诊断入口，或 KUAL → Kindle RSS → 导出 RSS 诊断报告。
-连接电脑后，复制 documents 里的 RSS-device-report.txt。
+遇到问题
+完整安装教程：本包 native-rss/docs/INSTALL.md
+启动问题排查：本包 native-rss/docs/TROUBLESHOOTING.md
+在线教程：https://github.com/frevia/kindle-rss-reader/blob/main/native-rss/docs/INSTALL.md
+最新版下载：https://github.com/frevia/kindle-rss-reader/releases/latest
+
+需要反馈时，从书库打开 RSS设备诊断，或 KUAL → Kindle RSS → 导出 RSS 诊断报告。
+连接电脑后，在 documents 里找到 RSS-device-report.txt。
 附上设备型号、安装包文件名、故障时间和操作步骤；公开前遮住私人地址。
 不要上传整个 data 文件夹或完整订阅列表。
 

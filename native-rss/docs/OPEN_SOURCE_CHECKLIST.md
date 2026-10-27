@@ -6,7 +6,7 @@
 
 - [x] 提供 [MIT 许可证](../../LICENSE)，以及[第三方组件说明](../../THIRD_PARTY_NOTICES.md)。字体、词库等组件保留自己的许可。
 - [x] 安装包和源码包都带上许可文件，打包时排除私人阅读数据、订阅列表、日志和原始设备报告。
-- [x] 按 RSS 实际调用关系说明 KUAL 与书库入口、FBInk 运行组件，并提供按需准备 Scriptlets / Hotfix、应用安装、使用、备份、升级和卸载步骤，安装入口始终指向[最新版](https://github.com/frevia/kindle-rss-reader/releases/latest)。
+- [x] 提供应用安装、首次阅读、备份、升级和卸载步骤；组件检查与补装说明放在按故障现象查阅的[启动问题排查](TROUBLESHOOTING.md)，安装入口始终指向[最新版](https://github.com/frevia/kindle-rss-reader/releases/latest)。
 - [x] 提供[问题反馈方式](../../CONTRIBUTING.md)和[私下安全反馈邮箱](../../SECURITY.md)。
 - [x] 将现有分支和标签历史中的作者、提交者邮箱，以及后续提交邮箱统一为维护者指定的地址。
 - [x] 提交并推送许可证与发布配置，由 GitHub 自动编译和发布安装包。

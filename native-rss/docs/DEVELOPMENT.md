@@ -119,7 +119,7 @@ rtk proxy native-rss/build/kindle-rss --db native-rss/output/demo.sqlite --artic
 
 ## 维护设备启动环境
 
-这一节供定位启动失败时核对，不需要让安装用户逐项执行或记住命令。先按真实调用链区分入口问题与运行环境问题：KUAL 菜单和 `reader-scriptlet.sh` 最终都调用 `launch.sh`，后者只在选择书库入口时需要 SH_Integration。`launch.sh` 不调用或检查 Hotfix、Scriptlets、微信读书或商店；它单独检查并调用 FBInk。Universal Hotfix 可以提供 Scriptlets 和 FBInk，但不是唯一来源，不应无条件要求安装或重装。用户侧按[安装教程](INSTALL.md)选择入口，启动失败时先导出检查文件。
+这一节供定位启动失败时核对，不需要让安装用户逐项执行或记住命令。先按真实调用链区分入口问题与运行环境问题：KUAL 菜单和 `reader-scriptlet.sh` 最终都调用 `launch.sh`，后者只在选择书库入口时需要 SH_Integration。`launch.sh` 不调用或检查 Hotfix、Scriptlets、微信读书或商店；它单独检查并调用 FBInk。Universal Hotfix 可以提供 Scriptlets 和 FBInk，但不是唯一来源，不应无条件要求安装或重装。用户侧按[安装教程](INSTALL.md)复制并打开应用，只有入口缺失或启动失败时才进入[启动问题排查](TROUBLESHOOTING.md)，按对应现象检查环境或导出检查文件。
 
 启动器的实际条件以 `device/launch.sh` 为准：需要 `/mnt/us/libkh/bin/fbink` 可执行，以及 `timeout`、`flock`、`stat`、`pidof`、`awk`、`dd`、`mktemp`、`mkfifo` 和系统 LIPC 工具；设备密码锁开启时会拒绝启动。当前只验证过 KPW3，屏幕和触摸布局校验不应绕过。
 
