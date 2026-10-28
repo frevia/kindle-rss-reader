@@ -35,6 +35,12 @@ int main() {
     reopened.open(story, "https://fixture.invalid/article", "来源与日期", 944, 1196, 34, 24);
     assert(reopened.restore(anchor) == 2);
     assert(reopened.restore("invalid") == 0);
+    // Captured with the previous 150% title CSS and 944×1196 reading area.
+    const std::string legacy_anchor="9783331959579986058:/html[1]/body[1]/p[16]/text()[1].0";
+    reopened.layout(944,1256,34,24);
+    assert(reopened.restore(legacy_anchor)>0);
+    reopened.layout(944,1196,34,24);
+    assert(reopened.restore(legacy_anchor)>0);
     auto changed = story;
     changed.html = "<p>新的正文。</p>";
     changed.text = rss::html_to_text(changed.html);

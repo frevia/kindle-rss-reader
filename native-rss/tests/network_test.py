@@ -17,6 +17,12 @@ RSS = b'''<?xml version="1.0"?><rss version="2.0"><channel><title>Local News</ti
 <description><![CDATA[<p>cached body</p>]]></description><pubDate>Tue, 02 Jan 2024 12:00:00 GMT</pubDate></item>
 </channel></rss>'''
 RSS_UPDATED = RSS.replace(b"First story", b"Updated story").replace(b"cached body", b"updated body")
+ARTICLE = b'''<!doctype html><html><head><meta charset="utf-8"><title>Article</title></head>
+<body><nav>Unwanted navigation</nav><article><h1>Full article</h1>
+<p>This is the complete article with enough original prose to distinguish the story from its surrounding navigation.</p>
+<blockquote>A quotation worth keeping.</blockquote><pre>code &lt; sample</pre>
+<p>The second paragraph explains the subject in more detail and should remain available after the network is disconnected.</p>
+<img src="../photo.png" alt="offline image"></article><footer>Unwanted footer</footer></body></html>'''
 
 
 class FeedHandler(http.server.BaseHTTPRequestHandler):
@@ -196,6 +202,118 @@ class NativeRSSNetworkTests(unittest.TestCase):
         requests={path:len(FeedHandler.seen_headers[path]) for path in ["/photo.png","/large.webp","/large.avif"]}
         self.cli("sync")
         self.assertEqual({path:len(FeedHandler.seen_headers[path]) for path in requests},requests)
+
+    def article_feed(self, path, article_path="/article-redirect", auto=False):
+        body = RSS.replace(b"/story", article_path.encode())
+        with FeedHandler.lock:
+            FeedHandler.responses[path] = (200, {"ETag": '"v1"'}, body)
+            FeedHandler.responses["/article-redirect"] = (302, {"Location": "/articles/full"}, b"")
+            FeedHandler.responses["/articles/full"] = (200, {"Content-Type": "text/html; charset=UTF-8"}, ARTICLE)
+            FeedHandler.responses["/photo.png"] = (200, {"Content-Type": "image/png"}, (pathlib.Path(__file__).parent / "fixtures/colors.png").read_bytes())
+        url = self.add(path)
+        if auto:
+            with sqlite3.connect(self.db) as conn:
+                feed_id = conn.execute("SELECT id FROM feeds WHERE url=?", (url,)).fetchone()[0]
+                conn.execute("INSERT INTO settings VALUES(?, '1')", (f"feed_fulltext:{feed_id}",))
+        return url
+
+    def test_manual_fulltext_preserves_original_state_and_images_across_rss_updates(self):
+        url = self.article_feed("/manual-fulltext")
+        self.cli("sync")
+        entry_id = self.rows("SELECT id FROM entries")[0][0]
+        with sqlite3.connect(self.db) as conn:
+            conn.execute("UPDATE entries SET read=1,starred=1,position=37,in_progress=1")
+        original = self.rows("SELECT html,text,read,starred,position,in_progress FROM entries")
+        self.cli("fulltext", str(entry_id))
+        self.assertEqual(self.rows("SELECT html,text,read,starred,position,in_progress FROM entries"), original)
+        state, text, effective = self.rows("SELECT state,text,url FROM article_fulltext")[0]
+        self.assertEqual(state, "ready")
+        self.assertIn("complete article", text)
+        self.assertNotIn("Unwanted", text)
+        self.assertEqual(effective, self.base + "/articles/full")
+        self.assertEqual(self.rows("SELECT width,height,length(pixels) FROM article_images"), [(2, 2, 4)])
+        requests = len(FeedHandler.seen_headers["/articles/full"])
+        self.cli("sync")
+        self.cli("fulltext", str(entry_id))
+        self.assertEqual(len(FeedHandler.seen_headers["/articles/full"]), requests)
+        self.assertEqual(self.rows("SELECT html,text,read,starred,position,in_progress FROM entries"), original)
+        self.assertEqual(self.rows("SELECT length(pixels) FROM article_images"), [(4,)])
+        self.assertEqual(self.rows("PRAGMA foreign_key_check"), [])
+
+    def test_auto_fulltext_only_new_articles_and_pending_work_survives_304(self):
+        url = self.article_feed("/existing-fulltext")
+        self.cli("sync")
+        feed_id = self.rows("SELECT id FROM feeds WHERE url=?", (url,))[0][0]
+        with sqlite3.connect(self.db) as conn:
+            conn.execute("INSERT INTO settings VALUES(?, '1')", (f"feed_fulltext:{feed_id}",))
+        self.cli("sync")
+        self.assertEqual(self.rows("SELECT COUNT(*) FROM article_fulltext"), [(0,)])
+
+        new_url = self.article_feed("/conditional", auto=True)
+        with FeedHandler.lock:
+            FeedHandler.responses["/articles/full"] = (500, {}, b"temporary failure")
+        result = self.cli("sync", expected=(2,))
+        self.assertIn("网页正文失败", result.stdout)
+        self.assertEqual(self.rows("SELECT state FROM article_fulltext"), [("failed",)])
+        self.assertEqual(self.rows("SELECT error FROM feeds WHERE url=?", (new_url,)), [("",)])
+        with sqlite3.connect(self.db) as conn:
+            conn.execute("UPDATE article_fulltext SET state='pending'")
+        with FeedHandler.lock:
+            FeedHandler.responses["/articles/full"] = (200, {"Content-Type": "text/html"}, ARTICLE)
+        self.cli("sync")
+        self.assertEqual(self.rows("SELECT state FROM article_fulltext"), [("ready",)])
+        self.assertEqual(FeedHandler.seen_headers["/conditional"][-1].get("If-None-Match"), '"v1"')
+
+    def test_fulltext_failures_keep_rss_and_manual_retry_recovers(self):
+        cases = [
+            ("mime", {"Content-Type": "application/pdf"}, b"%PDF document"),
+            ("encoding", {"Content-Type": "text/html; charset=GBK"}, ARTICLE),
+            ("login", {"Content-Type": "text/html"}, b"<html><body><h1>Sign in</h1><form><input type='password'></form></body></html>"),
+            ("oversized", {"Content-Type": "text/html"}, b"x" * (8 * 1024 * 1024 + 1)),
+        ]
+        for name, headers, body in cases:
+            with self.subTest(name=name):
+                self.article_feed("/failure-" + name, "/failure-page-" + name)
+                with FeedHandler.lock:
+                    FeedHandler.responses["/failure-page-" + name] = (200, headers, body)
+                self.cli("sync")
+                entry_id = self.rows("SELECT id FROM entries WHERE url=?", (self.base + "/failure-page-" + name,))[0][0]
+                self.cli("fulltext", str(entry_id), expected=(2,))
+                self.assertEqual(self.rows("SELECT text FROM entries WHERE id=?", (entry_id,)), [("cached body",)])
+                self.assertEqual(self.rows("SELECT state FROM article_fulltext WHERE entry_id=?", (entry_id,)), [("failed",)])
+                with FeedHandler.lock:
+                    FeedHandler.responses["/failure-page-" + name] = (200, {"Content-Type": "text/html"}, ARTICLE)
+                self.cli("sync", "failed")
+                self.assertEqual(self.rows("SELECT state FROM article_fulltext WHERE entry_id=?", (entry_id,)), [("ready",)])
+
+    def test_auto_fulltext_batch_limit_leaves_durable_work_for_next_sync(self):
+        url = self.article_feed("/batch-fulltext", auto=True)
+        items = b"".join(
+            b"<item><guid>batch-" + str(i).encode() + b"</guid><title>Batch story</title><link>/articles/full</link><description>RSS summary</description></item>"
+            for i in range(12)
+        )
+        with FeedHandler.lock:
+            FeedHandler.responses["/batch-fulltext"] = (200, {}, b"<rss><channel><title>Batch</title>" + items + b"</channel></rss>")
+        first = self.cli("sync")
+        self.assertIn("待下载", first.stdout)
+        self.assertEqual(dict(self.rows("SELECT state,COUNT(*) FROM article_fulltext GROUP BY state")), {"pending": 2, "ready": 10})
+        self.cli("sync")
+        self.assertEqual(self.rows("SELECT state,COUNT(*) FROM article_fulltext GROUP BY state"), [("ready", 12)])
+
+    def test_derived_requests_block_other_private_origins_and_unsafe_redirects(self):
+        self.article_feed("/private-fulltext", "/private-redirect")
+        with FeedHandler.lock:
+            FeedHandler.responses["/private-redirect"] = (302, {"Location": self.base.replace("127.0.0.1", "localhost") + "/never-fetch"}, b"")
+            FeedHandler.responses["/never-fetch"] = (200, {"Content-Type": "text/html"}, ARTICLE)
+        self.cli("sync")
+        entry_id = self.rows("SELECT id FROM entries")[0][0]
+        self.cli("fulltext", str(entry_id), expected=(2,))
+        self.assertNotIn("/never-fetch", FeedHandler.seen_headers)
+        self.assertIn("内网", self.rows("SELECT error FROM article_fulltext")[0][0])
+        with FeedHandler.lock:
+            FeedHandler.responses["/private-redirect"] = (302, {"Location": "file:///etc/passwd"}, b"")
+        self.cli("fulltext", str(entry_id), expected=(2,))
+        self.assertEqual(self.rows("SELECT text FROM entries"), [("cached body",)])
 
 
 if __name__ == "__main__":

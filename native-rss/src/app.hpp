@@ -1,6 +1,7 @@
 #pragma once
 #include "render.hpp"
 #include "store.hpp"
+#include "status.hpp"
 #include "cre_reader.hpp"
 #include <functional>
 #include <map>
@@ -10,11 +11,12 @@
 namespace rss {
 class App {
 public:
-    enum class ReaderPanel { None, Type, Images, Info };
+    enum class ReaderPanel { None, Type, Images, Info, Content };
     enum class Screen { List, Subscriptions, GroupPicker, Groups, GroupEdit, Opml, Sync, Cache };
     enum class SyncState { Idle, Running, Complete, Cancelled, Failed };
     App(Store& store, Canvas& canvas);
     void draw();
+    void set_reader_status(const ReaderStatus& status);
     void tap(int x, int y);
     void next();
     void previous();
@@ -42,6 +44,7 @@ public:
     std::size_t reader_page() const { return page_; }
     std::int64_t current_id() const { return current_ ? current_->id : 0; }
     bool using_cre() const { return static_cast<bool>(cre_); }
+    bool using_fulltext() const { return current_ && current_->web_content; }
     bool reader_tools_open() const { return reader_tools_; }
     ReaderPanel reader_panel() const { return reader_panel_; }
     std::size_t reader_image_page() const { return image_page_; }
@@ -66,6 +69,7 @@ private:
     std::size_t list_page_ = 0, page_ = 0, nav_page_ = 0;
     int last_tap_x_ = 0;
     int font_size_ = 32, line_gap_ = 20, margin_ = 32;
+    ReaderStatus reader_status_;
     bool reader_tools_ = false, image_zoom_ = false, shift_ = false, symbols_ = false;
     ReaderPanel reader_panel_ = ReaderPanel::None;
     std::size_t info_scroll_ = 0;
@@ -86,6 +90,7 @@ private:
     std::optional<InputContext> suspended_input_;
     std::string picker_query_, editing_group_, group_name_draft_, group_parent_draft_;
     bool new_group_ = false;
+    bool auto_fulltext_ = false;
     std::size_t image_page_=0;
     std::optional<Feed> managing_;
     std::string confirmation_;
@@ -101,9 +106,14 @@ private:
     int line_height() const { return font_size_ + line_gap_; }
     void paginate();
     void save_position();
+    std::string reader_key(const std::string& prefix) const;
+    void set_reader_content(bool web);
     void set_reader_engine(bool use_cre);
     enum class Align { Center, Left, Right };
-    void button(Rect rect,const std::string& label,std::function<void()> action,bool filled=false,int size=26,Icon icon=Icon::None,bool enabled=true,Align align=Align::Center);
+    void button(Rect rect,const std::string& label,std::function<void()> action,bool filled=false,int size=28,Icon icon=Icon::None,bool enabled=true,Align align=Align::Center);
+    void back_button(int top=28,int height=64);
+    void page_header(const std::string& title);
+    void device_status(int top,bool clock);
     void list_screen();
     void reader_screen();
     void nav_screen();
@@ -129,6 +139,7 @@ private:
     void reader_panel_screen();
     bool draw_image(const ArticleImage& image, Rect area, bool enlarge=false, int clip_bottom=-1);
     void close_reader_tools();
+    int reader_panel_height() const;
     int article_heading_height();
     void management_screen();
     void confirmation_screen();

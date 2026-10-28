@@ -121,6 +121,9 @@ void Canvas::icon(Icon kind,Rect area,std::uint8_t color){
     case Icon::Exit:line(10,4,4,4);line(4,4,4,20);line(4,20,10,20);line(10,12,21,12);line(16,7,21,12);line(21,12,16,17);break;
     case Icon::Check:line(4,12,9,17);line(9,17,20,6);break;
     case Icon::Info:arc(12,12,9,0,2*pi);arc(12,7,0.5,0,2*pi);line(12,11,12,17);break;
+    case Icon::Battery:box(3,7,17,10);line(20,10,21,10);line(21,10,21,14);line(21,14,20,14);break;
+    case Icon::Wifi:arc(12,20,3,pi*1.15,pi*1.85);arc(12,20,7,pi*1.15,pi*1.85);arc(12,20,11,pi*1.15,pi*1.85);arc(12,20,0.7,0,2*pi);break;
+    case Icon::BackCircle:arc(12,12,10,0,2*pi);line(14,8,10,12);line(10,12,14,16);break;
     case Icon::None:break;
     }
     const double scale=std::min(area.w,area.h)/24.0;

@@ -127,7 +127,7 @@ int main(){
         reader.draw();reader.tap(100,55);assert(!reader.reading());
         reader.open(eid);
         for(int i=0;i<100;++i){const auto at=reader.reader_page();reader.next();if(reader.reader_page()==at)break;}
-        reader.draw();reader.tap(900,1380);assert(!reader.reading()); // Last page keeps the next-article action in the same footer.
+        reader.draw();reader.tap(900,1420);assert(!reader.reading()); // Explicit completion stays in the compact footer.
     }
     {
         rss::Store preferences(":memory:");preferences.set_setting("reader_engine","classic");rss::Feed feed;feed.url="https://prefs.example/feed";
@@ -142,7 +142,7 @@ int main(){
         assert(reader.reader_panel()==rss::App::ReaderPanel::Type);
         reader.tap(950,400);assert(reader.reader_page()==menu_page); // Visible text closes the panel without turning the page.
         assert(!reader.reader_tools_open()&&reader.reader_panel()==rss::App::ReaderPanel::None);
-        reader.draw();reader.tap(530,400);reader.draw();reader.tap(178,1380);reader.draw();reader.tap(960,1048);
+        reader.draw();reader.tap(530,400);reader.draw();reader.tap(178,1380);reader.draw();reader.tap(960,856);
         assert(preferences.setting("font_size")=="32"&&preferences.setting("line_gap")=="18"&&preferences.setting("margin")=="60");
         const auto new_position=preferences.entry(eid)->position;
         assert(new_position<=old_position);
@@ -169,12 +169,13 @@ int main(){
     app.next();app.next();assert(app.reader_page()==2);const auto position=store.entry(entry.id)->position;assert(position>0);
     app.back();assert(!app.reading());app.draw();app.tap(100,400);assert(app.reading());assert(app.reader_page()==2);
     app.draw();app.tap(530,400);snapshot("reader-tools.pgm");
-    app.tap(178,1380);snapshot("reader-type.pgm");app.tap(960,1048);app.draw(); // Increase font in the type panel.
+    app.tap(178,1380);snapshot("reader-type.pgm");app.tap(960,856);app.draw(); // Increase font in the type panel.
     assert(app.reading()&&app.reader_panel()==rss::App::ReaderPanel::Type);app.back();app.back();app.back();app.show_view(rss::View::Unread);app.draw();
     assert(store.entries(rss::View::Unread).empty());
     app.show_view(rss::View::All);app.draw();app.tap(100,400);app.draw();
-    const auto page_before_star=app.reader_page();app.tap(950,50);assert(store.entry(entry.id)->starred&&app.reader_page()==page_before_star);
-    app.back();app.show_view(rss::View::Starred);app.draw();
+    const auto page_before_star=app.reader_page();app.tap(950,50);assert(!store.entry(entry.id)->starred);
+    app.draw();app.tap(536,600);app.draw();app.tap(950,50);assert(store.entry(entry.id)->starred&&app.reader_page()==page_before_star);
+    app.back();app.back();app.show_view(rss::View::Starred);app.draw();
     assert(store.entries(rss::View::Starred).size()==1);
     // Navigation and draft edits preserve the confirmed data until save.
     auto tap=[&](int x,int y){app.draw();app.tap(x,y);};
@@ -183,13 +184,13 @@ int main(){
         const auto group=store.feeds().front().group;const int headers=group.empty()?1:1+static_cast<int>(std::count(group.begin(),group.end(),'/'));
         tap(950,250+headers*104+44);
     };
-    manage();snapshot("subscription.pgm");tap(200,944);snapshot("unsubscribe.pgm");tap(200,1380);
+    manage();snapshot("subscription.pgm");tap(200,1124);snapshot("unsubscribe.pgm");tap(200,1380);
     assert(store.feeds().size()==1);app.back();app.back();
-    store.set_read(entry.id,false);tap(100,400);tap(536,600);tap(894,1380);tap(536,1270);
+    store.set_read(entry.id,false);tap(100,400);tap(536,600);tap(894,1380);tap(536,1296);
     assert(!store.entry(entry.id)->read);
-    app.back();app.back();app.back();manage();tap(800,944);tap(900,1380);
+    app.back();app.back();app.back();manage();tap(800,1124);tap(900,1380);
     assert(store.entry(entry.id)->read);app.back();app.back();
-    manage();tap(200,944);tap(900,1380);assert(store.feeds().empty());assert(store.entry(entry.id)->starred);app.back();
+    manage();tap(200,1124);tap(900,1380);assert(store.feeds().empty());assert(store.entry(entry.id)->starred);app.back();
     rss::Feed other;other.url="https://example.com/other";other.title="Other";
     const auto other_id=store.add_feed(other);rss::ParsedFeed old;rss::Entry clean;clean.guid="clean";clean.title="Old";clean.text="text";clean.published=100;
     old.entries={clean};store.save_entries(other_id,old);const auto clean_id=store.entries(rss::View::All,other_id)[0].id;
@@ -209,7 +210,7 @@ int main(){
     photo.width=320;photo.height=180;photo.pixels.resize(320*180);
     for(int y=0;y<180;++y)for(int x=0;x<320;++x)photo.pixels[y*320+x]=x%256;
     store.save_image(app.current_id(),photo);
-    tap(536,600);tap(536,1380);app.draw();assert(app.reader_panel()==rss::App::ReaderPanel::Images);
+    tap(536,600);tap(660,1380);app.draw();assert(app.reader_panel()==rss::App::ReaderPanel::Images);
     assert(canvas.pixels[950*1072+536]==160);snapshot("reader-images.pgm");
     app.next();snapshot("reader-images-uncached.pgm");app.back();assert(app.reading());
     app.back();
@@ -230,12 +231,12 @@ int main(){
         assert(canvas.pixels[400*1072+536]==77);
         reader.next();reader.next();assert(reader.reader_page()==2);reader.back();reader.open(eid);assert(reader.reader_page()==2);
         reader.draw();reader.tap(536,400);reader.draw();assert(reader.reader_tools_open());
-        reader.tap(536,1380);reader.draw();assert(reader.reader_panel()==rss::App::ReaderPanel::Images);
+        reader.tap(660,1380);reader.draw();assert(reader.reader_panel()==rss::App::ReaderPanel::Images);
         if(const auto folder=std::getenv("RSS_TEST_SNAPSHOTS"))canvas.write_pgm((std::filesystem::path(folder)/"reader-images-multipage.pgm").string());
         reader.back();reader.back();assert(reader.reader_page()==2);
-        reader.previous();assert(reader.reader_page()==1);reader.draw();reader.tap(536,400);reader.draw();reader.tap(536,1380);reader.draw();
+        reader.previous();assert(reader.reader_page()==1);reader.draw();reader.tap(536,400);reader.draw();reader.tap(660,1380);reader.draw();
         assert(reader.reader_panel()==rss::App::ReaderPanel::Images);assert(canvas.pixels[950*1072+536]==155);
-        reader.back();reader.back();reader.draw();reader.tap(536,400);reader.draw();reader.tap(178,1380);reader.draw();reader.tap(960,1048);
+        reader.back();reader.back();reader.draw();reader.tap(536,400);reader.draw();reader.tap(178,1380);reader.draw();reader.tap(960,856);
         assert(image_store.setting("font_size")=="36");reader.back();reader.back();
         reader.back();reader.open(eid);assert(reader.reader_page()==1);
     }
@@ -251,39 +252,47 @@ int main(){
         const auto eid=controls.entries(rss::View::All).front().id;controls.set_setting("margin","78");rss::App reader(controls,canvas);reader.open(eid);
         auto touch=[&](int x,int y){reader.draw();reader.tap(x,y);};
         auto capture=[&](const char* name){reader.draw();if(const auto folder=std::getenv("RSS_TEST_SNAPSHOTS"))canvas.write_pgm((std::filesystem::path(folder)/name).string());};
+        reader.set_reader_status({21,false,true,"09:19"});
         reader.next();reader.next();reader.draw();const auto normal=canvas.pixels;
+        reader.dirty=false;reader.set_reader_status({21,false,true,"09:19"});assert(!reader.dirty);
+        const auto saved=controls.entry(eid)->position;const auto saved_page=reader.reader_page();
+        reader.set_reader_status({20,true,false,"09:20"});assert(reader.dirty);reader.draw();
+        assert(reader.reader_page()==saved_page&&controls.entry(eid)->position==saved);
+        assert(std::equal(normal.begin()+96*1072,normal.begin()+1376*1072,canvas.pixels.begin()+96*1072));
+        assert(canvas.pixels!=normal);
+        reader.set_reader_status({21,false,true,"09:19"});reader.draw();
         const auto page=reader.reader_page(),position=static_cast<std::size_t>(controls.entry(eid)->position);
         touch(536,600);capture("reader-tools.pgm");assert(reader.reader_tools_open());
         assert(reader.reader_page()==page&&controls.entry(eid)->position==static_cast<std::int64_t>(position));
-        assert(std::equal(normal.begin(),normal.begin()+800*1072,canvas.pixels.begin()));
+        assert(std::equal(normal.begin()+96*1072,normal.begin()+700*1072,canvas.pixels.begin()+96*1072));
         touch(32,1380);assert(reader.reader_tools_open()); // Old previous-page target cannot turn the article.
         assert(reader.reader_panel()==rss::App::ReaderPanel::Type);capture("reader-type.pgm");
         reader.next();reader.previous();assert(reader.reader_page()==page);
-        touch(20,1100);assert(reader.reader_panel()==rss::App::ReaderPanel::Type&&reader.reader_page()==page);
-        for(int i=0;i<10;++i)touch(960,1048);
+        touch(20,900);assert(reader.reader_panel()==rss::App::ReaderPanel::Type&&reader.reader_page()==page);
+        for(int i=0;i<10;++i)touch(960,856);
         assert(controls.setting("font_size")=="48");assert(controls.entry(eid)->position==static_cast<std::int64_t>(position));
-        for(int i=0;i<15;++i)touch(640,1048);
+        for(int i=0;i<15;++i)touch(640,856);
         assert(controls.setting("font_size")=="24");assert(controls.entry(eid)->position==static_cast<std::int64_t>(position));
-        touch(960,1148);touch(640,1248);
+        touch(960,962);touch(640,1066);
         assert(controls.setting("line_gap")=="32"&&controls.setting("margin")=="32");
         assert(controls.entry(eid)->position==static_cast<std::int64_t>(position)&&reader.reader_page()>0);
-        touch(868,1248);assert(controls.setting("margin")=="78"&&controls.entry(eid)->position==static_cast<std::int64_t>(position));
-        touch(640,1248);assert(controls.setting("margin")=="32"&&controls.entry(eid)->position==static_cast<std::int64_t>(position));
+        touch(868,1066);assert(controls.setting("margin")=="78"&&controls.entry(eid)->position==static_cast<std::int64_t>(position));
+        touch(640,1066);assert(controls.setting("margin")=="32"&&controls.entry(eid)->position==static_cast<std::int64_t>(position));
         {rss::App restored(controls,canvas);restored.open(eid,false);restored.draw();bool ink_at_narrow_edge=false;for(int y=110;y<150;++y)for(int x=32;x<40;++x)if(canvas.pixels[y*1072+x]<100)ink_at_narrow_edge=true;assert(ink_at_narrow_edge);}
-        touch(536,1380);assert(reader.reader_panel()==rss::App::ReaderPanel::Images);capture("reader-images-empty.pgm");
+        touch(660,1380);assert(reader.reader_panel()==rss::App::ReaderPanel::Images);capture("reader-images-empty.pgm");
         touch(900,1380);assert(reader.reader_panel()==rss::App::ReaderPanel::Info);capture("reader-info.pgm");
         const auto first=canvas.pixels;bool reached_last=false;
-        for(int i=0;i<30;++i){const auto before=canvas.pixels;touch(950,1270);reader.draw();if(canvas.pixels==before){reached_last=true;break;}}
+        for(int i=0;i<30;++i){const auto before=canvas.pixels;touch(950,1296);reader.draw();if(canvas.pixels==before){reached_last=true;break;}}
         assert(reached_last&&canvas.pixels!=first);capture("reader-info-last.pgm");
         bool reached_first=false;
-        for(int i=0;i<30;++i){touch(100,1270);reader.draw();if(canvas.pixels==first){reached_first=true;break;}}
+        for(int i=0;i<30;++i){touch(100,1296);reader.draw();if(canvas.pixels==first){reached_first=true;break;}}
         assert(reached_first); // A short final information page must still navigate back to the first.
-        const auto info_page=reader.reader_page();touch(536,1270);assert(!controls.entry(eid)->read&&reader.reader_page()==info_page);
-        touch(950,850);assert(reader.reader_panel()==rss::App::ReaderPanel::None&&reader.reader_tools_open());
+        const auto info_page=reader.reader_page();touch(536,1296);assert(!controls.entry(eid)->read&&reader.reader_page()==info_page);
+        touch(950,790);assert(reader.reader_panel()==rss::App::ReaderPanel::None&&reader.reader_tools_open());
         touch(536,500);assert(!reader.reader_tools_open());
         const auto old=reader.reader_page();touch(950,1380);assert(reader.reader_page()==old+1);
-        touch(950,50);assert(controls.entry(eid)->starred);
-        reader.back();reader.draw();capture("list-starred.pgm");
+        touch(536,600);touch(950,50);assert(controls.entry(eid)->starred);
+        reader.back();reader.back();reader.draw();capture("list-starred.pgm");
     }
     std::cout<<"app checks passed\n";
     // Touch-only Chinese input: compose, correct, select, page candidates, and commit a feed name.
@@ -304,8 +313,8 @@ int main(){
     edit_title();typing.backspace();typing.backspace();keys("kejix");typing.backspace();
     typing.submit();assert(typing_store.feeds()[0].title=="旧名");typing.back();
     if(const auto folder=std::getenv("RSS_TEST_SNAPSHOTS")){typing.draw();canvas.write_pgm((std::filesystem::path(folder)/"pinyin.pgm").string());canvas.write_pgm((std::filesystem::path(folder)/"candidates.pgm").string());}
-    touch(180,592);commit();assert(typing_store.feeds()[0].title=="科技");
-    edit_title();typing.backspace();typing.backspace();keys("shi");touch(900,836);touch(180,592);commit();assert(typing_store.feeds()[0].title!="科技");assert(!typing_store.feeds()[0].title.empty());
+    touch(180,642);commit();assert(typing_store.feeds()[0].title=="科技");
+    edit_title();typing.backspace();typing.backspace();keys("shi");touch(900,836);touch(180,642);commit();assert(typing_store.feeds()[0].title!="科技");assert(!typing_store.feeds()[0].title.empty());
     edit_title();typing.backspace();keys("ni");touch(712,1364);keys("rss");commit();assert(typing_store.feeds()[0].title=="nirss");assert(typing_store.feeds()[0].id==typing_id);
     edit_title();for(int i=0;i<5;++i)typing.backspace();touch(100,1364);touch(131,1132);commit();assert(typing_store.feeds()[0].title=="@");
     edit_title();typing.backspace();keys("ni");touch(100,1248);keys("keji");touch(400,1364);touch(968,1248);commit();assert(typing_store.feeds()[0].title=="科");
@@ -331,9 +340,9 @@ int main(){
         assert(rejected&&names.feeds()[0].title=="博客名称");optional.sync_finished(true);tap(950,1380);assert(names.feeds()[0].title.empty());
         discovered.title="重新获取名称";names.save_entries(id,discovered);optional.reload();assert(names.feeds()[0].title=="重新获取名称");
         tap(950,398);tap(200,500);for(int i=0;i<25;++i)optional.backspace();rejected=false;try{optional.submit();}catch(const std::runtime_error&){rejected=true;}
-        assert(rejected&&names.feeds()[0].url=="https://optional.test/rss");tap(950,50);tap(150,1380); // Cancel input and source edit.
+        assert(rejected&&names.feeds()[0].url=="https://optional.test/rss");tap(62,60);tap(150,1380); // Cancel input and source edit.
         assert(names.feeds()[0].title=="重新获取名称");
-        tap(950,398);tap(200,330);optional.text_input(std::string(700,'a'));shot("keyboard-long-input.pgm");tap(950,50);tap(150,1380);
+        tap(950,398);tap(200,330);optional.text_input(std::string(700,'a'));shot("keyboard-long-input.pgm");tap(62,60);tap(150,1380);
         assert(names.feeds()[0].title=="重新获取名称");
     }
 

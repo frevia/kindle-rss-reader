@@ -48,7 +48,7 @@ int main(){
     touch(940,270);app.text_input("测试");app.submit();touch(940,270);app.backspace();app.backspace();app.submit();assert(app.query().empty());
     // A nested group search keeps a pending article keyword and composition.
     touch(940,270);app.text_input("初稿");touch(838,1132);touch(283,1016); // k, e
-    touch(400,150);assert(app.screen()==rss::App::Screen::GroupPicker);touch(950,50);app.text_input("科技");app.submit();app.back();
+    touch(400,200);assert(app.screen()==rss::App::Screen::GroupPicker);touch(950,50);app.text_input("科技");app.submit();app.back();
     app.submit();assert(app.query().empty());app.back();app.text_input("词");app.submit();assert(app.query()=="初稿词");
     touch(930,160);assert(app.query().empty());
     touch(150,270);touch(200,picker_row("",true));shot("empty-group");touch(100,400);assert(!app.reading());

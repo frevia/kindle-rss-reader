@@ -1,6 +1,7 @@
 #include "app.hpp"
 #include "feed.hpp"
 #include <cassert>
+#include <algorithm>
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
@@ -47,35 +48,41 @@ int main(){
     const auto old_offset=store.entry(first_id)->position;assert(old_offset>0);
     tap(536,600);assert(app.reader_tools_open());
     tap(178,1380);assert(app.reader_panel()==rss::App::ReaderPanel::Type);
-    tap(600,950);assert(app.using_cre()&&app.reader_page()==0);
+    tap(930,1162);assert(app.using_cre()&&app.reader_page()==0);
     app.draw();
     if(const auto dir=std::getenv("RSS_TEST_SNAPSHOTS")){std::filesystem::create_directories(dir);canvas.write_pgm((std::filesystem::path(dir)/"cre-controls.pgm").string());}
     tap(900,600);assert(!app.reader_tools_open());
     tap(950,1380);assert(app.reader_page()>0);
     const auto cre_page=app.reader_page();assert(store.entry(first_id)->position==old_offset);
+    app.set_reader_status({21,false,true,"09:19"});app.draw();const auto paper=canvas.pixels;
+    const auto bookmark=store.setting("reader_cre:"+std::to_string(first_id));
+    tap(536,600);tap(400,1380);assert(app.reader_panel()==rss::App::ReaderPanel::Content);
+    app.draw();assert(std::equal(paper.begin()+96*1072,paper.begin()+700*1072,canvas.pixels.begin()+96*1072));
+    tap(536,600);app.draw();assert(canvas.pixels==paper&&app.reader_page()==cre_page);
+    assert(store.setting("reader_cre:"+std::to_string(first_id))==bookmark);
     tap(100,1380);assert(app.reader_page()==cre_page-1);
-    tap(950,50);assert(store.entry(first_id)->starred&&app.reader_page()==cre_page-1);
-    app.next();const auto anchor_before=store.setting("reader_cre:"+std::to_string(first_id));
-    tap(536,600);tap(178,1380);tap(960,1048);
+    tap(536,600);tap(950,50);assert(store.entry(first_id)->starred&&app.reader_page()==cre_page-1);
+    tap(536,600);app.next();const auto anchor_before=store.setting("reader_cre:"+std::to_string(first_id));
+    tap(536,600);tap(178,1380);tap(960,856);
     assert(store.setting("font_size")=="36"&&app.using_cre()&&app.reader_page()>0);
     assert(store.setting("reader_cre:"+std::to_string(first_id))==anchor_before);
     if(const auto dir=std::getenv("RSS_TEST_SNAPSHOTS")){app.draw();canvas.write_pgm((std::filesystem::path(dir)/"cre-reader.pgm").string());}
     app.back();app.back();app.back();assert(!app.reading());
     tap(100,400);assert(app.current_id()==first_id&&app.using_cre()&&app.reader_page()>0);
     const auto restored=app.reader_page();
-    tap(536,600);tap(178,1380);tap(325,950);assert(!app.using_cre());
+    tap(536,600);tap(178,1380);tap(690,1162);assert(!app.using_cre());
     const auto classic_page=app.reader_page();
     assert(store.entry(first_id)->position==old_offset);
     assert(store.setting("reader_cre:"+std::to_string(first_id))!="");
     app.back();app.back();app.back();tap(100,400);assert(app.current_id()==first_id&&!app.using_cre());
     assert(app.reader_page()==classic_page);
     assert(store.entry(first_id)->position<=old_offset); // Classic exit saves its current page start after the font change.
-    tap(536,600);tap(178,1380);tap(600,950);assert(app.using_cre()&&app.reader_page()==restored);
+    tap(536,600);tap(178,1380);tap(930,1162);assert(app.using_cre()&&app.reader_page()==restored);
     tap(900,600);
     app.next();app.next();
     for(int i=0;i<1000;++i){const auto before=app.reader_page();app.next();if(app.reader_page()==before)break;}
     assert(app.reader_page()>0);
-    app.draw();app.tap(950,1380);
+    app.draw();app.tap(950,1420);
     assert(app.current_id()==second_id&&app.using_cre());
     assert(store.setting("reader_cre:"+std::to_string(first_id)).empty());
     assert(store.entry(first_id)->position==0);
@@ -91,7 +98,7 @@ int main(){
     rss::App failed_switch(store,canvas);failed_switch.show_view(rss::View::All,feed_id);
     auto fail_tap=[&](int x,int y){failed_switch.draw();failed_switch.tap(x,y);};
     fail_tap(100,400);failed_switch.next();const auto before_failure=failed_switch.reader_page();
-    fail_tap(536,600);fail_tap(178,1380);fail_tap(600,950);
+    fail_tap(536,600);fail_tap(178,1380);fail_tap(930,1162);
     assert(!failed_switch.using_cre()&&failed_switch.reader_page()==before_failure);
     assert(store.setting("reader_engine")=="classic");
     std::cout<<"CRE app checks passed\n";

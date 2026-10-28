@@ -105,6 +105,17 @@ void validate_feed_url(const std::string& url) {
     curl_free(scheme); curl_free(host); curl_url_cleanup(parsed);
     if (!valid) throw std::runtime_error("订阅地址必须是有效的 HTTP(S) URL");
 }
+bool valid_http_url(const std::string& url) {
+    if (url.empty() || url.size() > 2048 || std::any_of(url.begin(),url.end(),[](unsigned char c){return c<=32||c==127;})) return false;
+    CURLU* parsed = curl_url();
+    if (!parsed) return false;
+    char *scheme = nullptr, *host = nullptr;
+    const bool valid = curl_url_set(parsed,CURLUPART_URL,url.c_str(),0) == CURLUE_OK &&
+        curl_url_get(parsed,CURLUPART_SCHEME,&scheme,0) == CURLUE_OK && curl_url_get(parsed,CURLUPART_HOST,&host,0) == CURLUE_OK &&
+        host && *host && scheme && (std::string(scheme) == "http" || std::string(scheme) == "https");
+    curl_free(scheme); curl_free(host); curl_url_cleanup(parsed);
+    return valid;
+}
 void add_group_rows(sqlite3* db, const std::string& path) {
     Statement insert(db,"INSERT OR IGNORE INTO feed_groups(path) VALUES(?)");
     for (std::size_t end=0; end<path.size();) {
@@ -145,6 +156,16 @@ Store::Store(const std::string& path) {
                   "url TEXT NOT NULL,alt TEXT NOT NULL DEFAULT '',ordinal INTEGER NOT NULL,error TEXT NOT NULL DEFAULT '',"
                   "width INTEGER NOT NULL DEFAULT 0,height INTEGER NOT NULL DEFAULT 0,pixels BLOB NOT NULL DEFAULT X'',"
                   "PRIMARY KEY(entry_id,url))");
+        exec(db_, "BEGIN IMMEDIATE");
+        try {
+            exec(db_, "CREATE TABLE IF NOT EXISTS article_fulltext (entry_id INTEGER PRIMARY KEY REFERENCES entries(id) ON DELETE CASCADE,"
+                      "html TEXT NOT NULL DEFAULT '',text TEXT NOT NULL DEFAULT '',url TEXT NOT NULL DEFAULT '',"
+                      "state TEXT NOT NULL DEFAULT 'pending',error TEXT NOT NULL DEFAULT '',attempted_at INTEGER NOT NULL DEFAULT 0,"
+                      "position INTEGER NOT NULL DEFAULT 0,automatic INTEGER NOT NULL DEFAULT 0)");
+            exec(db_, "CREATE TABLE IF NOT EXISTS article_fulltext_images (entry_id INTEGER NOT NULL REFERENCES entries(id) ON DELETE CASCADE,"
+                      "url TEXT NOT NULL,alt TEXT NOT NULL DEFAULT '',ordinal INTEGER NOT NULL,PRIMARY KEY(entry_id,ordinal))");
+            exec(db_, "COMMIT");
+        } catch (...) { sqlite3_exec(db_, "ROLLBACK", nullptr, nullptr, nullptr); throw; }
         exec(db_, "CREATE INDEX IF NOT EXISTS entry_order ON entries(published DESC,id DESC)");
         bool has_progress = false;
         {
@@ -303,6 +324,10 @@ void Store::save_entries(std::int64_t feed_id, const ParsedFeed& parsed) {
                             "ON CONFLICT(feed_id,guid) DO UPDATE SET title=excluded.title,url=excluded.url,author=excluded.author,"
                             "html=excluded.html,text=excluded.text,published=CASE WHEN ?=0 THEN entries.published ELSE excluded.published END");
         for (const auto& entry : parsed.entries) {
+            Statement prior(db_,"SELECT 1 FROM entries WHERE feed_id=? AND guid=?");
+            prior.integer(1,feed_id);prior.text(2,entry.guid);
+            const int prior_step=sqlite3_step(prior.get());check(db_,prior_step);
+            const bool is_new=prior_step==SQLITE_DONE;
             check(db_, sqlite3_reset(save.get()));
             check(db_, sqlite3_clear_bindings(save.get()));
             save.integer(1, feed_id); save.text(2, entry.guid); save.text(3, entry.title); save.text(4, entry.url);
@@ -312,7 +337,7 @@ void Store::save_entries(std::int64_t feed_id, const ParsedFeed& parsed) {
             Statement lookup(db_,"SELECT id FROM entries WHERE feed_id=? AND guid=?");
             lookup.integer(1,feed_id);lookup.text(2,entry.guid);check(db_,sqlite3_step(lookup.get()));
             const auto id=sqlite3_column_int64(lookup.get(),0);
-            Statement old(db_,"UPDATE article_images SET ordinal=-1 WHERE entry_id=?");old.integer(1,id);old.run();
+            Statement old(db_,"UPDATE article_images SET ordinal=-1 WHERE entry_id=? AND ordinal>=0");old.integer(1,id);old.run();
             int ordinal=0;
             for(const auto& image:entry.images){
                 if(ordinal==20)break;
@@ -320,7 +345,13 @@ void Store::save_entries(std::int64_t feed_id, const ParsedFeed& parsed) {
                                   "ON CONFLICT(entry_id,url) DO UPDATE SET alt=excluded.alt,ordinal=excluded.ordinal");
                 ref.integer(1,id);ref.text(2,image.url);ref.text(3,image.alt);ref.integer(4,ordinal++);ref.run();
             }
-            Statement stale(db_,"DELETE FROM article_images WHERE entry_id=? AND ordinal=-1");stale.integer(1,id);stale.run();
+            Statement stale(db_,"DELETE FROM article_images WHERE entry_id=? AND ordinal=-1 AND NOT EXISTS(SELECT 1 FROM article_fulltext_images f WHERE f.entry_id=article_images.entry_id AND f.url=article_images.url)");stale.integer(1,id);stale.run();
+            if (is_new && setting("feed_fulltext:" + std::to_string(feed_id)) == "1") {
+                if (valid_http_url(entry.url)) {
+                    Statement queue(db_, "INSERT INTO article_fulltext(entry_id,state,automatic) VALUES(?,'pending',1)");
+                    queue.integer(1,id); queue.run();
+                }
+            }
         }
         if (!parsed.title.empty()) {
             Statement title(db_, "UPDATE feeds SET title=? WHERE id=? AND (title='' OR title=url)");
@@ -380,7 +411,7 @@ std::optional<Entry> Store::entry(std::int64_t id, bool with_content) const {
     check(db_, step);
     auto entry=read_entry(query.get());
     if(!with_content)return entry;
-    Statement images(db_,"SELECT url,alt,error,width,height FROM article_images WHERE entry_id=? ORDER BY ordinal");images.integer(1,id);
+    Statement images(db_,"SELECT url,alt,error,width,height FROM article_images WHERE entry_id=? AND ordinal>=0 ORDER BY ordinal");images.integer(1,id);
     int result;
     while((result=sqlite3_step(images.get()))==SQLITE_ROW){
         ArticleImage image;image.url=column_text(images.get(),0);image.alt=column_text(images.get(),1);image.error=column_text(images.get(),2);
@@ -423,8 +454,87 @@ std::vector<std::pair<std::int64_t,ArticleImage>> Store::pending_images() const 
 
 void Store::set_read(std::int64_t id, bool value) { Statement q(db_, "UPDATE entries SET read=? WHERE id=?"); q.boolean(1,value); q.integer(2,id); q.run(); }
 void Store::set_starred(std::int64_t id, bool value) { Statement q(db_, "UPDATE entries SET starred=? WHERE id=?"); q.boolean(1,value); q.integer(2,id); q.run(); }
-void Store::set_position(std::int64_t id, std::int64_t offset) { Statement q(db_, "UPDATE entries SET position=?,in_progress=1 WHERE id=?"); q.integer(1,std::max<std::int64_t>(0,offset)); q.integer(2,id); q.run(); }
-void Store::finish_reading(std::int64_t id) { Statement q(db_, "UPDATE entries SET in_progress=0,position=0,read=1 WHERE id=?"); q.integer(1,id); q.run(); }
+FulltextStatus Store::fulltext_status(std::int64_t id) const {
+    Statement q(db_,"SELECT state,error FROM article_fulltext WHERE entry_id=?");q.integer(1,id);
+    const int step=sqlite3_step(q.get());check(db_,step);if(step==SQLITE_DONE)return {};
+    return {column_text(q.get(),0),column_text(q.get(),1)};
+}
+
+bool Store::queue_fulltext(std::int64_t id) {
+    exec(db_,"BEGIN IMMEDIATE");
+    try {
+    Statement article(db_,"SELECT e.url FROM entries e JOIN feeds f ON f.id=e.feed_id WHERE e.id=? AND f.active=1");article.integer(1,id);
+    int step=sqlite3_step(article.get());check(db_,step);
+    if(step==SQLITE_DONE||!valid_http_url(column_text(article.get(),0))){exec(db_,"COMMIT");return false;}
+    Statement status(db_,"SELECT state FROM article_fulltext WHERE entry_id=?");status.integer(1,id);
+    step=sqlite3_step(status.get());check(db_,step);
+    if(step==SQLITE_ROW){
+        const auto state=column_text(status.get(),0);
+        if(state=="pending"){
+            Statement manual(db_,"UPDATE article_fulltext SET automatic=0 WHERE entry_id=? AND state='pending'");manual.integer(1,id);manual.run();exec(db_,"COMMIT");return false;
+        }
+        if(state!="failed"){exec(db_,"COMMIT");return false;}
+        Statement retry(db_,"UPDATE article_fulltext SET state='pending',error='',automatic=0 WHERE entry_id=? AND state='failed'");retry.integer(1,id);retry.run();
+        const bool queued=sqlite3_changes(db_)!=0;exec(db_,"COMMIT");return queued;
+    }
+    Statement insert(db_,"INSERT INTO article_fulltext(entry_id,state,automatic) VALUES(?,'pending',0)");insert.integer(1,id);insert.run();
+    exec(db_,"COMMIT");return true;
+    } catch(...) {sqlite3_exec(db_,"ROLLBACK",nullptr,nullptr,nullptr);throw;}
+}
+
+std::vector<Entry> Store::pending_fulltext(bool retry_failed,std::size_t limit) const {
+    const char* state=retry_failed?"failed":"pending";
+    Statement q(db_,std::string("SELECT e.id,e.feed_id,e.guid,e.title,e.url,e.author,'' AS html,'' AS text,e.published,e.read,e.starred,e.position,e.in_progress FROM entries e JOIN article_fulltext a ON a.entry_id=e.id JOIN feeds f ON f.id=e.feed_id "
+        "WHERE f.active=1 AND a.state=? AND (a.automatic=0 OR (SELECT value FROM settings WHERE key='feed_fulltext:' || f.id)='1') "
+        "ORDER BY e.published DESC,e.id DESC LIMIT ?").c_str());
+    q.text(1,state);q.integer(2,static_cast<std::int64_t>(std::min<std::size_t>(limit,static_cast<std::size_t>(INT64_MAX))));
+    std::vector<Entry> result;int step;
+    while((step=sqlite3_step(q.get()))==SQLITE_ROW)result.push_back(read_entry(q.get()));
+    check(db_,step);return result;
+}
+
+void Store::save_fulltext(std::int64_t id,const Entry& content) {
+    if(content.html.empty()||content.html.size()>512*1024||content.text.empty()||content.text.size()>512*1024||!valid_http_url(content.url)||content.images.size()>20)
+        throw std::runtime_error("无效全文内容");
+    for(const auto& image:content.images)if(!valid_http_url(image.url))throw std::runtime_error("无效全文图片地址");
+    exec(db_,"BEGIN IMMEDIATE");
+    try {
+        Statement active(db_,"SELECT 1 FROM entries e JOIN feeds f ON f.id=e.feed_id WHERE e.id=? AND f.active=1");active.integer(1,id);
+        int step=sqlite3_step(active.get());check(db_,step);
+        if(step==SQLITE_DONE){exec(db_,"COMMIT");return;}
+        Statement update(db_,"UPDATE article_fulltext SET html=?,text=?,url=?,state='ready',error='',attempted_at=CAST(strftime('%s','now') AS INTEGER) WHERE entry_id=? AND state='pending'");
+        update.text(1,content.html);update.text(2,content.text);update.text(3,content.url);update.integer(4,id);update.run();
+        if(!sqlite3_changes(db_)){exec(db_,"COMMIT");return;}
+        Statement clear(db_,"DELETE FROM article_fulltext_images WHERE entry_id=?");clear.integer(1,id);clear.run();
+        int ordinal=0;
+        for(const auto& image:content.images){
+            Statement shared(db_,"INSERT OR IGNORE INTO article_images(entry_id,url,alt,ordinal) VALUES(?,?,?,-1)");shared.integer(1,id);shared.text(2,image.url);shared.text(3,image.alt);shared.run();
+            Statement ref(db_,"INSERT INTO article_fulltext_images(entry_id,url,alt,ordinal) VALUES(?,?,?,?)");ref.integer(1,id);ref.text(2,image.url);ref.text(3,image.alt);ref.integer(4,ordinal++);ref.run();
+        }
+        exec(db_,"COMMIT");
+    } catch(...) {sqlite3_exec(db_,"ROLLBACK",nullptr,nullptr,nullptr);throw;}
+}
+
+void Store::fail_fulltext(std::int64_t id,const std::string& error) {
+    Statement q(db_,"UPDATE article_fulltext SET state='failed',error=?,attempted_at=CAST(strftime('%s','now') AS INTEGER) WHERE entry_id=? AND state IN ('pending','failed')");
+    q.text(1,error);q.integer(2,id);q.run();
+}
+
+std::optional<Entry> Store::fulltext_entry(std::int64_t id) const {
+    Statement q(db_,"SELECT e.id,e.feed_id,e.guid,e.title,e.url,e.author,'' AS html,'' AS text,e.published,e.read,e.starred,e.position,e.in_progress,a.html,a.text,a.url,a.position FROM entries e JOIN article_fulltext a ON a.entry_id=e.id WHERE e.id=? AND a.state='ready'");
+    q.integer(1,id);int step=sqlite3_step(q.get());check(db_,step);if(step==SQLITE_DONE)return std::nullopt;
+    auto entry=read_entry(q.get());entry.html=column_text(q.get(),13);entry.text=column_text(q.get(),14);entry.url=column_text(q.get(),15);entry.position=sqlite3_column_int64(q.get(),16);entry.web_content=true;
+    Statement images(db_,"SELECT f.url,f.alt,i.error,i.width,i.height FROM article_fulltext_images f LEFT JOIN article_images i ON i.entry_id=f.entry_id AND i.url=f.url WHERE f.entry_id=? ORDER BY f.ordinal");images.integer(1,id);
+    while((step=sqlite3_step(images.get()))==SQLITE_ROW){ArticleImage image;image.url=column_text(images.get(),0);image.alt=column_text(images.get(),1);image.error=column_text(images.get(),2);image.width=sqlite3_column_int(images.get(),3);image.height=sqlite3_column_int(images.get(),4);entry.images.push_back(std::move(image));}
+    check(db_,step);return entry;
+}
+
+void Store::set_position(std::int64_t id, std::int64_t offset, bool fulltext) {
+    const auto value=std::max<std::int64_t>(0,offset);
+    if(fulltext){Statement q(db_,"UPDATE article_fulltext SET position=? WHERE entry_id=?");q.integer(1,value);q.integer(2,id);q.run();Statement global(db_,"UPDATE entries SET in_progress=1 WHERE id=?");global.integer(1,id);global.run();}
+    else {Statement q(db_, "UPDATE entries SET position=?,in_progress=1 WHERE id=?"); q.integer(1,value); q.integer(2,id); q.run();}
+}
+void Store::finish_reading(std::int64_t id) { Statement q(db_, "UPDATE entries SET in_progress=0,position=0,read=1 WHERE id=?"); q.integer(1,id); q.run(); Statement fulltext(db_,"UPDATE article_fulltext SET position=0 WHERE entry_id=?");fulltext.integer(1,id);fulltext.run(); }
 
 void Store::mark_feed_read(std::int64_t feed_id) {
     Statement q(db_, feed_id ? "UPDATE entries SET read=1 WHERE feed_id=?" : "UPDATE entries SET read=1");

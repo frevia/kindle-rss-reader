@@ -70,17 +70,26 @@ void write_export(rss::Store& store,const std::string& path){
 }
 class UiTasks {
 public:
-    UiTasks(rss::Store& store,rss::App& app,const std::string& db):store_(store),app_(app),db_(db){}
+    UiTasks(rss::Store& store,rss::App& app,const std::string& db):store_(store),app_(app),db_(db){
+        // Sample before the first e-ink frame instead of refreshing an unknown status immediately after it.
+        app_.set_reader_status(rss::read_reader_status(std::time(nullptr)));
+        status_due_=std::chrono::steady_clock::now()+std::chrono::seconds(30);
+    }
     ~UiTasks(){cancel_=true;if(worker_.valid())worker_.wait();}
     void tick(){
+        const auto now=std::chrono::steady_clock::now();
+        if(now>=status_due_){app_.set_reader_status(rss::read_reader_status(std::time(nullptr)));status_due_=now+std::chrono::seconds(30);}
         collect();const auto request=app_.take_request();const auto folder=std::filesystem::path(db_).parent_path();
-        if(request=="sync"||request=="retry-sync"){
+        if(request=="sync"||request=="retry-sync"||request.rfind("fulltext:",0)==0){
             if(!worker_.valid()){
                 cancel_=false;app_.sync_started();const bool failed_only=request=="retry-sync";
-                worker_=std::async(std::launch::async,[this,failed_only]{
-                    rss::Store background(db_);rss::sync_feeds(background,cancel_,[this](const rss::SyncProgress& p){
+                const auto fulltext_id=request.rfind("fulltext:",0)==0?std::stoll(request.substr(9)):0;
+                worker_=std::async(std::launch::async,[this,failed_only,fulltext_id]{
+                    rss::Store background(db_);const auto progress=[this](const rss::SyncProgress& p){
                         std::lock_guard<std::mutex> lock(mutex_);progress_=p;
-                    },failed_only);
+                    };
+                    if(fulltext_id)rss::sync_fulltext(background,fulltext_id,cancel_,progress);
+                    else rss::sync_feeds(background,cancel_,progress,failed_only);
                 });
             }
         }else if(request=="cancel-sync"){
@@ -106,6 +115,7 @@ private:
         }
     }
     rss::Store& store_;rss::App& app_;std::string db_;
+    std::chrono::steady_clock::time_point status_due_{};
     std::atomic<bool> cancel_{false};std::future<void> worker_;std::mutex mutex_;std::optional<rss::SyncProgress> progress_;
 };
 volatile std::sig_atomic_t stop_device=0;
@@ -196,7 +206,8 @@ int main(int argc,char** argv){
                 "  import FILE.opml     导入并合并订阅\n"
                 "  export FILE.opml     导出订阅\n"
                 "  add URL              添加 RSS/Atom 订阅\n"
-                "  sync                 更新订阅并缓存正文\n"
+                "  sync [failed]        更新订阅，或重试失败项目\n"
+                "  fulltext ID          下载单篇网页正文并缓存图片\n"
                 "  list                 列出本地文章\n"
                 "  probe                只读检查 Kindle 屏幕和输入设备\n"
                 "  device               由会话启动器启动 Kindle 原生界面\n"
@@ -217,8 +228,18 @@ int main(int argc,char** argv){
             if(arg.rfind("http://",0)!=0&&arg.rfind("https://",0)!=0)throw std::runtime_error("需要 HTTP(S) 地址");
             rss::Feed feed;feed.url=arg;feed.title=arg;store.add_feed(feed);
         }else if(command=="sync"){
+            if(!arg.empty()&&arg!="failed")throw std::runtime_error("同步参数仅支持 failed");
             std::atomic<bool> cancel{false};int failed=0;
-            rss::sync_feeds(store,cancel,[&](const rss::SyncProgress& p){failed=p.failed;std::cout<<p.completed<<"/"<<p.total<<" "<<p.message<<"\n";});
+            rss::sync_feeds(store,cancel,[&](const rss::SyncProgress& p){failed=p.failed;std::cout<<p.completed<<"/"<<p.total<<" "<<p.message<<"\n";},arg=="failed");
+            return failed?2:0;
+        }else if(command=="fulltext"){
+            std::size_t used=0;const auto id=std::stoll(arg,&used);
+            if(id<=0||used!=arg.size())throw std::runtime_error("需要有效的文章编号");
+            store.queue_fulltext(id);
+            if(store.fulltext_status(id).state=="ready"){std::cout<<"网页正文已保存\n";return 0;}
+            if(store.fulltext_status(id).state!="pending")throw std::runtime_error("文章地址不可下载，或订阅已取消");
+            std::atomic<bool> cancel{false};int failed=0;
+            rss::sync_fulltext(store,id,cancel,[&](const rss::SyncProgress& p){failed=p.failed;std::cout<<p.message<<"\n";});
             return failed?2:0;
         }else if(command=="list"){
             for(const auto& e:store.entries(rss::View::All))std::cout<<e.id<<"\t"<<(e.read?"已读":"未读")<<"\t"<<e.title<<"\n";

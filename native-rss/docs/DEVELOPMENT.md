@@ -27,6 +27,16 @@ rtk proxy ctest --test-dir native-rss/build --output-on-failure
 
 上面的 `rtk proxy` 是本仓库使用的命令代理；没有安装 RTK 时可直接运行其后的命令。仅构建命令行与测试、不需要 SDL 窗口时，可在配置命令追加 `-DRSS_DESKTOP=OFF`。
 
+## 网页正文
+
+`src/fulltext.cpp` 使用已有 libxml2 提取并清洗正文，不引入 JavaScript 运行时或网络提取服务。仅接受 UTF-8 / ASCII，输入上限 8 MiB、输出 HTML 和文本各 512 KiB、DOM 最多 10000 节点 / 64 层。语义正文与普通容器按文本和链接密度选择；裸 body 页面要求多段正文证据。提取结果不保证覆盖所有站点，登录、验证码、旧编码和脚本生成页面应回退到 RSS 原文。
+
+`article_fulltext` 附表保存 pending / ready / failed、正文、最终网页地址及独立位置，`article_fulltext_images` 保存图片顺序，复用 `article_images` 像素缓存。原 `entries.html/text/position` 继续属于 RSS 原文。正文选择使用 `reader_content:<id>`；网页正文的排版书签使用 `reader_cre:web:<id>`，原有 `reader_cre:<id>` 不变。订阅自动下载使用 `feed_fulltext:<id>`，默认关闭且只在新增文章时入队。
+
+正文和派生图片请求逐次验证跳转及目标地址，禁止非 HTTP(S)、账号密码 URL 及未配置的内网目标。显式订阅地址的同 origin 内网资源仍可读取；派生请求不使用环境代理，以免代理绕过目标地址校验。正文每轮最多 10 篇，单篇请求最多 15 秒、阶段预算 120 秒；剩余 pending 在后续同步（包含 RSS 304）继续，failed 经手动重试重新入队。单篇下载复用 UI 后台线程，不在绘制或数据库事务中联网。
+
+本地临时数据库可使用 `kindle-rss --db /tmp/test.sqlite fulltext ID` 验证单篇下载，`sync failed` 重试失败项目。`fulltext`、`fulltext_app`、`store`、`net` 和本机 HTTP `network` 测试覆盖提取、迁移、正文切换、取消和失败路径；宿主截图与 ARM 编译不等于真机内存、触摸或耗电验收。
+
 ## ARM 构建状态
 
 Apple Silicon macOS 上的依赖构建脚本为 `tools/build_arm.py`，依赖版本与校验来源在 `tools/arm-sources.json`。需要 CMake 3.22+、Make、Perl、curl 和 Python 3.12+，以及 `vendor/zig-aarch64-macos-0.15.2/zig`。Zig 官方归档为 `https://ziglang.org/download/0.15.2/zig-aarch64-macos-0.15.2.tar.xz`，SHA-256 为 `3cc2bab367e185cdfb27501c4b30b1b0653c28d9f73df8dc91488e66ece5fa6b`。编译器目前需预先放置在该位置。
@@ -87,6 +97,14 @@ GUI 的导入按钮读取数据库同目录下的 `feeds.opml`；导出写入 `s
 订阅页底部「管理分组」可新增、重命名、移动或删除多级分组。点击「子分组」在当前组内创建；新增和编辑时选择「上级分组」，选择「顶层（无上级）」可移回根目录。更换上级会移动整棵子树，保存前仅修改草稿；上级选择支持按完整路径查找，并排除自身及后代。空分组会保留，重名目标不覆盖；删除分组及其子分组时把组内订阅移到「未分组」，保留文章、收藏和阅读状态。底部「OPML」专门导入/导出订阅及空分组。「缓存管理」从同步页进入，可确认清理 30 天前的已读文章，保留收藏、未读及正在阅读的文章。清理会删除这些文章及状态；订阅源仍提供的文章可能在下次同步后重新出现。原生软键盘支持拼音选字和词组，桌面仍可使用系统输入法。
 
 `--font /absolute/path/font.ttf` 或 `RSS_FONT` 可以指定字体。macOS 默认使用本机系统字体，仅本机读取，不随项目分发。
+
+## 界面约定
+
+普通页面共用 `page_header`：状态行 32 px，返回按钮位于左上角、图标 40 px、触控范围 96×64，分隔线 y96，标题基线 y160；阅读页共用同一返回图标，保持原 96×88 触控范围和逐层返回行为。搜索与编辑输入页沿用同一页头，候选区下移 50 px，底部键盘位置不变。
+
+按角色统一字号：页面标题 48 px；分组、订阅、表单值和键帽 32 px；常用操作与面板正文 28 px；辅助说明、元信息和分页计数 24 px。文章列表标题 36 px、阅读正文可调 24–48 px，属于内容排版，不与界面操作文字强制等大。底部操作区使用 88 px 控件和距底部 104 px 的分隔线；阅读工具栏仍为 96 px。
+
+`reader_layout_test` 检查各页返回区域像素一致，并实际点击新坐标验证输入取消、搜索范围返回、分组草稿、确认取消与错误返回；`app_test` 覆盖下移后的拼音候选和取消输入。设置面板的开合仍不改变正文分页或锚点。
 
 ## 渲染与示例
 

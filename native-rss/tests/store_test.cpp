@@ -2,11 +2,13 @@
 #include "store.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <cassert>
 #include <cstdio>
 #include <ctime>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -380,5 +382,64 @@ int main() {
         assert(failed);
         assert(rollback.add_feed(historical)==historical_id);
         assert(rollback.feeds().size()==1 && rollback.feeds()[0].id==historical_id && rollback.feeds()[0].title=="Historical");
+    }
+    {
+        Store store(":memory:");Feed feed;feed.url="https://fulltext.test/feed";const auto feed_id=store.add_feed(feed);
+        ParsedFeed historical;historical.entries={make_entry("before","Before",50)};store.save_entries(feed_id,historical);
+        store.set_setting("feed_fulltext:"+std::to_string(feed_id),"1");
+        ParsedFeed parsed;auto rss=make_entry("one","Original",100);rss.html="<p>RSS</p>";rss.text="RSS text";ArticleImage rss_image;rss_image.url="https://fulltext.test/rss.png";rss.images={rss_image};parsed.entries={rss};store.save_entries(feed_id,parsed);
+        const auto initial_entries=store.entries(View::All);const auto initial=std::find_if(initial_entries.begin(),initial_entries.end(),[](const Entry& e){return e.guid=="one";});assert(initial!=initial_entries.end());const auto id=initial->id;
+        assert(store.pending_fulltext().size()==1);assert(store.pending_fulltext()[0].html.empty());
+        Entry full;full.url="https://fulltext.test/final";full.html="<article>full</article>";full.text="Full text";
+        ArticleImage full_image;full_image.url="https://fulltext.test/full.png";full_image.alt="selected";full.images={full_image};
+        store.save_fulltext(id,full);
+        ArticleImage cache=full_image;cache.width=1;cache.height=1;cache.pixels={42};store.save_image(id,cache);
+        assert(store.fulltext_status(id).state=="ready"&&!store.queue_fulltext(id));
+        auto full_entry=store.fulltext_entry(id);assert(full_entry&&full_entry->web_content&&full_entry->url==full.url&&full_entry->text==full.text&&full_entry->images.size()==1&&full_entry->images[0].alt=="selected");
+        auto original=store.entry(id);assert(original&&original->html=="<p>RSS</p>"&&original->text=="RSS text"&&original->images.size()==1);
+        store.set_position(id,19,true);store.set_position(id,7);full_entry=store.fulltext_entry(id);original=store.entry(id);
+        assert(full_entry&&full_entry->position==19&&original&&original->position==7&&original->in_progress);
+        ParsedFeed refreshed;refreshed.entries={make_entry("one","Updated RSS",100)};store.save_entries(feed_id,refreshed);
+        assert(store.image(id,full_image.url)&&store.image(id,full_image.url)->pixels==cache.pixels);
+        assert(store.entry(id)->images.empty()&&store.fulltext_entry(id)->images.size()==1);
+        store.finish_reading(id);assert(store.fulltext_entry(id)->position==0&&!store.entry(id)->in_progress);
+
+        auto failed_article=make_entry("two","Failed",200);failed_article.html="<p>original</p>";failed_article.text="original text";ParsedFeed second;second.entries={failed_article};store.save_entries(feed_id,second);
+        const auto all_entries=store.entries(View::All);const auto failed_id=std::find_if(all_entries.begin(),all_entries.end(),[](const Entry& e){return e.guid=="two";});
+        // The feed setting queues new articles automatically; disabling it pauses automatic work.
+        assert(failed_id!=all_entries.end());const auto two=failed_id->id;
+        store.set_setting("feed_fulltext:"+std::to_string(feed_id),"0");assert(store.pending_fulltext().empty());
+        store.fail_fulltext(two,"fetch failed");assert(store.fulltext_status(two).state=="failed"&&store.fulltext_status(two).error=="fetch failed");
+        assert(store.pending_fulltext(true).empty());assert(store.queue_fulltext(two));assert(store.fulltext_status(two).state=="pending"&&store.pending_fulltext().size()==1);
+        Entry invalid=full;invalid.text.clear();bool rejected=false;try{store.save_fulltext(two,invalid);}catch(const std::runtime_error&){rejected=true;}
+        assert(rejected&&store.fulltext_status(two).state=="pending"&&store.entry(two)->text=="original text");
+        auto cascade_article=make_entry("three","Cascade",300);ParsedFeed third;third.entries={cascade_article};store.save_entries(feed_id,third);
+        const auto before_remove=store.entries(View::All);const auto cascade=std::find_if(before_remove.begin(),before_remove.end(),[](const Entry& e){return e.guid=="three";});assert(cascade!=before_remove.end());const auto cascade_id=cascade->id;assert(store.queue_fulltext(cascade_id));
+        store.set_starred(two,true);store.set_starred(id,true);store.remove_feed(feed_id);assert(!store.queue_fulltext(two));store.save_fulltext(two,full);
+        assert(store.fulltext_status(two).state=="pending"&&!store.fulltext_entry(two));
+        assert(store.queue_fulltext(id)==false); // Ready fulltext survives unsubscribe but cannot be refreshed.
+        assert(store.fulltext_status(cascade_id).state.empty());
+    }
+    {
+        const std::string legacy_path="/tmp/kindle-rss-fulltext-migration-"+std::to_string(getpid())+".sqlite";std::remove(legacy_path.c_str());
+        sqlite3* db=nullptr;assert(sqlite3_open(legacy_path.c_str(),&db)==SQLITE_OK);
+        assert(sqlite3_exec(db,"CREATE TABLE feeds(id INTEGER PRIMARY KEY,url TEXT NOT NULL UNIQUE,title TEXT NOT NULL DEFAULT '',group_name TEXT NOT NULL DEFAULT '',error TEXT NOT NULL DEFAULT '',etag TEXT NOT NULL DEFAULT '',modified TEXT NOT NULL DEFAULT '',synced_at INTEGER NOT NULL DEFAULT 0,active INTEGER NOT NULL DEFAULT 1); CREATE TABLE entries(id INTEGER PRIMARY KEY,feed_id INTEGER NOT NULL REFERENCES feeds(id),guid TEXT NOT NULL,title TEXT NOT NULL DEFAULT '',url TEXT NOT NULL DEFAULT '',author TEXT NOT NULL DEFAULT '',html TEXT NOT NULL DEFAULT '',text TEXT NOT NULL DEFAULT '',published INTEGER NOT NULL DEFAULT 0,read INTEGER NOT NULL DEFAULT 0,starred INTEGER NOT NULL DEFAULT 0,position INTEGER NOT NULL DEFAULT 0,UNIQUE(feed_id,guid)); INSERT INTO feeds(id,url) VALUES(1,'https://migration.test/feed'); INSERT INTO entries(id,feed_id,guid,title,url,text,position) VALUES(2,1,'old','Old','https://migration.test/old','retained',12);",nullptr,nullptr,nullptr)==SQLITE_OK);sqlite3_close(db);
+        {Store migrated(legacy_path);assert(migrated.entry(2)&&migrated.entry(2)->text=="retained");assert(migrated.fulltext_status(2).state.empty());assert(migrated.queue_fulltext(2));}
+        {Store reopened(legacy_path);assert(reopened.entry(2)&&reopened.fulltext_status(2).state=="pending");reopened.set_starred(2,true);reopened.remove_feed(1);assert(reopened.entry(2)&&reopened.queue_fulltext(2)==false);}
+        std::remove(legacy_path.c_str());
+    }
+    {
+        const auto path="/tmp/kindle-rss-fulltext-concurrent-"+std::to_string(getpid())+".sqlite";
+        std::remove(path.c_str());
+        {
+            Store store(path);Feed feed;feed.url="https://concurrent.test/rss";const auto fid=store.add_feed(feed);
+            ParsedFeed parsed;parsed.entries={make_entry("one","Concurrent queue",1)};store.save_entries(fid,parsed);
+            const auto id=store.entries(View::All).front().id;Store second(path),third(path);
+            std::atomic<int> queued{0};
+            std::thread a([&]{if(second.queue_fulltext(id))++queued;});
+            std::thread b([&]{if(third.queue_fulltext(id))++queued;});
+            a.join();b.join();assert(queued==1&&store.pending_fulltext().size()==1);
+        }
+        std::remove(path.c_str());
     }
 }

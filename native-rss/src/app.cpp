@@ -11,6 +11,7 @@
 
 namespace rss {
 namespace {
+constexpr int reader_bar_height=96;
 std::int64_t midnight() {
     auto now=std::time(nullptr);auto local=*std::localtime(&now);
     local.tm_hour=local.tm_min=local.tm_sec=0;local.tm_isdst=-1;
@@ -114,53 +115,73 @@ void App::button(Rect r,const std::string& label,std::function<void()> action,bo
     c_.text(trailing?left:left+symbol+gap,r.y+(r.h+size)/2-5,text,size,color);
     if(enabled)hits_.push_back({r,std::move(action)});
 }
+void App::back_button(int top,int height){
+    c_.icon(Icon::BackCircle,{42,top+(height-40)/2,40,40},30);
+    hits_.push_back({{24,top,96,height},[this]{back();}});
+}
+void App::page_header(const std::string& title){
+    back_button();c_.rule(32,96,c_.width-64,150);c_.text(32,160,title,48);
+}
 void App::draw(){
-    hits_.clear();c_.clear();
+    hits_.clear();c_.clear();bool reader_visible=false;
     if(!error_.empty()){
-        c_.text(32,100,"操作未完成",40);int y=220;
+        page_header("操作未完成");int y=250;
         for(const auto& line:c_.wrap(error_,28,c_.width-64)){if(y>c_.height-220)break;c_.text(32,y,line.text,28);y+=44;}
-        button({32,c_.height-100,c_.width-64,96},"返回",[this]{error_.clear();},true);
+        c_.rule(32,c_.height-104,c_.width-64,210);
+        button({32,c_.height-100,c_.width-64,88},"返回",[this]{back();},true,28);
     }else if(!confirmation_.empty())confirmation_screen();
     else if(!input_mode_.empty())input_screen();
     else if(screen_==Screen::GroupPicker){if(picker_purpose_==PickerPurpose::Read)list_screen();group_picker_screen();}
     else if(managing_)management_screen();
     else if(screen_==Screen::GroupEdit)group_edit_screen();
-    else if(current_){reader_screen();if(reader_tools_)reader_tools();if(reader_panel_!=ReaderPanel::None)reader_panel_screen();}
+    else if(current_){reader_visible=true;reader_screen();if(reader_tools_)reader_tools();if(reader_panel_!=ReaderPanel::None)reader_panel_screen();}
     else if(screen_==Screen::Subscriptions||screen_==Screen::Groups)nav_screen();
     else if(screen_==Screen::Opml)opml_screen();
     else if(screen_==Screen::Sync)sync_screen();
     else if(screen_==Screen::Cache)management_screen();
     else {list_screen();if(brand_menu_)app_menu();}
+    if(!reader_visible)device_status(0,true);
     dirty=false;
+}
+void App::device_status(int top,bool clock){
+    const int w=c_.width,size=clock?24:28;
+    if(clock)c_.text(32,top+26,reader_status_.clock.empty()?"--:--":reader_status_.clock,24,70);
+    const auto battery=reader_status_.battery<0?"--%":std::string(reader_status_.charging?"+":"")+std::to_string(reader_status_.battery)+"%";
+    const int text_x=w-32-c_.measure(battery,size),battery_x=text_x-48;
+    if(reader_status_.wifi)c_.icon(Icon::Wifi,{battery_x-40,top-2,32,32},60);
+    c_.icon(Icon::Battery,{battery_x,top-2,40,40},60);
+    if(reader_status_.battery>=0)c_.fill({battery_x+7,top+13,std::min(100,reader_status_.battery)*24/100,10},60);
+    c_.text(text_x,top+(clock?26:29),battery,size,60);
 }
 void App::list_screen(){
     // Cache all page boundaries once so the first footer includes the exact total.
     ensure_list_page(std::max<std::size_t>(1,list_.size()));list_page_=std::min(list_page_,list_starts_.size()-1);
     const int w=c_.width,h=c_.height,m=32;
-    c_.text(32,76,"RSS Reader",36,30);down(c_,32+c_.measure("RSS Reader",36)+20,58);
-    hits_.push_back({{32,8,310,88},[this]{brand_menu_=true;}});
-    c_.icon(Icon::Sync,{w-66,43,34,34});
-    hits_.push_back({{w-120,8,88,88},[this]{screen_=Screen::Sync;if(sync_state_!=SyncState::Running){request_="sync";sync_started();}}});
-    c_.rule(32,104,w-64,30);
+    c_.text(32,70,"RSS Reader",32,30);down(c_,32+c_.measure("RSS Reader",32)+20,52);
+    hits_.push_back({{32,28,310,64},[this]{brand_menu_=true;}});
+    c_.icon(Icon::Sync,{w-66,37,34,34});
+    hits_.push_back({{w-120,28,88,64},[this]{screen_=Screen::Sync;if(sync_state_!=SyncState::Running){request_="sync";sync_started();}}});
+    c_.rule(32,96,w-64,150);
     const auto total=std::to_string(list_.size());const int total_width=c_.measure(total,48),extra=search_.empty()?0:200;
-    c_.text(m,174,c_.ellipsize(view_name(),52,w-2*m-total_width-40-extra),52);
-    c_.text(w-m-total_width-extra,174,total,48,75);
-    if(!search_.empty())button({w-244,118,180,88},"退出搜索",[this]{clear_search();},false,26);
+    c_.text(m,160,c_.ellipsize(view_name(),48,w-2*m-total_width-40-extra),48);
+    c_.text(w-m-total_width-extra,160,total,48,75);
+    if(!search_.empty())button({w-244,104,180,88},"退出搜索",[this]{clear_search();},false,28);
     const auto context=!search_.empty()?"「"+search_+"」 · "+(feed_?source(feed_):group_?group_label(*group_):"全部订阅"):
         feed_?source_group(feed_):group_?"订阅 / "+group_label(*group_):"";
-    if(!context.empty())c_.text(m,214,c_.ellipsize(context,24,w-64),24,85);
+    if(!context.empty())c_.text(m,200,c_.ellipsize(context,28,w-64),28,85);
     const int filters=list_top()-88;
-    c_.icon(Icon::Folder,{m,filters+34,28,28});
+    c_.icon(Icon::Folder,{m,filters+28,32,32});
     const auto scope=feed_?"切换分组":group_?group_label(leaf(*group_)):"全部分组";
-    c_.text(m+40,filters+58,c_.ellipsize(scope,26,148),26);down(c_,m+204,filters+43);
+    c_.text(m+40,filters+58,c_.ellipsize(scope,32,148),32);down(c_,m+204,filters+39);
     hits_.push_back({{m,filters,232,88},[this]{open_group_picker(PickerPurpose::Read);}});
     c_.fill({m+244,filters,1,88},180);
     const std::vector<std::pair<std::string,View>> choices={{"未读",View::Unread},{"全部",View::All},{"收藏",View::Starred}};
     for(std::size_t i=0;i<choices.size();++i){int x=m+264+static_cast<int>(i)*116;bool selected=view_==choices[i].second;
-        c_.text(x,filters+58,choices[i].first,28,selected?20:90);if(selected)c_.fill({x,filters+84,88,4},25);
+        c_.text(x+(100-c_.measure(choices[i].first,32))/2,filters+58,choices[i].first,32,selected?20:90);if(selected)c_.fill({x+6,filters+84,88,4},25);
         hits_.push_back({{x,filters,100,88},[this,v=choices[i].second]{view_=v;list_page_=0;reload();}});
     }
-    c_.icon(Icon::Search,{w-124,filters+34,28,28});c_.text(w-32-c_.measure("搜索",26),filters+58,"搜索",26,30);
+    const int search_x=w-32-c_.measure("搜索",32);
+    c_.icon(Icon::Search,{search_x-44,filters+28,32,32});c_.text(search_x,filters+58,"搜索",32,30);
     hits_.push_back({{w-168,filters,136,88},[this]{start_input("search",search_);}});c_.rule(m,list_top(),w-64,100);
     if(list_.empty()){
         const bool none=feeds_.empty()&&search_.empty(),empty_search=!search_.empty(),empty_star=view_==View::Starred;
@@ -168,18 +189,18 @@ void App::list_screen(){
         const auto title=none?"从第一份订阅开始":empty_search?"没有找到相关标题":empty_star?"还没有收藏":done?"未读已全部读完":"这里还没有文章";
         const std::string copy=none?"添加 RSS 地址，或导入 OPML 文件。内容缓存后，即可离线阅读。":
             empty_search?"没有标题包含「"+search_+"」。试试更短的关键词，或切换搜索范围。":
-            empty_star?"阅读时点击顶部星标，即可收藏文章。":done?"慢慢读，也可以就此休息。已读文章仍可在「全部」中找到。":"同步后，已缓存的文章会显示在这里。";
+            empty_star?"点正文中央展开工具，再点星标收藏文章。":done?"慢慢读，也可以就此休息。已读文章仍可在「全部」中找到。":"同步后，已缓存的文章会显示在这里。";
         const std::string label=none?"添加订阅":empty_search?"修改搜索":done?"查看全部文章":"订阅";
-        auto lines=c_.wrap(copy,30,w-64);
+        auto lines=c_.wrap(copy,28,w-64);
         const int fixed_height=160+40+67+24+48+96;
         const int available=list_bottom()-list_top(),max_lines=std::max(1,(available-150-fixed_height)/54);
-        if(lines.size()>static_cast<std::size_t>(max_lines)){lines.resize(max_lines);lines.back().text=c_.ellipsize(lines.back().text+"…",30,w-64);}
+        if(lines.size()>static_cast<std::size_t>(max_lines)){lines.resize(max_lines);lines.back().text=c_.ellipsize(lines.back().text+"…",28,w-64);}
         const int content_height=fixed_height+static_cast<int>(lines.size())*54;
         int y=list_top()+110+std::max(0,(available-150-content_height)/2);
         c_.fill({32,y,110,3},20);c_.rule(32,y+159,110,20);
         if(none||done)c_.text(32,y+116,none?"＋":"✓",84);else c_.fill({32,y+84,84,4},20);
         y+=160+40;c_.text(32,y+52,title,48);y+=67+24;
-        for(const auto& line:lines){c_.text(32,y+38,line.text,30,90);y+=54;}
+        for(const auto& line:lines){c_.text(32,y+38,line.text,28,90);y+=54;}
         y+=48;const Rect action{32,y,std::max(160,c_.measure(label,28)+56),96};frame(c_,action,2);
         button(action,label,[this,none,empty_search,done]{
             if(none)edit_feed(Feed{});
@@ -198,25 +219,29 @@ void App::list_screen(){
         for(int n=0;n<meta_count;++n){auto text=meta[n].text;if(n==meta_count-1&&meta.size()>2)text=c_.ellipsize(text+"…",24,w-108);c_.text(m+44,y+24+count*50+10+24+n*36,text,24,85);}
         c_.rule(m,y+height-1,w-64,205);hits_.push_back({{m,y,w-64,height},[this,id=e.id]{open(id);}});y+=height;
     }
-    if(!status_.empty())button({m,h-204,w-64,88},status_,[this]{status_.clear();reload();},false,22);
+    if(!status_.empty())button({m,h-204,w-64,88},status_,[this]{status_.clear();reload();},false,24);
     c_.rule(32,h-104,w-64,210);
-    button({32,h-100,220,96},"上一页",[this]{previous();},false,26,Icon::Back,list_page_>0,Align::Left);
+    button({32,h-100,220,88},"上一页",[this]{previous();},false,28,Icon::Back,list_page_>0,Align::Left);
     const auto page="第 "+std::to_string(list_page_+1)+" / "+std::to_string(list_starts_.size())+" 页";
     c_.text(w/2-c_.measure(page,24)/2,h-42,page,24,90);
-    button({w-252,h-100,220,96},"下一页",[this]{next();},false,26,Icon::Next,list_page_+1<list_starts_.size(),Align::Right);
+    button({w-252,h-100,220,88},"下一页",[this]{next();},false,28,Icon::Next,list_page_+1<list_starts_.size(),Align::Right);
 }
 int App::article_heading_height(){
-    return 60*static_cast<int>(std::min<std::size_t>(3,c_.wrap(current_->title,48,c_.width-2*margin_).size()))+76;
+    const int size=std::min(48,font_size_+6);
+    return (size+10)*static_cast<int>(std::min<std::size_t>(3,c_.wrap(current_->title,size,c_.width-2*margin_).size()))+64;
+}
+std::string App::reader_key(const std::string& prefix)const{
+    return prefix+(current_->web_content?"web:":"")+std::to_string(current_->id);
 }
 void App::paginate(){
     if(!current_)return;
     if(cre_){
         try{
-            cre_->layout(c_.width-2*margin_,c_.height-252,font_size_,line_gap_);
+            cre_->layout(c_.width-2*margin_,c_.height-192,font_size_,line_gap_);
             const auto count=cre_->page_count();
             if(!count)throw std::runtime_error("新版排版没有可显示的页面");
             pages_.assign(count,Page{});
-            page_=std::min(cre_->restore(store_.setting("reader_cre:"+std::to_string(current_->id))),pages_.size()-1);
+            page_=std::min(cre_->restore(store_.setting(reader_key("reader_cre:"))),pages_.size()-1);
             return;
         }catch(const std::exception& e){cre_.reset();show_error(std::string("新版排版无法重排，已回到原排版：")+e.what());}
     }
@@ -230,24 +255,28 @@ void App::paginate(){
             inline_images.push_back({anchor.offset,anchor.caption_end,static_cast<int>(found-current_->images.begin()),found->width,found->height});
         }
     }
-    pages_=c_.paginate_article(current_->text,inline_images,font_size_,line_height(),c_.width-2*margin_,c_.height-252,
-                               c_.height-252-article_heading_height());
+    pages_=c_.paginate_article(current_->text,inline_images,font_size_,line_height(),c_.width-2*margin_,c_.height-192,
+                               c_.height-192-article_heading_height());
     // Existing reading positions count the title prefix; images consume no text bytes.
     const auto prefix=current_->title.size()+2;
     for(auto& page:pages_){page.start+=prefix;page.end+=prefix;}
     pages_.front().start=0;
     const auto position=static_cast<std::size_t>(std::max<std::int64_t>(0,current_->position));
     page_=page_at(pages_,position);
-    const auto anchor=store_.setting("reader_image:"+std::to_string(current_->id));
+    const auto anchor=store_.setting(reader_key("reader_image:"));
     for(std::size_t i=0;i<pages_.size();++i)
         if(pages_[i].image_anchor>=0&&anchor==std::to_string(position)+":"+std::to_string(pages_[i].image_anchor)){page_=i;break;}
 
 }
 void App::open(std::int64_t id,bool track){
     auto entry=store_.entry(id);if(!entry)throw std::runtime_error("文章已不在缓存中");
+    const auto selected=store_.setting("reader_content:"+std::to_string(id));
+    if(selected=="web"||(selected.empty()&&!entry->read&&!entry->in_progress)){
+        if(auto web=store_.fulltext_entry(id))entry=std::move(web);
+    }
     if(entry->text.empty()&&entry->images.empty())throw std::runtime_error("这篇文章尚无可阅读的正文");
     cre_.reset();current_=std::move(entry);
-    const bool keep_classic_position=store_.setting("reader_engine").empty()&&current_->position>0&&
+    const bool keep_classic_position=!current_->web_content&&store_.setting("reader_engine").empty()&&current_->position>0&&
         store_.setting("reader_cre:"+std::to_string(id)).empty();
     if(cre_requested_&&!keep_classic_position){
         try{
@@ -255,14 +284,15 @@ void App::open(std::int64_t id,bool track){
             if(base.empty())for(const auto& feed:feeds_)if(feed.id==current_->feed_id){base=feed.url;break;}
             cre_=std::make_unique<CreReader>(store_,c_.font_path());
             cre_->open(*current_,base,source(current_->feed_id)+"  ·  "+date(current_->published),
-                       c_.width-2*margin_,c_.height-252,font_size_,line_gap_);
+                       c_.width-2*margin_,c_.height-192,font_size_,line_gap_);
             paginate();
         }catch(const std::exception& e){cre_.reset();paginate();show_error(std::string("新版排版无法打开，已回到原排版：")+e.what());}
     }else paginate();
     if(cre_requested_&&keep_classic_position)notify("已保留原排版阅读位置，可在排版中切换新版");
     if(track){
         store_.set_read(id,true);current_->read=true;
-        store_.set_position(id,current_->position);
+        store_.set_position(id,current_->position,current_->web_content);
+        store_.set_setting("reader_content:"+std::to_string(id),current_->web_content?"web":"rss");
         store_.set_setting("last_entry",std::to_string(id));
     }
     reader_tools_=false;reader_panel_=ReaderPanel::None;image_zoom_=false;image_page_=0;info_scroll_=0;typography_anchor_.reset();dirty=true;
@@ -270,15 +300,25 @@ void App::open(std::int64_t id,bool track){
 void App::save_position(){
     if(!current_||pages_.empty())return;
     if(cre_){
-        store_.set_setting("reader_cre:"+std::to_string(current_->id),cre_->anchor(page_));
-        store_.set_position(current_->id,current_->position);
+        store_.set_setting(reader_key("reader_cre:"),cre_->anchor(page_));
+        store_.set_position(current_->id,current_->position,current_->web_content);
         return;
     }
     current_->position=static_cast<std::int64_t>(pages_[page_].start);
-    store_.set_position(current_->id,current_->position);
+    store_.set_position(current_->id,current_->position,current_->web_content);
     // Consecutive image-only pages share a text offset; retain their occurrence separately.
-    store_.set_setting("reader_image:"+std::to_string(current_->id),
+    store_.set_setting(reader_key("reader_image:"),
                        std::to_string(current_->position)+":"+std::to_string(pages_[page_].image_anchor));
+}
+void App::set_reader_content(bool web){
+    if(!current_||current_->web_content==web)return;
+    const auto id=current_->id;
+    const auto next=web?store_.fulltext_entry(id):store_.entry(id);
+    if(!next||(next->text.empty()&&next->images.empty())){show_error("所选正文尚无可阅读内容");return;}
+    save_position();
+    store_.set_setting("reader_content:"+std::to_string(id),web?"web":"rss");
+    open(id);
+    reader_tools_=true;reader_panel_=ReaderPanel::Content;
 }
 void App::set_reader_engine(bool use_cre){
     if(!current_||use_cre==static_cast<bool>(cre_))return;
@@ -289,8 +329,8 @@ void App::set_reader_engine(bool use_cre){
             if(base.empty())for(const auto& feed:feeds_)if(feed.id==current_->feed_id){base=feed.url;break;}
             auto next=std::make_unique<CreReader>(store_,c_.font_path());
             next->open(*current_,base,source(current_->feed_id)+"  ·  "+date(current_->published),
-                       c_.width-2*margin_,c_.height-252,font_size_,line_gap_);
-            const auto restored=next->restore(store_.setting("reader_cre:"+std::to_string(current_->id)));
+                       c_.width-2*margin_,c_.height-192,font_size_,line_gap_);
+            const auto restored=next->restore(store_.setting(reader_key("reader_cre:")));
             std::vector<Page> pages(next->page_count());
             if(pages.empty())throw std::runtime_error("新版排版没有可显示的页面");
             store_.set_setting("reader_engine","cre");
@@ -301,25 +341,25 @@ void App::set_reader_engine(bool use_cre){
 }
 void App::reader_screen(){
     const int w=c_.width,h=c_.height;
-    button({32,8,230,88},"返回列表",[this]{save_position();cre_.reset();current_.reset();pages_.clear();reader_tools_=false;reader_panel_=ReaderPanel::None;},false,26,Icon::Back,true,Align::Left);
-    button({w-262,8,230,88},current_->starred?"已收藏":"未收藏",[this]{
-        current_->starred=!current_->starred;store_.set_starred(current_->id,current_->starred);
-    },false,26,current_->starred?Icon::StarFilled:Icon::Star,true,Align::Right);
-    c_.rule(32,108,w-64);
+    back_button(8,88);
+    if(reader_tools_){
+        button({w-262,4,230,88},current_->starred?"已收藏":"收藏",[this]{
+            current_->starred=!current_->starred;store_.set_starred(current_->id,current_->starred);
+        },false,28,current_->starred?Icon::StarFilled:Icon::Star,true,Align::Right);
+        if(reader_panel_!=ReaderPanel::None)c_.text(144,57,c_.ellipsize(current_->title,24,w-440),24,85);
+    }else device_status(28,false);
     const int heading=cre_?0:page_==0?article_heading_height():0;
-    const int top=148+heading;
+    const int top=120+heading;
+    const int cover_top=reader_panel_==ReaderPanel::None?(reader_tools_?h-reader_bar_height:h-72):h-reader_bar_height-reader_panel_height();
     if(!cre_&&page_==0){
-        const auto title=c_.wrap(current_->title,48,w-2*margin_);
+        const int size=std::min(48,font_size_+6);
+        const auto title=c_.wrap(current_->title,size,w-2*margin_);
         for(std::size_t i=0;i<std::min<std::size_t>(3,title.size());++i)
-            c_.text(margin_,174+static_cast<int>(i)*60,i==2&&title.size()>3?c_.ellipsize(title[i].text+"…",48,w-2*margin_):title[i].text,48,15);
+            c_.text(margin_,120+size+static_cast<int>(i)*(size+10),i==2&&title.size()>3?c_.ellipsize(title[i].text+"…",size,w-2*margin_):title[i].text,size,15);
         const auto meta=source(current_->feed_id)+"  ·  "+date(current_->published);
-        c_.text(margin_,174+static_cast<int>(std::min<std::size_t>(3,title.size()))*60+8,c_.ellipsize(meta,24,w-2*margin_),24,75);
-    }else if(!cre_){
-        c_.text(margin_,135,c_.ellipsize(current_->title,24,w-2*margin_),24,90);
+        c_.text(margin_,120+static_cast<int>(std::min<std::size_t>(3,title.size()))*(size+10)+32,c_.ellipsize(meta,24,w-2*margin_),24,75);
     }
-    const int panel_height=reader_panel_==ReaderPanel::Type?420:reader_panel_==ReaderPanel::Images?(image_zoom_?764:662):reader_panel_==ReaderPanel::Info?520:0;
-    const int cover_top=reader_panel_==ReaderPanel::None?(reader_tools_?h-120:h-104):h-120-panel_height;
-    if(cre_)cre_->draw(c_,page_,margin_,148,cover_top);
+    if(cre_)cre_->draw(c_,page_,margin_,120,cover_top);
     if(!cre_)for(const auto& item:pages_[page_].elements){
         const Rect area{margin_+item.rect.x,top+item.rect.y,item.rect.w,item.rect.h};
         if(area.y>=cover_top||(item.image<0&&area.y+area.h>cover_top))continue;
@@ -333,22 +373,26 @@ void App::reader_screen(){
                       area.y+item.size,item.line.text,item.size,item.caption?90:20);
     }
     if(reader_panel_==ReaderPanel::None&&!reader_tools_){
-        c_.rule(32,h-104,w-64,200);
-        c_.fill({32,h-105,static_cast<int>((w-64)*(page_+1)/pages_.size()),3},30);
-        const auto footer="第 "+std::to_string(page_+1)+" / "+std::to_string(pages_.size())+" 页";
-        button({32,h-100,230,96},"上一页",[this]{previous();},false,26,Icon::Back,page_>0,Align::Left);
-        c_.text((w-c_.measure(footer,24))/2,h-35,footer,24,100);
-        if(page_+1<pages_.size())button({w-262,h-100,230,96},"下一页",[this]{next();},false,26,Icon::Next,true,Align::Right);
-        else button({w-262,h-100,230,96},"下一篇",[this]{
-            store_.set_setting("reader_cre:"+std::to_string(current_->id),"");
+        const auto clock=reader_status_.clock.empty()?"--:--":reader_status_.clock;
+        c_.text(32,h-20,clock,28,80);
+        const auto it=std::find_if(list_.begin(),list_.end(),[this](const Entry& e){return e.id==current_->id;});
+        const auto progress=it==list_.end()?source(current_->feed_id):
+            "第 "+std::to_string(it-list_.begin()+1)+" / "+std::to_string(list_.size())+" 篇";
+        const auto label=c_.ellipsize(progress,28,w-640);
+        c_.text((w-c_.measure(label,28))/2,h-20,label,28,80);
+        const auto footer=std::to_string(page_+1)+" / "+std::to_string(pages_.size());
+        if(page_+1<pages_.size())c_.text(w-32-c_.measure(footer,28),h-20,footer,28,80);
+        else button({w-332,h-56,300,56},footer+" · 下一篇",[this]{
+            for(const auto* prefix:{"reader_cre:","reader_cre:web:","reader_image:","reader_image:web:"})
+                store_.set_setting(std::string(prefix)+std::to_string(current_->id),"");
             store_.finish_reading(current_->id);
             auto it=std::find_if(list_.begin(),list_.end(),[this](const Entry& e){return e.id==current_->id;});
             if(it!=list_.end()&&++it!=list_.end())open(it->id);
             else{cre_.reset();current_.reset();pages_.clear();notify("本次列表已读完");}
-        },false,26,Icon::Next,true,Align::Right);
+        },false,28,Icon::Next,true,Align::Right);
     }
-    const int content_bottom=reader_panel_==ReaderPanel::None?(reader_tools_?h-120:h-104):cover_top;
-    hits_.push_back({{0,110,w,content_bottom-110},[this,w]{
+    const int content_bottom=reader_panel_==ReaderPanel::None?(reader_tools_?h-reader_bar_height:h-56):cover_top;
+    hits_.push_back({{0,96,w,content_bottom-96},[this,w]{
         if(reader_panel_!=ReaderPanel::None){close_reader_tools();return;}
         const int x=last_tap_x_;
         if(reader_tools_){close_reader_tools();return;}
@@ -367,37 +411,40 @@ void App::reader_screen(){
 }
 void App::close_reader_tools(){reader_panel_=ReaderPanel::None;reader_tools_=false;image_zoom_=false;typography_anchor_.reset();}
 void App::reader_tools(){
-    const int w=c_.width,h=c_.height,y=h-120;
-    c_.fill({0,y,w,120},255);c_.rule(32,y,w-64,170);
-    const std::array<std::tuple<const char*,Icon,ReaderPanel>,3> tools{{
-        {"排版",Icon::None,ReaderPanel::Type},{"图片",Icon::Image,ReaderPanel::Images},{"信息",Icon::Info,ReaderPanel::Info}}};
+    const int w=c_.width,h=c_.height,y=h-reader_bar_height;
+    c_.fill({0,y,w,reader_bar_height},255);c_.rule(32,y,w-64,170);
+    const std::array<std::tuple<const char*,Icon,ReaderPanel>,4> tools{{
+        {"排版",Icon::None,ReaderPanel::Type},{"正文",Icon::Download,ReaderPanel::Content},{"图片",Icon::Image,ReaderPanel::Images},{"信息",Icon::Info,ReaderPanel::Info}}};
     for(std::size_t i=0;i<tools.size();++i){
-        const int tw=(w-64)/3,x=32+static_cast<int>(i)*tw;
+        const int tw=(w-64)/4,x=32+static_cast<int>(i)*tw;
         const auto label=std::get<0>(tools[i]);const auto icon=std::get<1>(tools[i]);const auto panel=std::get<2>(tools[i]);
-        if(icon==Icon::None)c_.text(x+(tw-c_.measure("Aa",34))/2,y+51,"Aa",34);
-        else c_.icon(icon,{x+(tw-34)/2,y+20,34,34});
-        if(reader_panel_==panel)c_.fill({x,y+116,tw,4},30);
-        c_.text(x+(tw-c_.measure(label,24))/2,y+88,label,24);
-        hits_.push_back({{x,y,tw,120},[this,panel]{
+        const int left=x+(tw-108)/2;
+        if(icon==Icon::None)c_.text(left,y+60,"Aa",32);
+        else c_.icon(icon,{left,y+32,32,32});
+        c_.text(left+48,y+60,label,28);
+        if(reader_panel_==panel)c_.fill({x,y+reader_bar_height-4,tw,4},30);
+        hits_.push_back({{x,y,tw,reader_bar_height},[this,panel]{
             typography_anchor_.reset();
             if(reader_panel_==panel){reader_panel_=ReaderPanel::None;image_zoom_=false;}
             else{reader_panel_=panel;image_zoom_=false;info_scroll_=0;}
         }});
     }
 }
+int App::reader_panel_height()const{
+    if(reader_panel_==ReaderPanel::None)return 0;
+    if(reader_panel_==ReaderPanel::Type)return 640;
+    if(reader_panel_==ReaderPanel::Images)return image_zoom_?764:662;
+    return reader_panel_==ReaderPanel::Info?600:560;
+}
 void App::reader_panel_screen(){
-    const int w=c_.width,h=c_.height,bar=120;
-    const int height=reader_panel_==ReaderPanel::Type?420:reader_panel_==ReaderPanel::Images?(image_zoom_?764:662):520;
+    const int w=c_.width,h=c_.height,bar=reader_bar_height;
+    const int height=reader_panel_height();
     const int y=h-bar-height;
     c_.fill({0,y,w,height},255);c_.rule(32,y,w-64,150);
     const auto close=[this]{reader_panel_=ReaderPanel::None;image_zoom_=false;typography_anchor_.reset();};
-    const char* title=reader_panel_==ReaderPanel::Type?"排版":reader_panel_==ReaderPanel::Images?"图片":"文章信息";
-    c_.text(32,y+54,title,28);
-    if(reader_panel_==ReaderPanel::Type&&CreReader::available()){
-        button({200,y,250,88},"原排版",[this]{set_reader_engine(false);},!cre_,22);
-        button({466,y,300,88},"新版排版",[this]{set_reader_engine(true);},static_cast<bool>(cre_),22);
-    }
-    button({w-264,y,232,88},"收起面板",close,false,24,Icon::Close,true,Align::Right);
+    const char* title=reader_panel_==ReaderPanel::Type?"排版":reader_panel_==ReaderPanel::Images?"图片":reader_panel_==ReaderPanel::Content?"正文来源":"文章信息";
+    c_.text(32,y+54,title,32);
+    button({w-184,y,152,88},"收起",close,false,28,Icon::Close,true,Align::Right);
     auto adjust=[this](int& value,int next,const std::string& key){
         if(value==next)return;
         // Keep one text/image anchor across repeated live adjustments instead of drifting to each new page start.
@@ -407,32 +454,32 @@ void App::reader_panel_screen(){
     };
     if(reader_panel_==ReaderPanel::Type){
         const int start=w-496,cell=144,gap=16;
-        const auto frame=[this](Rect r,bool selected=false){
-            const int edge=selected?3:1;c_.fill(r,selected?30:180);
-            c_.fill({r.x+edge,r.y+edge,r.w-2*edge,r.h-2*edge},255);
+        const auto choice=[this](Rect r,const std::string& label,std::function<void()> action,bool selected){
+            frame(c_,r,selected?3:1);button(r,label,std::move(action),selected,28);
         };
-        c_.text(32,y+152,"字号",26);
-        const Rect smaller{start,y+96,cell,88},larger{start+2*(cell+gap),y+96,cell,88};
-        frame(smaller);frame(larger);
-        button(smaller,"−",[this,adjust]{adjust(font_size_,std::max(24,font_size_-2),"font_size");},false,34,Icon::None,font_size_>24);
+        c_.text(32,y+150,"字号",32);
+        const Rect smaller{start,y+100,cell,88},larger{start+2*(cell+gap),y+100,cell,88};
+        frame(c_,smaller);frame(c_,larger);
+        button(smaller,"−",[this,adjust]{adjust(font_size_,std::max(24,font_size_-2),"font_size");},false,36,Icon::None,font_size_>24);
         const auto value=std::to_string(font_size_);
-        c_.text(start+cell+gap+(cell-c_.measure(value,30))/2,y+152,value,30);
-        button(larger,"+",[this,adjust]{adjust(font_size_,std::min(48,font_size_+2),"font_size");},false,34,Icon::None,font_size_<48);
+        c_.text(start+cell+gap+(cell-c_.measure(value,32))/2,y+150,value,32);
+        button(larger,"+",[this,adjust]{adjust(font_size_,std::min(48,font_size_+2),"font_size");},false,36,Icon::None,font_size_<48);
         const std::array<int,3> gaps{16,24,32};
         const std::array<int,4> margins{32,64,78,96};
         const std::array<const char*,3> lines{"紧凑","标准","宽松"};
         const std::array<const char*,4> widths{"窄","适中","标准","宽"};
-        c_.text(32,y+252,"行距  "+std::to_string(line_height()),26);
-        c_.text(32,y+352,"页边距  "+std::to_string(margin_),26);
-        for(int i=0;i<3;++i){
-            const Rect line{start+i*(cell+gap),y+196,cell,88};
-            frame(line,line_gap_==gaps[i]);
-            button(line,lines[i],[this,adjust,gaps,i]{adjust(line_gap_,gaps[i],"line_gap");},false,26);
+        c_.text(32,y+256,"行距  "+std::to_string(line_height()),32);
+        c_.text(32,y+360,"页边距  "+std::to_string(margin_),32);
+        for(int i=0;i<3;++i)choice({start+i*(cell+gap),y+206,cell,88},lines[i],
+            [this,adjust,gaps,i]{adjust(line_gap_,gaps[i],"line_gap");},line_gap_==gaps[i]);
+        for(int i=0;i<4;++i)choice({start+i*(104+gap),y+310,104,88},widths[i],
+            [this,adjust,margins,i]{adjust(margin_,margins[i],"margin");},margin_==margins[i]);
+        if(CreReader::available()){
+            c_.text(32,y+456,"排版引擎",32);
+            choice({start,y+406,224,88},"原排版",[this]{set_reader_engine(false);},!cre_);
+            choice({start+240,y+406,224,88},"新版排版",[this]{set_reader_engine(true);},static_cast<bool>(cre_));
         }
-        for(int i=0;i<4;++i){
-            const Rect margin{start+i*(104+gap),y+296,104,88};frame(margin,margin_==margins[i]);
-            button(margin,widths[i],[this,adjust,margins,i]{adjust(margin_,margins[i],"margin");},false,26);
-        }
+        c_.text(32,y+560,"调整后会保留当前阅读位置",24,85);
     }else if(reader_panel_==ReaderPanel::Images){
         if(current_->images.empty())c_.text(32,y+240,"这篇文章没有图片",28,90);
         else{
@@ -450,24 +497,44 @@ void App::reader_panel_screen(){
                 }
             }
             const auto caption=reference.alt.empty()?"订阅源图片":reference.alt;
-            c_.text(32,y+area_height+118,c_.ellipsize(caption,22,w-64),22,90);
+            c_.text(32,y+area_height+118,c_.ellipsize(caption,24,w-64),24,90);
             const int controls=h-bar-100;
-            button({32,controls,216,88},"上一张",[this]{previous();},false,24,Icon::Back,image_page_>0,Align::Left);
+            button({32,controls,216,88},"上一张",[this]{previous();},false,28,Icon::Back,image_page_>0,Align::Left);
             const auto counter=std::to_string(image_page_+1)+" / "+std::to_string(current_->images.size());
             c_.text(w/2-180+(160-c_.measure(counter,24))/2,controls+52,counter,24,90);
-            button({w/2+12,controls,176,88},image_zoom_?"还原":"放大",[this]{image_zoom_=!image_zoom_;},false,24,Icon::None,shown);
-            button({w-248,controls,216,88},"下一张",[this]{next();},false,24,Icon::Next,image_page_+1<current_->images.size(),Align::Right);
+            button({w/2+12,controls,176,88},image_zoom_?"还原":"放大",[this]{image_zoom_=!image_zoom_;},false,28,Icon::None,shown);
+            button({w-248,controls,216,88},"下一张",[this]{next();},false,28,Icon::Next,image_page_+1<current_->images.size(),Align::Right);
         }
+    }else if(reader_panel_==ReaderPanel::Content){
+        const auto state=store_.fulltext_status(current_->id);
+        c_.text(32,y+130,current_->web_content?"当前：网页正文":"当前：RSS 原文",28);
+        button({32,y+166,(w-80)/2,88},"RSS 原文",[this]{set_reader_content(false);},!current_->web_content,28);
+        button({w/2+8,y+166,(w-80)/2,88},"网页正文",[this]{set_reader_content(true);},current_->web_content,28,Icon::None,state.state=="ready");
+        std::string message;
+        if(state.state=="ready"){
+            int missing=0;if(auto web=store_.fulltext_entry(current_->id))for(const auto& image:web->images)if(!image.width)++missing;
+            message=missing?"正文已保存 · "+std::to_string(missing)+" 张图片未缓存，返回列表同步可重试":"网页正文和所含缓存图片可离线阅读";
+        }else if(state.state=="pending")message=sync_state_==SyncState::Running?"正在下载，当前阅读内容不会替换":"等待下载；可继续下载或返回列表同步";
+        else if(state.state=="failed")message="下载失败："+state.error;
+        else message="尝试从原网页提取正文；失败仍保留 RSS 原文";
+        int line_y=y+300;for(const auto& line:c_.wrap(message,28,w-64)){if(line_y>y+height-120)break;c_.text(32,line_y,line.text,28,85);line_y+=42;}
+        const bool running=sync_state_==SyncState::Running;
+        button({32,y+height-100,w-64,88},running?"取消下载":state.state=="ready"?"网页正文已保存":state.state=="failed"?"重试下载网页正文":state.state=="pending"?"继续下载网页正文":"下载网页正文",[this,running]{
+            if(running){request_="cancel-sync";return;}
+            save_position();store_.queue_fulltext(current_->id);
+            if(store_.fulltext_status(current_->id).state!="pending"){show_error("文章地址不可下载，或订阅已取消");return;}
+            request_="fulltext:"+std::to_string(current_->id);sync_started();
+        },false,28,running?Icon::Close:Icon::Download,running||(state.state!="ready"&&!current_->url.empty()),Align::Left);
     }else{
         const std::string details="标题："+current_->title+"\n\n来源："+source(current_->feed_id)+"\n时间："+date(current_->published)+"\n作者："+(current_->author.empty()?"未提供":current_->author)+"\n\n原文地址：\n"+current_->url;
-        const auto lines=c_.wrap(details,24,w-64);const std::size_t visible=std::max(1,(height-210)/38);
+        const auto lines=c_.wrap(details,28,w-64);const std::size_t visible=std::max(1,(height-210)/42);
         const auto last=((lines.size()-1)/visible)*visible;info_scroll_=std::min(info_scroll_,last);
-        for(std::size_t i=0;i<visible&&info_scroll_+i<lines.size();++i)c_.text(32,y+128+static_cast<int>(i)*38,lines[info_scroll_+i].text,24,30);
+        for(std::size_t i=0;i<visible&&info_scroll_+i<lines.size();++i)c_.text(32,y+128+static_cast<int>(i)*42,lines[info_scroll_+i].text,28,30);
         if(lines.size()>visible){
-            button({32,y+height-100,230,88},"上一页",[this,visible]{info_scroll_=info_scroll_>=visible?info_scroll_-visible:0;},false,24,Icon::Back,info_scroll_>0,Align::Left);
-            button({w-262,y+height-100,230,88},"下一页",[this,visible,last]{info_scroll_=std::min(info_scroll_+visible,last);},false,24,Icon::Next,info_scroll_+visible<lines.size(),Align::Right);
+            button({32,y+height-100,230,88},"上一页",[this,visible]{info_scroll_=info_scroll_>=visible?info_scroll_-visible:0;},false,28,Icon::Back,info_scroll_>0,Align::Left);
+            button({w-262,y+height-100,230,88},"下一页",[this,visible,last]{info_scroll_=std::min(info_scroll_+visible,last);},false,28,Icon::Next,info_scroll_+visible<lines.size(),Align::Right);
         }
-        button({w/2-210,y+height-100,420,88},current_->read?"标为未读":"标为已读",[this]{current_->read=!current_->read;store_.set_read(current_->id,current_->read);},false,24,Icon::Check);
+        button({w/2-210,y+height-100,420,88},current_->read?"标为未读":"标为已读",[this]{current_->read=!current_->read;store_.set_read(current_->id,current_->read);},false,28,Icon::Check);
     }
 }
 void App::open_subscriptions(){
@@ -480,17 +547,17 @@ void App::restore_home(){
 }
 void App::app_menu(){
     hits_.clear();hits_.push_back({{0,0,c_.width,c_.height},[this]{brand_menu_=false;}});
-    frame(c_,{32,104,400,212},2);
-    button({56,108,352,100},"订阅",[this]{open_subscriptions();},false,30,Icon::Folder,true,Align::Left);
-    c_.rule(34,210,396,180);
-    button({56,212,352,100},"退出",[this]{brand_menu_=false;confirmation_="exit";},false,30,Icon::Exit,true,Align::Left);
+    frame(c_,{32,96,400,212},2);
+    button({56,100,352,100},"订阅",[this]{open_subscriptions();},false,32,Icon::Folder,true,Align::Left);
+    c_.rule(34,202,396,180);
+    button({56,204,352,100},"退出",[this]{brand_menu_=false;confirmation_="exit";},false,32,Icon::Exit,true,Align::Left);
 }
 void App::nav_screen(){
     const bool groups=screen_==Screen::Groups;const int w=c_.width,h=c_.height;
-    button({32,8,240,88},groups?"订阅":"文章列表",[this]{back();},false,26,Icon::Back,true,Align::Left);
-    button({w-212,8,180,88},groups?"新增":"添加",[this,groups]{if(groups){edit_group("",true);}else edit_feed(Feed{});},false,28,Icon::Plus,true,Align::Right);
-    c_.rule(32,104,w-64,30);c_.text(32,174,groups?"管理分组":"订阅",48);
-    c_.text(32,214,std::to_string(groups?group_names_.size()-1:feeds_.size())+(groups?" 个分组":" 个订阅源"),24,85);
+    page_header(groups?"管理分组":"订阅");
+    button({w-212,28,180,64},groups?"新增":"添加",[this,groups]{if(groups){edit_group("",true);}else edit_feed(Feed{});},false,28,Icon::Plus,true,Align::Right);
+
+    c_.text(32,200,std::to_string(groups?group_names_.size()-1:feeds_.size())+(groups?" 个分组":" 个订阅源"),24,85);
     const auto count=[this](const std::string& path){return std::count_if(feeds_.begin(),feeds_.end(),[&](const Feed& f){return path.empty()?f.group.empty():under(f.group,path);});};
     std::vector<NavigationRow> rows;
     if(groups){for(const auto& path:group_names_)rows.push_back({path,0,static_cast<int>(std::count(path.begin(),path.end(),'/')),128});}
@@ -505,15 +572,15 @@ void App::nav_screen(){
     }
     const int top=250,bottom=h-(groups?104:208);auto starts=navigation_pages(rows,bottom-top);auto& page=groups?groups_page_:nav_page_;
     page=std::min(page,starts.size()-1);nav_page_count_=starts.size();int y=top;const auto end=page+1<starts.size()?starts[page+1]:rows.size();
-    if(starts[page]<rows.size()&&rows[starts[page]].depth>0)c_.text(32,244,c_.ellipsize(rows[starts[page]].path,22,w-64),22,100);
+    if(starts[page]<rows.size()&&rows[starts[page]].depth>0)c_.text(32,244,c_.ellipsize(rows[starts[page]].path,24,w-64),24,100);
     for(auto i=starts[page];i<end;++i){const auto row=rows[i];const int x=40+std::min(row.depth,8)*32;
         if(!row.feed){
-            c_.icon(Icon::Folder,{x,y+34,28,28});c_.text(x+48,y+62,c_.ellipsize(group_label(leaf(row.path)),30,w-x-(groups?450:310)),30);
+            c_.icon(Icon::Folder,{x,y+34,28,28});c_.text(x+48,y+62,c_.ellipsize(group_label(leaf(row.path)),32,w-x-(groups?450:310)),32);
             if(groups){
                 c_.text(x+48,y+100,std::to_string(count(row.path))+" 个订阅源",24,90);
                 if(!row.path.empty()){
-                    button({w-352,y+10,176,88},"子分组",[this,path=row.path]{edit_group(path,true);},false,26,Icon::Plus,true,Align::Right);
-                    button({w-152,y+10,120,88},"编辑",[this,path=row.path]{edit_group(path,false);},false,26,Icon::None,true,Align::Right);
+                    button({w-352,y+10,176,88},"子分组",[this,path=row.path]{edit_group(path,true);},false,28,Icon::Plus,true,Align::Right);
+                    button({w-152,y+10,120,88},"编辑",[this,path=row.path]{edit_group(path,false);},false,28,Icon::None,true,Align::Right);
                 }
             }else{
                 const auto label=std::to_string(count(row.path))+" 个源";c_.text(w-72-c_.measure(label,24),y+62,label,24,90);down(c_,w-52,y+44);
@@ -526,15 +593,15 @@ void App::nav_screen(){
             auto domain=f->url;auto protocol=domain.find("://");if(protocol!=std::string::npos)domain=domain.substr(protocol+3);domain=domain.substr(0,domain.find('/'));
             c_.text(x+48,y+36+n*38,c_.ellipsize(domain,24,w-x-240),24,90);
             hits_.push_back({{32,y,w-224,row.height},[this,id=f->id]{view_=View::Unread;feed_=id;group_.reset();search_.clear();list_page_=0;source_list_=true;screen_=Screen::List;reload();}});
-            button({w-152,y+20,120,88},"编辑",[this,f=*f]{edit_feed(f);},false,26,Icon::None,true,Align::Right);
+            button({w-152,y+20,120,88},"编辑",[this,f=*f]{edit_feed(f);},false,28,Icon::None,true,Align::Right);
         }
         c_.rule(32,y+row.height-1,w-64,205);y+=row.height;
     }
     if(rows.empty())c_.text(32,350,"还没有订阅源",32,80);
-    const int pager=h-(groups?100:204);
-    button({32,pager,220,88},"上一页",[page_ptr=&page]{--*page_ptr;},false,26,Icon::Back,page>0,Align::Left);
+    const int pager=h-(groups?100:204);c_.rule(32,pager-4,w-64,210);
+    button({32,pager,220,88},"上一页",[page_ptr=&page]{--*page_ptr;},false,28,Icon::Back,page>0,Align::Left);
     const auto page_label="第 "+std::to_string(page+1)+" / "+std::to_string(starts.size())+" 页";c_.text(w/2-c_.measure(page_label,24)/2,pager+56,page_label,24,90);
-    button({w-252,pager,220,88},"下一页",[page_ptr=&page]{++*page_ptr;},false,26,Icon::Next,page+1<starts.size(),Align::Right);
+    button({w-252,pager,220,88},"下一页",[page_ptr=&page]{++*page_ptr;},false,28,Icon::Next,page+1<starts.size(),Align::Right);
     if(!groups){c_.rule(32,h-104,w-64,100);button({32,h-100,w/2-64,88},"管理分组",[this]{screen_=Screen::Groups;},false,28,Icon::Folder,true,Align::Left);button({w/2,h-100,w/2-32,88},"OPML",[this]{status_.clear();screen_=Screen::Opml;},false,28,Icon::Download,true,Align::Right);}
 }
 void App::open_group_picker(PickerPurpose purpose){
@@ -551,11 +618,11 @@ void App::group_picker_screen(){
     const int left=32,width=w-64,row_height=popup?88:112;
     int top=popup?list_top()+96:250;
     if(!popup){
-        button({32,8,220,88},"返回",[this]{back();},false,26,Icon::Back,true,Align::Left);
-        button({w-212,8,180,88},"查找",[this]{start_input("group-find",picker_query_);},false,26,Icon::Search,true,Align::Right);
-        c_.rule(32,104,w-64,30);c_.text(32,174,parent?"上级分组":picker_purpose_==PickerPurpose::Search?"搜索范围":"所属分组",48);
-        c_.text(32,214,parent?"选择顶层，或放入已有分组；子分组随之移动":picker_purpose_==PickerPurpose::Move?"每个订阅源归属一个分组":"包含所选分组及其子分组",24,85);
-        if(!picker_query_.empty()){c_.text(32,286,c_.ellipsize("查找："+picker_query_,26,w-260),26);button({w-212,238,180,88},"清除",[this]{picker_query_.clear();picker_page_=0;},false,26,Icon::None,true,Align::Right);top=340;}
+        page_header(parent?"上级分组":picker_purpose_==PickerPurpose::Search?"搜索范围":"所属分组");
+        button({w-212,28,180,64},"查找",[this]{start_input("group-find",picker_query_);},false,28,Icon::Search,true,Align::Right);
+
+        c_.text(32,200,parent?"选择顶层，或放入已有分组；子分组随之移动":picker_purpose_==PickerPurpose::Move?"每个订阅源归属一个分组":"包含所选分组及其子分组",24,85);
+        if(!picker_query_.empty()){c_.text(32,286,c_.ellipsize("查找："+picker_query_,28,w-260),28);button({w-212,238,180,88},"清除",[this]{picker_query_.clear();picker_page_=0;},false,28,Icon::None,true,Align::Right);top=340;}
     }
     std::vector<std::optional<std::string>> options;if(!parent&&picker_purpose_!=PickerPurpose::Move)options.push_back(std::nullopt);for(const auto& group:group_names_)if(!parent||new_group_||!under(group,editing_group_))options.push_back(group);
     std::vector<NavigationRow> rows;for(std::size_t i=0;i<options.size();++i){const auto name=options[i]?(parent&&options[i]->empty()?"顶层（无上级）":group_label(*options[i])):"全部订阅";if(lower_ascii(name).find(lower_ascii(picker_query_))!=std::string::npos)rows.push_back({name,static_cast<std::int64_t>(i+1),options[i]?static_cast<int>(std::count(options[i]->begin(),options[i]->end(),'/')):0,row_height});}
@@ -564,28 +631,29 @@ void App::group_picker_screen(){
     if(popup){
         const Rect panel{left,top-88,width,88+visible_rows*row_height+(starts.size()>1?88:0)+4};
         hits_.clear();hits_.push_back({{0,0,w,h},[this]{back();}});frame(c_,panel,2);hits_.push_back({panel,[]{}});
-        if(picker_query_.empty())c_.text(left+24,panel.y+52,"选择分组",26);
-        else button({left+24,panel.y,width-236,88},"查找："+picker_query_,[this]{start_input("group-find",picker_query_);},false,26,Icon::None,true,Align::Left);
-        button({left+width-188,panel.y,164,88},picker_query_.empty()?"查找":"清除",[this]{if(picker_query_.empty())start_input("group-find",picker_query_);else{picker_query_.clear();picker_page_=0;}},false,26,picker_query_.empty()?Icon::Search:Icon::None,true,Align::Right);
+        if(picker_query_.empty())c_.text(left+24,panel.y+58,"选择分组",32);
+        else button({left+24,panel.y,width-236,88},"查找："+picker_query_,[this]{start_input("group-find",picker_query_);},false,32,Icon::None,true,Align::Left);
+        button({left+width-188,panel.y,164,88},picker_query_.empty()?"查找":"清除",[this]{if(picker_query_.empty())start_input("group-find",picker_query_);else{picker_query_.clear();picker_page_=0;}},false,32,picker_query_.empty()?Icon::Search:Icon::None,true,Align::Right);
         c_.rule(left+16,top-1,width-32,180);
     }
     int y=top;
     for(auto i=begin;i<end;++i){const auto row=rows[i];const auto option=options.at(row.feed-1);const int x=popup?left+24+std::min(row.depth,6)*28:40+std::min(row.depth,8)*32;
-        c_.icon(Icon::Folder,{x,y+(popup?34:40),28,28});c_.text(x+48,y+(popup?58:68),c_.ellipsize(row.path,popup?28:30,left+width-x-(popup?144:112)),popup?28:30);
+        c_.icon(Icon::Folder,{x,y+(popup?30:40),28,28});c_.text(x+48,y+(popup?58:68),c_.ellipsize(row.path,32,left+width-x-(popup?144:112)),32);
         const bool selected=parent?(option&&*option==group_parent_draft_):picker_purpose_==PickerPurpose::Move?(option&&*option==managing_->group):(!feed_&&option==group_);
-        if(selected)c_.icon(Icon::Check,{left+width-(popup?56:28),y+(popup?34:40),28,28});c_.rule(popup?left+16:left,y+row_height-1,popup?width-32:width,205);
+        if(selected)c_.icon(Icon::Check,{left+width-(popup?56:28),y+(popup?30:40),28,28});c_.rule(popup?left+16:left,y+row_height-1,popup?width-32:width,205);
         hits_.push_back({{popup?left+2:left,y,popup?width-4:width,row_height},[this,option]{
             if(picker_purpose_==PickerPurpose::Parent){group_parent_draft_=option.value_or("");screen_=Screen::GroupEdit;}
             else if(picker_purpose_==PickerPurpose::Move){managing_->group=option.value_or("");screen_=edit_origin_;}
             else {group_=option;feed_=0;if(picker_purpose_==PickerPurpose::Search){restore_input();}else{source_list_=false;screen_=Screen::List;list_page_=0;reload();}}
         }});y+=row_height;
     }
-    if(rows.empty())c_.text(popup?left+24:32,top+(popup?58:100),"没有匹配的分组",popup?28:32,80);
+    if(rows.empty())c_.text(popup?left+24:32,top+(popup?58:100),"没有匹配的分组",32,80);
     if(!popup||starts.size()>1){
         const int pager=popup?top+visible_rows*row_height:h-100;
-        button({popup?left+16:32,pager,popup?200:220,88},"上一页",[this]{--picker_page_;},false,26,Icon::Back,picker_page_>0,Align::Left);
+        if(!popup)c_.rule(32,pager-4,w-64,210);
+        button({popup?left+16:32,pager,popup?200:220,88},"上一页",[this]{--picker_page_;},false,28,Icon::Back,picker_page_>0,Align::Left);
         const auto page="第 "+std::to_string(picker_page_+1)+" / "+std::to_string(starts.size())+" 页";c_.text(left+width/2-c_.measure(page,24)/2,pager+56,page,24,90);
-        button({popup?left+width-216:w-252,pager,popup?200:220,88},"下一页",[this]{++picker_page_;},false,26,Icon::Next,picker_page_+1<starts.size(),Align::Right);
+        button({popup?left+width-216:w-252,pager,popup?200:220,88},"下一页",[this]{++picker_page_;},false,28,Icon::Next,picker_page_+1<starts.size(),Align::Right);
     }
 }
 void App::edit_group(const std::string& path,bool create){
@@ -594,14 +662,15 @@ void App::edit_group(const std::string& path,bool create){
     screen_=Screen::GroupEdit;
 }
 void App::group_edit_screen(){
-    const int w=c_.width,h=c_.height;button({32,8,220,88},"管理分组",[this]{screen_=Screen::Groups;},false,26,Icon::Back,true,Align::Left);c_.rule(32,104,w-64,30);
-    c_.text(32,174,new_group_?"新增分组":"编辑分组",48);c_.text(32,270,"分组名称",24,85);frame(c_,{32,296,w-64,112});
-    button({56,304,w-112,96},group_name_draft_.empty()?"点击输入名称":group_name_draft_,[this]{start_input("folder",group_name_draft_);},false,30,Icon::None,true,Align::Left);
+    const int w=c_.width,h=c_.height;page_header(new_group_?"新增分组":"编辑分组");
+    c_.text(32,270,"分组名称",24,85);frame(c_,{32,296,w-64,112});
+    button({56,304,w-112,96},group_name_draft_.empty()?"点击输入名称":group_name_draft_,[this]{start_input("folder",group_name_draft_);},false,32,Icon::None,true,Align::Left);
     c_.text(32,470,"上级分组",24,85);frame(c_,{32,496,w-64,112});
-    button({56,504,w-168,96},group_parent_draft_.empty()?"顶层（无上级）":group_parent_draft_,[this]{open_group_picker(PickerPurpose::Parent);},false,30,Icon::Folder,true,Align::Left);
+    button({56,504,w-168,96},group_parent_draft_.empty()?"顶层（无上级）":group_parent_draft_,[this]{open_group_picker(PickerPurpose::Parent);},false,32,Icon::Folder,true,Align::Left);
     down(c_,w-72,552);hits_.push_back({{w-112,496,80,112},[this]{open_group_picker(PickerPurpose::Parent);}});
-    c_.text(32,682,new_group_?"保存在所选上级中，可继续添加更深的子分组。":"更换上级会移动整个分组，订阅和文章状态保留。",26,85);
-    if(!new_group_){button({32,780,280,88},"删除分组",[this]{confirmation_="delete-group";},false,28,Icon::Close,true,Align::Left);c_.text(32,936,"删除含子分组；订阅移到未分组，文章保留。",26,85);}
+    c_.text(32,682,new_group_?"保存在所选上级中，可继续添加更深的子分组。":"更换上级会移动整个分组，订阅和文章状态保留。",24,85);
+    if(!new_group_){button({32,780,280,88},"删除分组",[this]{confirmation_="delete-group";},false,28,Icon::Close,true,Align::Left);c_.text(32,936,"删除含子分组；订阅移到未分组，文章保留。",24,85);}
+    c_.rule(32,h-104,w-64,210);
     button({32,h-100,220,88},"取消",[this]{screen_=Screen::Groups;},false,28,Icon::None,true,Align::Left);
     button({w-252,h-100,220,88},"保存",[this]{
         const auto name=trim(group_name_draft_);if(name.empty()||name.find('/')!=std::string::npos)throw std::runtime_error("请输入不含 / 的分组名称");
@@ -615,7 +684,7 @@ void App::group_edit_screen(){
     },true,28);
 }
 void App::opml_screen(){
-    const int w=c_.width;button({32,8,220,88},"订阅",[this]{back();},false,26,Icon::Back,true,Align::Left);c_.rule(32,104,w-64,30);c_.text(32,174,"OPML",48);
+    const int w=c_.width;page_header("OPML");
     button({32,270,w-64,112},"导入 OPML",[this]{confirmation_="import";},false,32,Icon::Download,true,Align::Left);
     c_.text(32,428,"从本机 feeds.opml 合并订阅及分组",24,85);
     button({32,510,w-64,112},"导出 OPML",[this]{request_="export";},false,32,Icon::Upload,true,Align::Left);
@@ -625,35 +694,37 @@ void App::opml_screen(){
 void App::sync_started(){status_.clear();sync_page_=0;sync_state_=SyncState::Running;sync_completed_=sync_failed_=0;sync_total_=static_cast<int>(feeds_.size());sync_message_="正在连接订阅源";if(screen_==Screen::Sync)dirty=true;}
 void App::sync_progress(int completed,int total,int failed,const std::string& message){sync_completed_=completed;sync_total_=total;sync_failed_=failed;sync_message_=message;if(screen_==Screen::Sync)dirty=true;}
 void App::sync_finished(bool cancelled,const std::string& error){
-    feeds_=store_.feeds();group_names_=store_.groups();sync_failed_=static_cast<int>(std::count_if(feeds_.begin(),feeds_.end(),[](const Feed& f){return !f.error.empty();}));sync_state_=cancelled?SyncState::Cancelled:(!error.empty()||sync_failed_)?SyncState::Failed:SyncState::Complete;
+    feeds_=store_.feeds();group_names_=store_.groups();sync_failed_=std::max(sync_failed_,static_cast<int>(std::count_if(feeds_.begin(),feeds_.end(),[](const Feed& f){return !f.error.empty();})));sync_state_=cancelled?SyncState::Cancelled:(!error.empty()||sync_failed_)?SyncState::Failed:SyncState::Complete;
     if(!error.empty())sync_message_=error;
-    if(screen_==Screen::Sync)dirty=true;else notify(cancelled?"同步已取消，点击更新列表":sync_state_==SyncState::Failed?"同步有未完成项目，点击更新列表":"同步已完成，点击更新列表");
+    dirty=true;
+    if(screen_!=Screen::Sync)notify(reading()?sync_message_:cancelled?"同步已取消，点击更新列表":sync_state_==SyncState::Failed?"同步有未完成项目，点击更新列表":"同步已完成，点击更新列表");
 }
 void App::sync_screen(){
-    const int w=c_.width,h=c_.height;button({32,8,240,88},"返回列表",[this]{back();},false,26,Icon::Back,true,Align::Left);c_.text(w-120,76,"同步",28,90);c_.rule(32,104,w-64,30);
-    const auto heading=sync_state_==SyncState::Running?"正在同步订阅":sync_state_==SyncState::Failed?"部分订阅未能同步":sync_state_==SyncState::Cancelled?"同步已取消":sync_state_==SyncState::Complete?"同步已完成":"同步订阅";
-    c_.text(32,174,heading,48);c_.text(32,224,"已缓存文章、收藏与阅读位置会保留。",24,85);
+    const int w=c_.width,h=c_.height;
+    const auto heading=sync_state_==SyncState::Running?"正在下载内容":sync_state_==SyncState::Failed?"部分内容未能下载":sync_state_==SyncState::Cancelled?"同步已取消":sync_state_==SyncState::Complete?"同步已完成":"同步订阅";
+    page_header(heading);c_.text(32,200,"已缓存文章、收藏与阅读位置会保留。",24,85);
     int y=300;
     if(sync_state_==SyncState::Failed){
         std::vector<Feed> failed;for(const auto& f:feeds_)if(!f.error.empty())failed.push_back(f);
         const std::size_t pages=std::max<std::size_t>(1,(failed.size()+3)/4);sync_page_=std::min(sync_page_,pages-1);nav_page_count_=pages;
         for(std::size_t i=sync_page_*4;i<std::min(failed.size(),(sync_page_+1)*4);++i){const auto f=failed[i];
-            button({32,y,w-64,96},f.title.empty()?f.url:f.title,[this,f]{edit_feed(f);},false,30,Icon::Rss,true,Align::Left);
+            button({32,y,w-64,96},f.title.empty()?f.url:f.title,[this,f]{edit_feed(f);},false,32,Icon::Rss,true,Align::Left);
             c_.text(32,y+132,c_.ellipsize(f.error,24,w-64),24,90);y+=180;
         }
-        if(failed.empty()&&!sync_message_.empty())for(const auto& line:c_.wrap(sync_message_,26,w-64)){if(y>h-300)break;c_.text(32,y,line.text,26,85);y+=42;}
+        if(failed.empty()&&!sync_message_.empty())for(const auto& line:c_.wrap(sync_message_,28,w-64)){if(y>h-300)break;c_.text(32,y,line.text,28,85);y+=42;}
+        if(!failed.empty()&&!sync_message_.empty()&&status_.empty())c_.text(32,h-260,c_.ellipsize(sync_message_,24,w-64),24,85);
         if(pages>1){
-            button({32,h-204,220,88},"上一页",[this]{--sync_page_;},false,26,Icon::Back,sync_page_>0,Align::Left);
+            button({32,h-204,220,88},"上一页",[this]{--sync_page_;},false,28,Icon::Back,sync_page_>0,Align::Left);
             const auto label=std::to_string(sync_page_+1)+" / "+std::to_string(pages);c_.text(w/2-c_.measure(label,24)/2,h-148,label,24,90);
-            button({w-252,h-204,220,88},"下一页",[this]{++sync_page_;},false,26,Icon::Next,sync_page_+1<pages,Align::Right);
+            button({w-252,h-204,220,88},"下一页",[this]{++sync_page_;},false,28,Icon::Next,sync_page_+1<pages,Align::Right);
         }
     }else{
         frame(c_,{32,y,w-64,22},2);if(sync_total_>0)c_.fill({34,y+2,static_cast<int>(static_cast<long long>(w-68)*sync_completed_/sync_total_),18},30);y+=90;
-        if(!sync_message_.empty()){for(const auto& line:c_.wrap(sync_message_,26,w-64)){if(y>h-300)break;c_.text(32,y,line.text,26,85);y+=42;}}
+        if(!sync_message_.empty()){for(const auto& line:c_.wrap(sync_message_,28,w-64)){if(y>h-300)break;c_.text(32,y,line.text,28,85);y+=42;}}
     }
     if(!status_.empty())c_.text(32,h-(sync_state_==SyncState::Failed&&sync_failed_>4?260:152),c_.ellipsize(status_,24,w-64),24,80);
-    const auto running=sync_state_==SyncState::Running;
-    button({32,h-100,400,88},running?"取消同步":sync_state_==SyncState::Failed?"重试失败订阅":"返回列表",[this,running]{if(running)request_="cancel-sync";else if(sync_state_==SyncState::Failed){request_="retry-sync";sync_started();}else{screen_=Screen::List;status_.clear();reload();}},false,28,running?Icon::Close:sync_state_==SyncState::Failed?Icon::Sync:Icon::Back,true,Align::Left);
+    const auto running=sync_state_==SyncState::Running;c_.rule(32,h-104,w-64,210);
+    button({32,h-100,400,88},running?"取消同步":sync_state_==SyncState::Failed?"重试失败项目":"返回列表",[this,running]{if(running)request_="cancel-sync";else if(sync_state_==SyncState::Failed){request_="retry-sync";sync_started();}else{screen_=Screen::List;status_.clear();reload();}},false,28,running?Icon::Close:sync_state_==SyncState::Failed?Icon::Sync:Icon::Back,true,Align::Left);
     button({w-312,h-100,280,88},"缓存管理",[this]{screen_=Screen::Cache;},false,28,Icon::Settings,true,Align::Right);
 }
 void App::input_screen(){
@@ -661,33 +732,34 @@ void App::input_screen(){
     const auto title=input_mode_=="url"?"订阅地址":input_mode_=="title"?"订阅名称":input_mode_=="folder"?"分组名称":input_mode_=="group-find"?"查找分组":"搜索文章";
     std::string hint=input_mode_=="url"?"输入 HTTP(S) RSS / Atom 地址":input_mode_=="title"?"可留空，同步时自动读取博客名称":input_mode_=="folder"?"请输入不含 / 的分组名称":input_mode_=="group-find"?"按分组名称或路径查找":"搜索本地文章标题";
     if(input_mode_=="search")hint+=" · 范围："+(feed_?source(feed_):group_?(group_->empty()?"未分组":*group_):"全部订阅");
-    c_.text(32,88,title,44);button({w-212,8,180,88},"取消",[this]{back();},false,26,Icon::Close,true,Align::Right);
-    c_.text(32,150,c_.ellipsize(hint,24,w-64),24,75);
-    if(input_mode_=="search")hits_.push_back({{32,104,w-64,88},[this]{open_group_picker(PickerPurpose::Search);}});
-    c_.rule(32,180,w-64,180);
+    page_header(title);
+    const int hint_size=28;
+    c_.text(32,200,c_.ellipsize(hint,hint_size,w-64),hint_size,75);
+    if(input_mode_=="search")hits_.push_back({{32,166,w-64,88},[this]{open_group_picker(PickerPurpose::Search);}});
+    c_.rule(32,230,w-64,180);
     const auto frame=[this](Rect r){c_.fill(r,170);c_.fill({r.x+1,r.y+1,r.w-2,r.h-2},255);};
-    frame({32,204,w-64,200});
-    auto lines=c_.wrap(input_,28,w-112);if(lines.empty())lines.push_back(Line{});
+    frame({32,254,w-64,200});
+    auto lines=c_.wrap(input_,32,w-112);if(lines.empty())lines.push_back(Line{});
     const auto first=lines.size()>4?lines.size()-4:0;
-    for(std::size_t i=first;i<lines.size();++i)c_.text(56,246+static_cast<int>(i-first)*44,lines[i].text,28);
-    const int cursor_x=56+c_.measure(lines.back().text,28);
-    c_.fill({cursor_x,223+static_cast<int>(lines.size()-first-1)*44,2,28},30);
-    c_.text(32,456,input_mode_=="url"?"支持 RSS / Atom，也可通过 OPML 批量导入。":"点击确定应用输入；取消保留原内容。",24,75);
-    c_.rule(32,484,w-64,190);
-    c_.text(32,528,chinese_?(composing_.empty()?"中文拼音 · ü 用 v":"中文拼音 · "+composing_):symbols_?"英文 · 符号":"英文 · 字母",26,30);
+    for(std::size_t i=first;i<lines.size();++i)c_.text(56,296+static_cast<int>(i-first)*44,lines[i].text,32);
+    const int cursor_x=56+c_.measure(lines.back().text,32);
+    c_.fill({cursor_x,273+static_cast<int>(lines.size()-first-1)*44,2,32},30);
+    c_.text(32,506,input_mode_=="url"?"支持 RSS / Atom，也可通过 OPML 批量导入。":"点击确定应用输入；返回保留原内容。",24,75);
+    c_.rule(32,534,w-64,190);
+    c_.text(32,578,chinese_?(composing_.empty()?"中文拼音 · ü 用 v":"中文拼音 · "+composing_):symbols_?"英文 · 符号":"英文 · 字母",28,30);
     const auto candidates=chinese_?pinyin_candidates(composing_):std::vector<std::string>{};
     const auto pages=(candidates.size()+5)/6;
     if(candidate_page_>=std::max<std::size_t>(1,pages))candidate_page_=0;
     for(std::size_t i=candidate_page_*6;i<std::min(candidates.size(),(candidate_page_+1)*6);++i){
         const auto slot=i%6;const auto word=candidates[i];const int candidate_width=(w-88)/3;
-        const Rect candidate{32+static_cast<int>(slot%3)*(candidate_width+12),548+static_cast<int>(slot/3)*100,candidate_width,88};
-        frame(candidate);button(candidate,word,[this,word]{text_input(word);},false,30);
+        const Rect candidate{32+static_cast<int>(slot%3)*(candidate_width+12),598+static_cast<int>(slot/3)*100,candidate_width,88};
+        frame(candidate);button(candidate,word,[this,word]{text_input(word);},false,32);
     }
-    if(chinese_&&candidates.empty())c_.text(32,610,composing_.empty()?"输入拼音后，点击候选词上屏。":"暂无候选，请修改拼音。",24,100);
+    if(chinese_&&candidates.empty())c_.text(32,660,composing_.empty()?"输入拼音后，点击候选词上屏。":"暂无候选，请修改拼音。",24,100);
     if(pages>1){
-        button({32,756,220,88},"上一组",[this]{--candidate_page_;},false,24,Icon::Back,candidate_page_>0,Align::Left);
-        const auto page=std::to_string(candidate_page_+1)+" / "+std::to_string(pages);c_.text((w-c_.measure(page,24))/2,810,page,24,100);
-        button({w-252,756,220,88},"下一组",[this]{++candidate_page_;},false,24,Icon::Next,candidate_page_+1<pages,Align::Right);
+        button({32,806,220,88},"上一组",[this]{--candidate_page_;},false,28,Icon::Back,candidate_page_>0,Align::Left);
+        const auto page=std::to_string(candidate_page_+1)+" / "+std::to_string(pages);c_.text((w-c_.measure(page,24))/2,860,page,24,100);
+        button({w-252,806,220,88},"下一组",[this]{++candidate_page_;},false,28,Icon::Next,candidate_page_+1<pages,Align::Right);
     }
     const std::vector<std::string> keys=symbols_?std::vector<std::string>{"1234567890","@#$%&-+/=",":;!?._~"}:
         std::vector<std::string>{"qwertyuiop","asdfghjkl","zxcvbnm"};
@@ -699,20 +771,20 @@ void App::input_screen(){
         for(std::size_t i=0;i<row.size();++i){
             const std::string ch(1,shift_&&!symbols_?static_cast<char>(std::toupper(static_cast<unsigned char>(row[i]))):row[i]);
             const Rect key{start+static_cast<int>(i)*(key_width+6),y,key_width,key_height};
-            frame(key);button(key,ch,[this,ch]{keyboard_key(ch);},false,30);
+            frame(key);button(key,ch,[this,ch]{keyboard_key(ch);},false,32);
         }
         y+=key_height+key_gap;
     }
     const Rect shift{32,top+2*(key_height+key_gap),144,key_height},erase{w-176,shift.y,144,key_height};
-    frame(shift);button(shift,chinese_?"清拼音":shift_?"小写":"大写",[this]{if(chinese_){composing_.clear();candidate_page_=0;}else shift_=!shift_;},false,24,Icon::None,chinese_?!composing_.empty():!symbols_);
-    frame(erase);button(erase,"删除",[this]{backspace();},false,26);
+    frame(shift);button(shift,chinese_?"清拼音":shift_?"小写":"大写",[this]{if(chinese_){composing_.clear();candidate_page_=0;}else shift_=!shift_;},false,28,Icon::None,chinese_?!composing_.empty():!symbols_);
+    frame(erase);button(erase,"删除",[this]{backspace();},false,28);
     const Rect symbols{32,y,144,key_height},space{192,y,420,key_height},language{628,y,168,key_height},confirm{812,y,w-844,key_height};
-    frame(symbols);button(symbols,symbols_?"字母":"符号",[this]{symbols_=!symbols_;},false,26);
+    frame(symbols);button(symbols,symbols_?"字母":"符号",[this]{symbols_=!symbols_;},false,28);
     frame(space);button(space,composing_.empty()?"空格":"选首词",[this]{input_space();},false,28);
     frame(language);button(language,input_mode_=="url"?"英文":chinese_?"切换英文":"切换中文",[this]{
         if(!composing_.empty()){const auto raw=composing_;text_input(raw);if(!composing_.empty())return;}
         chinese_=!chinese_;shift_=false;
-    },false,24,Icon::None,input_mode_!="url");
+    },false,28,Icon::None,input_mode_!="url");
     button(confirm,"确定",[this]{submit();},true,28,Icon::Check);
 }
 bool App::draw_image(const ArticleImage& image,Rect area,bool enlarge,int clip_bottom){
@@ -731,6 +803,7 @@ void App::edit_feed(const Feed& feed){
     status_.clear();
     if(screen_==Screen::List){home_=ListContext{view_,feed_,group_,search_,list_page_};source_list_=false;}
     edit_origin_=screen_==Screen::Sync?Screen::Sync:Screen::Subscriptions;screen_=edit_origin_;managing_=feed;
+    auto_fulltext_=feed.id&&store_.setting("feed_fulltext:"+std::to_string(feed.id))=="1";
     if(managing_->url.empty())managing_->url="https://";
 }
 void App::save_feed(){
@@ -742,14 +815,14 @@ void App::save_feed(){
         store_.update_feed(draft);
     }else{
         if(std::any_of(feeds_.begin(),feeds_.end(),[&](const Feed& f){return f.url==draft.url;}))throw std::runtime_error("此订阅地址已存在");
-        store_.add_feed(draft);
+        draft.id=store_.add_feed(draft);
     }
+    store_.set_setting("feed_fulltext:"+std::to_string(draft.id),auto_fulltext_?"1":"0");
     managing_.reset();screen_=edit_origin_;reload();notify("订阅更改已保存");
 }
 void App::management_screen(){
     const int w=c_.width,h=c_.height;const bool storage=screen_==Screen::Cache&&!managing_;
-    button({32,8,240,88},storage?"同步":edit_origin_==Screen::Sync?"同步":"订阅",[this]{back();},false,26,Icon::Back,true,Align::Left);c_.rule(32,104,w-64,30);
-    c_.text(32,174,storage?"缓存管理":managing_->id?"编辑订阅":"添加订阅",48);
+    page_header(storage?"缓存管理":managing_->id?"编辑订阅":"添加订阅");
     if(storage){
         const auto entries=store_.entries(View::All);const auto cutoff=static_cast<std::int64_t>(std::time(nullptr))-30LL*86400;
         const auto starred=std::count_if(entries.begin(),entries.end(),[](const Entry& e){return e.starred;});
@@ -759,21 +832,24 @@ void App::management_screen(){
         c_.text(32,460,"可清理    "+std::to_string(eligible)+" 篇",32);
         c_.rule(32,520,w-64,180);c_.text(32,592,"清理 30 天前的已读文章",32);
         int y=680;for(const auto& line:c_.wrap("收藏、未读与正在阅读的文章会保留。\n\n清理会删除这些文章的本地内容和状态；订阅源仍提供的文章可能在同步后重新出现。",28,w-64)){c_.text(32,y,line.text,28,85);y+=44;}
-        button({32,h-100,440,88},"清理旧已读缓存",[this]{confirmation_="clean";},false,28,Icon::Download,true,Align::Left);return;
+        c_.rule(32,h-104,w-64,210);button({32,h-100,440,88},"清理旧已读缓存",[this]{confirmation_="clean";},false,28,Icon::Download,true,Align::Left);return;
     }
     c_.text(32,254,"名称（选填）",24,85);frame(c_,{32,280,w-64,112});
-    button({56,288,w-112,96},managing_->title.empty()?"留空，同步时自动读取博客名称":managing_->title,[this]{start_input("title",managing_->title);},false,30,Icon::None,true,Align::Left);
-    c_.text(32,442,"RSS 地址",24,85);frame(c_,{32,466,w-64,160});auto url=c_.wrap(managing_->url,26,w-112);
-    for(std::size_t i=0;i<std::min<std::size_t>(3,url.size());++i)c_.text(56,508+static_cast<int>(i)*38,c_.ellipsize(url[i].text+(i==2&&url.size()>3?"…":""),26,w-112),26);
+    button({56,288,w-112,96},managing_->title.empty()?"留空，同步时自动读取博客名称":managing_->title,[this]{start_input("title",managing_->title);},false,32,Icon::None,true,Align::Left);
+    c_.text(32,442,"RSS 地址",24,85);frame(c_,{32,466,w-64,160});auto url=c_.wrap(managing_->url,32,w-112);
+    for(std::size_t i=0;i<std::min<std::size_t>(3,url.size());++i)c_.text(56,508+static_cast<int>(i)*38,c_.ellipsize(url[i].text+(i==2&&url.size()>3?"…":""),32,w-112),32);
     hits_.push_back({{32,466,w-64,160},[this]{start_input("url",managing_->url);}});
     c_.text(32,700,"所属分组",24,85);frame(c_,{32,724,w-64,96});
-    button({56,728,w-112,88},group_label(managing_->group),[this]{open_group_picker(PickerPurpose::Move);},false,30,Icon::Folder,true,Align::Left);
+    button({56,728,w-112,88},group_label(managing_->group),[this]{open_group_picker(PickerPurpose::Move);},false,32,Icon::Folder,true,Align::Left);
     if(managing_->id){
-        button({32,900,320,88},"取消订阅",[this]{confirmation_="remove";},false,28,Icon::Close,true,Align::Left);
-        button({w-452,900,420,88},"本订阅标为已读",[this]{confirmation_="read";},false,26,Icon::Check,true,Align::Right);
-        c_.text(32,1040,"取消订阅仅保留收藏文章；两项操作均需确认。",24,85);
+        button({32,1080,320,88},"取消订阅",[this]{confirmation_="remove";},false,28,Icon::Close,true,Align::Left);
+        button({w-452,1080,420,88},"本订阅标为已读",[this]{confirmation_="read";},false,28,Icon::Check,true,Align::Right);
+        c_.text(32,1220,"取消订阅仅保留收藏；上述操作均需确认。",24,85);
     }
+    button({32,876,w-64,88},std::string(auto_fulltext_?"✓ ":"○ ")+"自动下载网页正文",[this]{auto_fulltext_=!auto_fulltext_;},false,28,Icon::None,true,Align::Left);
+    c_.text(32,1010,"仅下载之后新增的文章；失败保留 RSS 原文。",24,85);
     if(!status_.empty())c_.text(32,h-152,c_.ellipsize(status_,24,w-64),24,80);
+    c_.rule(32,h-104,w-64,210);
     button({32,h-100,320,88},"放弃更改",[this]{managing_.reset();screen_=edit_origin_;},false,28,Icon::None,true,Align::Left);
     button({w-312,h-100,280,88},"保存更改",[this]{save_feed();},true,28);
 }
@@ -781,18 +857,19 @@ void App::confirmation_screen(){
     const int w=c_.width,h=c_.height;
     if(confirmation_=="exit"){
         list_screen();hits_.clear();hits_.push_back({{0,0,w,h},[this]{confirmation_.clear();}});
-        const Rect dialog{32,240,w-64,320};frame(c_,dialog,2);c_.text(dialog.x+24,dialog.y+78,"退出 RSS Reader？",40);
+        const Rect dialog{32,240,w-64,320};frame(c_,dialog,2);c_.text(dialog.x+24,dialog.y+78,"退出 RSS Reader？",32);
         c_.text(dialog.x+24,dialog.y+148,"订阅、收藏与阅读位置都会保留。",28);
         button({dialog.x+24,dialog.y+200,320,88},"取消",[this]{confirmation_.clear();},false,28);
         button({dialog.x+dialog.w-344,dialog.y+200,320,88},"退出应用",[this]{confirmation_.clear();quit=true;},true,28);return;
     }
-    button({32,8,220,88},"返回",[this]{confirmation_.clear();},false,26,Icon::Back,true,Align::Left);c_.rule(32,104,w-64,30);
+    page_header("确认操作");
     const auto message=confirmation_=="remove"?"取消这个订阅？\n\n收藏文章会保留。其余文章及阅读进度将从本机删除。":
         confirmation_=="read"?"将这个订阅的全部文章标为已读？\n\n收藏和阅读位置会保留。":
         confirmation_=="delete-group"?"删除这个分组？\n\n此分组及子分组会移除，组内订阅移到未分组，所有文章和状态保留。":
         confirmation_=="import"?"导入本地 OPML？\n\n从 feeds.opml 合并订阅与分组；重复地址不会再次添加。":
         "清理 30 天前的已读文章？\n\n收藏、未读和正在阅读的文章会保留。此操作无法撤销。";
     int y=250;for(const auto& line:c_.wrap(message,32,w-64)){c_.text(32,y,line.text,32);y+=50;}
+    c_.rule(32,h-104,w-64,210);
     button({32,h-100,280,88},"取消",[this]{confirmation_.clear();},false,28,Icon::None,true,Align::Left);
     button({w-312,h-100,280,88},"确认",[this]{
         std::string result;const auto kind=confirmation_;
@@ -893,6 +970,10 @@ void App::back(){
     else if(screen_==Screen::Sync){screen_=Screen::List;if(sync_state_!=SyncState::Running){status_.clear();reload();}}
     else if(source_list_)screen_=Screen::Subscriptions;
     dirty=true;
+}
+void App::set_reader_status(const ReaderStatus& status){
+    if(reader_status_==status)return;
+    reader_status_=status;dirty=true;
 }
 void App::notify(const std::string& text){status_=text;list_starts_={0};list_complete_=false;ensure_list_page(list_page_);list_page_=std::min(list_page_,list_starts_.size()-1);dirty=true;}
 void App::show_error(const std::string& text){error_=text;dirty=true;}

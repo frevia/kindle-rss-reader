@@ -82,7 +82,7 @@ head,script,style {display:none;}
 body {margin:0;padding:0;text-align:justify;font-size:100%;}
 p {margin:0 0 .35em 0;text-indent:0;orphans:2;widows:2;}
 h1,h2,h3,h4,h5,h6 {font-weight:bold;line-height:1.3;margin:.6em 0 .35em 0;page-break-after:avoid;}
-h1 {font-size:150%;} h2 {font-size:135%;} h3,h4,h5,h6 {font-size:115%;}
+h1,h2,h3,h4,h5,h6 {font-size:100%;}
 strong,b,em,i,u,s,del,small,sup,sub,a,code {display:inline;}
 .rss-title {margin-top:0;} .rss-meta {font-size:75%;color:#555;margin-bottom:1em;}
 strong,b {font-weight:bold;} em,i {font-style:italic;} a {text-decoration:underline;}
@@ -242,7 +242,9 @@ void CreReader::layout(int width, int height, int font_size, int line_gap) {
     auto& value = *impl_;
     if (value.width == width && value.height == height && value.size == font_size && value.gap == line_gap) return;
     std::ostringstream css;
-    css << base_css << "body {line-height:" << (100.0 * (font_size + line_gap) / font_size) << "%;}";
+    css << base_css << "body {line-height:" << (100.0 * (font_size + line_gap) / font_size) << "%;}"
+        << "h1,.rss-title {font-size:" << (100.0*std::min(48,font_size+6)/font_size) << "%;}"
+        << "h2 {font-size:" << (100.0*std::min(48,font_size+3)/font_size) << "%;}";
     value.view->Resize(width, height);
     value.view->setFontSize(font_size);
     value.view->setStyleSheet(lString8(css.str().c_str()));

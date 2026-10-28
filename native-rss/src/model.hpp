@@ -22,7 +22,9 @@ struct Entry {
     bool in_progress = false;
     std::vector<ArticleImage> images;
     std::int64_t position = 0; // UTF-8 byte offset, independent of font size.
+    bool web_content = false;
 };
+struct FulltextStatus { std::string state, error; };
 struct ParsedFeed { std::string title; std::vector<Entry> entries; };
 enum class View { Unread, All, Starred, Today };
 }

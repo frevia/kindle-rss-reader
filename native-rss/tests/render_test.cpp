@@ -11,7 +11,7 @@ int main(){
     if(!std::filesystem::exists(font))font="/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf";
     rss::Canvas c(1072,1448,font);
     // Every action icon paints within its box, including clipped screen-edge draws.
-    for(int value=static_cast<int>(rss::Icon::Rss);value<=static_cast<int>(rss::Icon::Info);++value){
+    for(int value=static_cast<int>(rss::Icon::Rss);value<=static_cast<int>(rss::Icon::BackCircle);++value){
         c.clear();c.icon(static_cast<rss::Icon>(value),{20,20,36,36});int painted=0;
         for(int y=0;y<c.height;++y)for(int x=0;x<c.width;++x)if(c.pixels[y*c.width+x]!=255){
             assert(x>=20&&x<56&&y>=20&&y<56);++painted;
