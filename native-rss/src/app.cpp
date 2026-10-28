@@ -378,11 +378,11 @@ void App::reader_screen(){
         const auto it=std::find_if(list_.begin(),list_.end(),[this](const Entry& e){return e.id==current_->id;});
         const auto progress=it==list_.end()?source(current_->feed_id):
             "第 "+std::to_string(it-list_.begin()+1)+" / "+std::to_string(list_.size())+" 篇";
-        const auto label=c_.ellipsize(progress,28,w-640);
-        c_.text((w-c_.measure(label,28))/2,h-20,label,28,80);
+        const auto label=c_.ellipsize(progress,28,300);
         const auto footer=std::to_string(page_+1)+" / "+std::to_string(pages_.size());
-        if(page_+1<pages_.size())c_.text(w-32-c_.measure(footer,28),h-20,footer,28,80);
-        else button({w-332,h-56,300,56},footer+" · 下一篇",[this]{
+        c_.text((w-c_.measure(footer,28))/2,h-20,footer,28,80);
+        if(page_+1<pages_.size())c_.text(w-32-c_.measure(label,28),h-20,label,28,80);
+        else button({w-332,h-56,300,56},label,[this]{
             for(const auto* prefix:{"reader_cre:","reader_cre:web:","reader_image:","reader_image:web:"})
                 store_.set_setting(std::string(prefix)+std::to_string(current_->id),"");
             store_.finish_reading(current_->id);
