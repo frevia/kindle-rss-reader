@@ -25,6 +25,9 @@ public:
     std::vector<Entry> entries(View view, std::int64_t feed_id = 0,
                                const std::string& search = "", std::int64_t today_start = 0,
                                const std::optional<std::string>& group = std::nullopt) const;
+    std::int64_t entry_count(View view, std::int64_t feed_id = 0,
+                             const std::string& search = "", std::int64_t today_start = 0,
+                             const std::optional<std::string>& group = std::nullopt) const;
     std::optional<Entry> entry(std::int64_t id, bool with_content = true) const;
     std::optional<ArticleImage> image(std::int64_t entry_id,const std::string& url) const;
     void save_image(std::int64_t entry_id,const ArticleImage& image);

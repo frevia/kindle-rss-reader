@@ -120,13 +120,13 @@ private:
 };
 volatile std::sig_atomic_t stop_device=0;
 void stop_device_handler(int){stop_device=1;}
-void device(rss::Store& store,rss::Canvas& canvas,const std::string& db){
+void device(rss::Store& store,rss::Canvas& canvas,const std::string& db,std::int64_t article){
     const auto guard=std::getenv("RSS_UI_GUARD");
     if(!guard||std::string(guard)!="1")throw std::runtime_error("设备模式必须由屏幕会话启动器运行");
     stop_device=0;
     const auto term=std::signal(SIGTERM,stop_device_handler),interrupt=std::signal(SIGINT,stop_device_handler),hangup=std::signal(SIGHUP,stop_device_handler);
     try{
-        rss::KindleDevice hardware;rss::App app(store,canvas);UiTasks tasks(store,app,db);
+        rss::KindleDevice hardware;rss::App app(store,canvas,article);UiTasks tasks(store,app,db);
         auto last_activity=std::chrono::steady_clock::now()-std::chrono::seconds(5);
         while(!stop_device&&!app.quit){
             if(app.dirty){app.draw();hardware.present(canvas.pixels);}
@@ -144,7 +144,7 @@ void device(rss::Store& store,rss::Canvas& canvas,const std::string& db){
     std::signal(SIGTERM,term);std::signal(SIGINT,interrupt);std::signal(SIGHUP,hangup);
 }
 #ifdef RSS_DESKTOP
-void desktop(rss::Store& store,rss::Canvas& canvas,const std::string& db){
+void desktop(rss::Store& store,rss::Canvas& canvas,const std::string& db,std::int64_t article){
     if(SDL_Init(SDL_INIT_VIDEO|SDL_INIT_EVENTS)!=0)throw std::runtime_error(SDL_GetError());
     auto window=SDL_CreateWindow("Kindle RSS · 原生桌面模拟",SDL_WINDOWPOS_CENTERED,SDL_WINDOWPOS_CENTERED,
         canvas.width/2,canvas.height/2,SDL_WINDOW_RESIZABLE|SDL_WINDOW_ALLOW_HIGHDPI);
@@ -153,7 +153,7 @@ void desktop(rss::Store& store,rss::Canvas& canvas,const std::string& db){
     auto texture=renderer?SDL_CreateTexture(renderer,SDL_PIXELFORMAT_ARGB8888,SDL_TEXTUREACCESS_STREAMING,canvas.width,canvas.height):nullptr;
     if(!texture){if(renderer)SDL_DestroyRenderer(renderer);SDL_DestroyWindow(window);SDL_Quit();throw std::runtime_error("无法创建模拟窗口");}
     SDL_RenderSetLogicalSize(renderer,canvas.width,canvas.height);SDL_StartTextInput();
-    rss::App app(store,canvas);std::vector<std::uint32_t> rgba(canvas.pixels.size());
+    rss::App app(store,canvas,article);std::vector<std::uint32_t> rgba(canvas.pixels.size());
     UiTasks tasks(store,app,db);
     try {
         while(!app.quit){
@@ -194,7 +194,12 @@ int main(int argc,char** argv){
             std::string token=argv[i];
             if(token=="--db"||token=="--font"||token=="--article"){
                 if(++i==argc)throw std::runtime_error("缺少参数："+token);
-                if(token=="--db")db=argv[i];else if(token=="--font")font=argv[i];else article=std::stoll(argv[i]);
+                if(token=="--db")db=argv[i];else if(token=="--font")font=argv[i];else {
+                    const std::string value=argv[i];std::size_t used=0;
+                    article=std::stoll(value,&used);
+                    if(value.empty()||value[0]<'1'||value[0]>'9'||used!=value.size()||article<=0)
+                        throw std::runtime_error("需要有效的文章编号");
+                }
             }else if(command=="help")command=token;
             else if(arg.empty())arg=token;
             else throw std::runtime_error("多余参数："+token);
@@ -210,7 +215,7 @@ int main(int argc,char** argv){
                 "  fulltext ID          下载单篇网页正文并缓存图片\n"
                 "  list                 列出本地文章\n"
                 "  probe                只读检查 Kindle 屏幕和输入设备\n"
-                "  device               由会话启动器启动 Kindle 原生界面\n"
+                "  device               由会话启动器启动 Kindle 原生界面；--article ID 直达正文\n"
                 "  render FILE.pgm      渲染 1072×1448 列表；--article ID 渲染正文\n"
                 "  desktop              启动原生桌面模拟器\n";return 0;
         }
@@ -245,13 +250,13 @@ int main(int argc,char** argv){
             for(const auto& e:store.entries(rss::View::All))std::cout<<e.id<<"\t"<<(e.read?"已读":"未读")<<"\t"<<e.title<<"\n";
         }else if(command=="render"||command=="desktop"||command=="device"){
             rss::Canvas canvas(1072,1448,font.empty()?font_path():font);
-            if(command=="device")device(store,canvas,db);
+            if(command=="device")device(store,canvas,db,article);
             else if(command=="render"){
                 if(arg.empty())throw std::runtime_error("需要输出 PGM 路径");
                 rss::App app(store,canvas);if(article)app.open(article,false);app.draw();canvas.write_pgm(arg);
             }else{
 #ifdef RSS_DESKTOP
-                desktop(store,canvas,db);
+                desktop(store,canvas,db,article);
 #else
                 throw std::runtime_error("当前构建未启用桌面模拟器");
 #endif

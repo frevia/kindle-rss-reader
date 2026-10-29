@@ -112,7 +112,7 @@ def build_app(target, build, prefix, toolchain=None):
     if toolchain:
         args.append(f"-DCMAKE_TOOLCHAIN_FILE={toolchain}")
     arm.run(args, env=env)
-    arm.run(["cmake", "--build", str(build), *(["--target", "kindle-rss"] if target == "arm" else []),
+    arm.run(["cmake", "--build", str(build), *(["--target", "kindle-rss", "kindle-rss-home"] if target == "arm" else []),
              "--parallel", "6"], env=env)
     binary = build / "kindle-rss"
     if target == "arm":

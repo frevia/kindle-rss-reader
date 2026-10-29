@@ -23,6 +23,13 @@ static Entry make_entry(std::string guid, std::string title, std::int64_t publis
     return entry;
 }
 
+static void assert_count_matches(const Store& store, View view, std::int64_t feed_id = 0,
+                                 const std::string& search = "", std::int64_t today_start = 0,
+                                 const std::optional<std::string>& group = std::nullopt) {
+    assert(store.entry_count(view, feed_id, search, today_start, group) ==
+           static_cast<std::int64_t>(store.entries(view, feed_id, search, today_start, group).size()));
+}
+
 int main() {
     {
         Store legacy(":memory:");Feed f;f.url="https://legacy.example/feed";f.title="旧分组";f.group="科技/编程";auto id=legacy.add_feed(f);
@@ -59,19 +66,29 @@ int main() {
         store.add_group("persisted/empty");
 
         ParsedFeed parsed;
-        parsed.entries = {make_entry("a", "Percent % literal", 100), make_entry("b", "Underscore _ and \xc3\xa9", 200)};
+        parsed.entries = {make_entry("a", "Percent % literal", 100), make_entry("b", "Underscore _ and \\ and \xc3\xa9", 200)};
         store.save_entries(feed_id, parsed);
         auto entries = store.entries(View::All);
         assert(entries.size() == 2 && entries[0].guid == "b");
+        assert_count_matches(store, View::All);
+        assert_count_matches(store, View::Unread);
+        assert_count_matches(store, View::Starred);
+        assert_count_matches(store, View::Today, 0, "", 150);
+        assert_count_matches(store, View::All, feed_id);
+        assert_count_matches(store, View::All, feed_id, "%");
+        assert_count_matches(store, View::All, feed_id, "_");
+        assert_count_matches(store, View::All, feed_id, "\\");
+        assert(store.entry_count(View::All) == 2 && store.entry_count(View::Unread) == 2);
         first_id = entries[1].id;
         old_published = entries[1].published;
         store.set_read(first_id, true);
+        assert(store.entry_count(View::All) == 2 && store.entry_count(View::Unread) == 1);
         store.set_starred(first_id, true);
         store.set_position(first_id, 42);
         store.set_position(entries[0].id, -5);
         assert(store.entry(entries[0].id)->position == 0);
 
-        ParsedFeed refreshed; refreshed.entries = {make_entry("a", "Percent % literal updated"), make_entry("b", "Updated _ title \xc3\xa9")};
+        ParsedFeed refreshed; refreshed.entries = {make_entry("a", "Percent % literal updated"), make_entry("b", "Updated _ title \\ and \xc3\xa9")};
         store.save_entries(feed_id, refreshed);
         auto retained = store.entry(first_id);
         assert(retained && retained->read && retained->starred && retained->position == 42);
@@ -81,7 +98,11 @@ int main() {
         assert(store.entries(View::All, feed_id, "%").size() == 1);
         assert(store.entries(View::All, feed_id, "_").size() == 1);
         assert(store.entries(View::All, feed_id, "\xc3\xa9").size() == 1);
+        assert(store.entries(View::All, feed_id, "\\").size() == 1);
         assert(store.entries(View::All, 0, "%_").empty());
+        assert_count_matches(store, View::Unread);
+        assert_count_matches(store, View::Today, 0, "", 150);
+        assert_count_matches(store, View::All, feed_id, "\\");
 
         store.sync_result(feed_id, "", "tag-one", "date-one", 500);
         store.sync_result(feed_id, "network error", "tag-bad", "date-bad", 600);
@@ -90,6 +111,7 @@ int main() {
         assert(store.feeds()[0].synced_at == 500);
 
         store.set_read(entries[0].id, true);
+        assert(store.entry_count(View::All) == 2 && store.entry_count(View::Unread) == 0);
         store.set_position(entries[0].id, 1);
         assert(store.clean_read(1000) == 0);
         store.set_position(entries[0].id, 0);
@@ -99,6 +121,9 @@ int main() {
         store.remove_feed(feed_id);
         assert(store.feeds().empty());
         assert(store.entry(first_id) && store.entry(first_id)->starred);
+        assert_count_matches(store, View::All);
+        assert_count_matches(store, View::Starred);
+        assert(store.entry_count(View::All) == 1 && store.entry_count(View::Starred) == 1);
         Store background(path);
         ParsedFeed late; late.entries = {make_entry("late", "must not resurrect", 300)};
         background.save_entries(feed_id, late);
@@ -176,11 +201,14 @@ int main() {
         groups.save_entries(other,content);
         assert(groups.entries(View::All,0,"",0,std::string("科技")).size()==1);
         assert(groups.entries(View::All,0,"匹配",0,std::string("科技/编程")).size()==1);
+        assert_count_matches(groups, View::All, 0, "", 0, std::string("科技"));
+        assert_count_matches(groups, View::All, 0, "匹配", 0, std::string("科技/编程"));
         assert(groups.entries(View::All,0,"",0,std::string("%")).empty());
         groups.edit_feed(child,"自定义名称","");
         assert(groups.feeds()[0].title=="自定义名称");
         assert(groups.entries(View::All,0,"",0,std::string("科技")).empty());
         assert(groups.entries(View::All,0,"",0,std::string("")).size()==1);
+        assert_count_matches(groups, View::All, 0, "", 0, std::string(""));
         content.title="服务器名称";groups.save_entries(child,content);
         assert(groups.feeds()[0].title=="自定义名称");
         const auto entry_id=groups.entries(View::All,child)[0].id;

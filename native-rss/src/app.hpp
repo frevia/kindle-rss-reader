@@ -12,9 +12,9 @@ namespace rss {
 class App {
 public:
     enum class ReaderPanel { None, Type, Images, Info, Content };
-    enum class Screen { List, Subscriptions, GroupPicker, Groups, GroupEdit, Opml, Sync, Cache };
+    enum class Screen { List, Subscriptions, GroupPicker, Groups, GroupEdit, Opml, Sync, Cache, Settings };
     enum class SyncState { Idle, Running, Complete, Cancelled, Failed };
-    App(Store& store, Canvas& canvas);
+    App(Store& store, Canvas& canvas, std::int64_t initial_article = 0);
     void draw();
     void set_reader_status(const ReaderStatus& status);
     void tap(int x, int y);
@@ -123,6 +123,7 @@ private:
     void opml_screen();
     void sync_screen();
     void app_menu();
+    void settings_screen();
     void open_subscriptions();
     void restore_home();
     void open_group_picker(PickerPurpose purpose);

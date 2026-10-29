@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Build a local development ZIP only; never copies files to a Kindle."""
+import argparse
 import hashlib
 import json
 from pathlib import Path
@@ -34,9 +35,10 @@ def source_files(root):
     files = {}
     # Only distributable sources: .gitignore does not filter Python directory walks.
     patterns = (
-        "src/*.cpp", "src/*.hpp", "tests/*.cpp", "tests/*.py",
+        "src/*.cpp", "src/*.hpp", "tests/*.cpp", "tests/*.py", "tests/*.js",
         *("tests/fixtures/*." + suffix for suffix in ("avif", "jpg", "png", "webp", "pgm")),
-        "tools/*.py", "tools/*.cpp", "tools/*.json", "tools/*.cmake", "device/*.sh", "device/*.json", "device/book-cover.png",
+        "tools/*.py", "tools/*.cpp", "tools/*.json", "tools/*.cmake", "device/*.sh", "device/*.json", "device/*.conf", "device/book-cover.png",
+        "home/*.js", "home/*.json", "third_party/hbc84/*.json",
         "device/INSTALL.txt", "device/kual/*.xml", "device/kual/*.json", "docs/*.md",
         "third_party/*/LICENSE", "third_party/*/SOURCE.json", "third_party/*/*.h", "third_party/*/*.yaml",
         "experiments/cre-reader/*.cpp", "experiments/cre-reader/*.py", "experiments/cre-reader/*.cmake",
@@ -56,10 +58,42 @@ def source_files(root):
     return files
 
 
+def home_adapter_files(folder):
+    folder = Path(folder)
+    for name in ("manifest.json", "patch.rhp"):
+        if (folder / name).is_symlink():
+            raise RuntimeError("拒绝打包首页补丁符号链接")
+    manifest = json.loads((folder / "manifest.json").read_text())
+    profiles = json.loads((ROOT / "home/firmwares.json").read_text())["profiles"]
+    profile = next((item for item in profiles if item["id"] == manifest.get("id")), None)
+    if profile is None or any(manifest.get(key) != value for key, value in profile.items()):
+        raise RuntimeError("首页补丁不属于受支持的固件")
+    if manifest.get("source_sha256") != sha256(ROOT / "home/card.js"):
+        raise RuntimeError("首页补丁与当前适配代码不一致，请重新生成")
+    recipe = (folder / "patch.rhp").read_bytes()
+    if manifest.get("patch_sha256") != hashlib.sha256(recipe).hexdigest():
+        raise RuntimeError("首页差分补丁校验失败")
+    if (len(recipe) < 84 or recipe[:8] != b"RSSHBC1\n" or
+            recipe[8:40].hex() != manifest["original_sha256"] or recipe[40:72].hex() != manifest.get("patched_sha256")):
+        raise RuntimeError("首页补丁头与清单不一致")
+    profile_text = ("ORIGINAL_SHA256=" + manifest["original_sha256"] + "\nPATCHED_SHA256=" +
+                    manifest["patched_sha256"] + "\nPATCH_SHA256=" + manifest["patch_sha256"] + "\n")
+    return {"native-rss/home/patch.rhp": (recipe, False),
+            "native-rss/home/profile.env": (profile_text.encode(), False),
+            "native-rss/home/manifest.json": ((json.dumps(manifest, ensure_ascii=False, indent=2) + "\n").encode(), False)}
+
+
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--home-patch", type=Path, help="已校验的可选首页差分补丁目录；不包含原固件")
+    args = parser.parse_args()
     binary = BUILD / "kindle-rss"
     manifest = json.loads((BUILD / "build-info.json").read_text())
     verify_build(binary, manifest, build_inputs())
+    home_binary = BUILD / "kindle-rss-home"
+    verify_elf(home_binary)
+    if manifest.get("home_bridge_sha256") != sha256(home_binary):
+        raise RuntimeError("首页后台组件与构建清单不一致，请重新构建")
     reader = manifest.get("reader", {})
     if reader.get("name") != "crengine" or reader.get("revision") != build_reader.sources()["cre"]["revision"]:
         raise RuntimeError("当前安装包要求正式构建的固定版本 CREngine，请重新运行 tools/build_arm.py")
@@ -83,6 +117,13 @@ def main():
             raise RuntimeError(f"拒绝打包符号链接：{source}")
         files[name] = (source.read_bytes(), executable)
     add("native-rss/bin/kindle-rss", binary, True)
+    add("native-rss/bin/kindle-rss-home", home_binary, True)
+    add("native-rss/home.sh", ROOT / "device/home.sh", True)
+    add("native-rss/home/native-rss-home.conf", ROOT / "device/native-rss-home.conf")
+    add("native-rss/home/card.js", ROOT / "home/card.js")
+    add("native-rss/home/firmwares.json", ROOT / "home/firmwares.json")
+    if args.home_patch:
+        files.update(home_adapter_files(args.home_patch))
     add("native-rss/book-cover.png", ROOT / "device/book-cover.png")
     add("native-rss/launch.sh", ROOT / "device/launch.sh", True)
     add("native-rss/diagnose.sh", ROOT / "device/diagnose.sh", True)
@@ -120,6 +161,7 @@ def main():
         "FreeType-BDF.txt": UNPACKED / "freetype-2.15.0/src/bdf/README",
         "FreeType-PCF.txt": UNPACKED / "freetype-2.15.0/src/pcf/README",
         "stb.txt": ROOT / "third_party/stb/LICENSE",
+        "hbc84-MIT.txt": ROOT / "third_party/hbc84/LICENSE",
         "Noto-OFL.txt": VENDOR / "runtime/OFL.txt",
         "Mozilla-MPL-2.0.txt": VENDOR / "runtime/MPL-2.0.txt",
         "musl.txt": VENDOR / "zig-aarch64-macos-0.15.2/lib/libc/musl/COPYRIGHT",
@@ -153,7 +195,7 @@ def main():
         b"Public redistribution is disabled pending review of the GPLv2/Apache-2.0 combination.\n", False)
     checksums = {name: hashlib.sha256(data).hexdigest() for name, (data, _) in files.items()}
     files["native-rss/MANIFEST.json"] = (json.dumps({"development_only": True, "device_tested": False,
-        "reader": reader, "public_release_ready": False, "files": checksums}, indent=2).encode(), False)
+        "reader": reader, "home_adapter": {"included": bool(args.home_patch), "enabled_by_default": False}, "public_release_ready": False, "files": checksums}, indent=2).encode(), False)
     output = ROOT / "output"
     output.mkdir(exist_ok=True)
     target = output / "kindle-rss-kpw3-dev.zip"

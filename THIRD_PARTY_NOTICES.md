@@ -8,6 +8,7 @@
 
 | 组件 | 使用方式 | 许可与来源 |
 |---|---|---|
+| hbctool HBC84 格式表 | 离线首页补丁生成器只使用 opcode / structure 两张表；固定来源和校验值在 `native-rss/third_party/hbc84/SOURCE.json`，设备不运行 hbctool | MIT；`native-rss/third_party/hbc84/LICENSE`，安装包 `licenses/hbc84-MIT.txt` |
 | stb_image | JPEG / PNG 解码，选择其 MIT 许可 | [LICENSE](https://github.com/frevia/kindle-rss-reader/blob/main/native-rss/third_party/stb/LICENSE)、[固定来源](https://github.com/frevia/kindle-rss-reader/blob/main/native-rss/third_party/stb/SOURCE.json) |
 | Rime pinyin-simp | 原始词库及生成的只读候选表；生成时合并音节空格并按词频排序 | Apache-2.0；[LICENSE](https://github.com/frevia/kindle-rss-reader/blob/main/native-rss/third_party/pinyin/LICENSE)、[固定来源](https://github.com/frevia/kindle-rss-reader/blob/main/native-rss/third_party/pinyin/SOURCE.json)；上游词库注明源自 Android PinyinIME |
 

@@ -1,0 +1,11 @@
+{
+  "format": 1,
+  "profiles": [{
+    "id": "kpw3-5.16.2.1.1",
+    "firmware": "5.16.2.1.1",
+    "original_sha256": "999d9234f5557820ce13526fa7732e2bebe273a84f5a375c97f9a1936d4cafa2",
+    "hbc_version": 84,
+    "render_function": 6771,
+    "press_function": 6775
+  }]
+}

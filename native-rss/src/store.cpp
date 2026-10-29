@@ -35,6 +35,33 @@ private:
     sqlite3_stmt* stmt_ = nullptr;
 };
 
+std::string entry_filter_sql(View view, std::int64_t feed_id, const std::string& search,
+                             const std::optional<std::string>& group) {
+    std::string sql = " WHERE 1=1";
+    if (view == View::Unread) sql += " AND read=0";
+    if (view == View::Starred) sql += " AND starred=1";
+    if (view == View::Today) sql += " AND published>=?";
+    if (feed_id) sql += " AND feed_id=?";
+    if (group) sql += group->empty()
+        ? " AND feed_id IN (SELECT id FROM feeds WHERE active=1 AND group_name=?)"
+        : " AND feed_id IN (SELECT id FROM feeds WHERE active=1 AND (group_name=? OR instr(group_name,?)=1))";
+    if (!search.empty()) sql += " AND title LIKE ? ESCAPE '\\'";
+    return sql;
+}
+
+void bind_entry_filters(Statement& query, View view, std::int64_t feed_id, const std::string& search,
+                        std::int64_t today_start, const std::optional<std::string>& group) {
+    int bind = 1;
+    if (view == View::Today) query.integer(bind++, today_start);
+    if (feed_id) query.integer(bind++, feed_id);
+    if (group) { query.text(bind++, *group); if (!group->empty()) query.text(bind++, *group + "/"); }
+    if (!search.empty()) {
+        std::string pattern;
+        for (char c : search) { if (c == '%' || c == '_' || c == '\\') pattern += '\\'; pattern += c; }
+        query.text(bind, "%" + pattern + "%");
+    }
+}
+
 void exec(sqlite3* db, const char* sql) {
     char* message = nullptr;
     const int result = sqlite3_exec(db, sql, nullptr, nullptr, &message);
@@ -376,31 +403,28 @@ void Store::sync_result(std::int64_t feed_id, const std::string& error, const st
 
 std::vector<Entry> Store::entries(View view, std::int64_t feed_id, const std::string& search, std::int64_t today_start,
                                 const std::optional<std::string>& group) const {
-    std::string sql = std::string("SELECT ")+metadata_columns+" FROM entries WHERE 1=1";
-    if (view == View::Unread) sql += " AND read=0";
-    if (view == View::Starred) sql += " AND starred=1";
-    if (view == View::Today) sql += " AND published>=?";
-    if (feed_id) sql += " AND feed_id=?";
-    if (group) sql += group->empty()
-        ? " AND feed_id IN (SELECT id FROM feeds WHERE active=1 AND group_name=?)"
-        : " AND feed_id IN (SELECT id FROM feeds WHERE active=1 AND (group_name=? OR instr(group_name,?)=1))";
-    if (!search.empty()) sql += " AND title LIKE ? ESCAPE '\\'";
-    sql += " ORDER BY published DESC,id DESC";
+    const std::string sql = std::string("SELECT ") + metadata_columns + " FROM entries" +
+        entry_filter_sql(view, feed_id, search, group) + " ORDER BY published DESC,id DESC";
     Statement query(db_, sql.c_str());
-    int bind = 1;
-    if (view == View::Today) query.integer(bind++, today_start);
-    if (feed_id) query.integer(bind++, feed_id);
-    if (group) { query.text(bind++, *group); if (!group->empty()) query.text(bind++, *group+"/"); }
-    if (!search.empty()) {
-        std::string pattern;
-        for (char c : search) { if (c == '%' || c == '_' || c == '\\') pattern += '\\'; pattern += c; }
-        query.text(bind, "%" + pattern + "%");
-    }
+    bind_entry_filters(query, view, feed_id, search, today_start, group);
     std::vector<Entry> result;
     int step;
     while ((step = sqlite3_step(query.get())) == SQLITE_ROW) result.push_back(read_entry(query.get()));
     check(db_, step);
     return result;
+}
+
+std::int64_t Store::entry_count(View view, std::int64_t feed_id, const std::string& search, std::int64_t today_start,
+                                const std::optional<std::string>& group) const {
+    const std::string sql = "SELECT count(*) FROM entries" + entry_filter_sql(view, feed_id, search, group);
+    Statement query(db_, sql.c_str());
+    bind_entry_filters(query, view, feed_id, search, today_start, group);
+    const int step = sqlite3_step(query.get());
+    if (step != SQLITE_ROW) {
+        check(db_, step);
+        throw std::runtime_error("entry count query returned no result");
+    }
+    return sqlite3_column_int64(query.get(), 0);
 }
 
 std::optional<Entry> Store::entry(std::int64_t id, bool with_content) const {

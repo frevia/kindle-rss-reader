@@ -30,8 +30,12 @@ RSS Reader 安装说明
    安装包不带这个文件夹；不要用整个文件夹替换的方式覆盖它。
 4. 安全弹出并拔线，再次打开检查原有数据。能正常使用时，无需重装启动工具。
 
+可选首页 RSS
+普通安装默认关闭；固件支持范围、准备补丁和启停方法见 native-rss/docs/HOME.md。
+已经启用时，升级、卸载或更新 Kindle 固件前先在 KUAL 中选择“停用首页 RSS”。
+
 卸载
-退出并备份后，删除 native-rss、extensions 里的 native-rss，
+先停用已启用的首页 RSS。退出并备份后，删除 native-rss、extensions 里的 native-rss，
 以及 documents 里的 RSS阅读器.sh 和 RSS设备诊断.sh。
 只删除本应用的文件，不要删除整个 documents 或 extensions，也不要删除其他应用的共享工具。
 

@@ -13,6 +13,20 @@
       "action": "sh /mnt/us/native-rss/diagnose.sh",
       "exitmenu": false,
       "refresh": false
+    },
+    {
+      "name": "启用首页 RSS（可选）",
+      "priority": 2,
+      "action": "sh /mnt/us/native-rss/home.sh enable",
+      "exitmenu": true,
+      "refresh": false
+    },
+    {
+      "name": "停用首页 RSS",
+      "priority": 3,
+      "action": "sh /mnt/us/native-rss/home.sh disable",
+      "exitmenu": true,
+      "refresh": false
     }
   ]
 }

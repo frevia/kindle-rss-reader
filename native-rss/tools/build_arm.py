@@ -357,10 +357,15 @@ def main() -> int:
     shutil.copy2(compiled, binary)
     binary.chmod(0o755)
     verify_elf(binary)
+    home_binary = BUILD / "kindle-rss-home"
+    shutil.copy2(BUILD / "app/kindle-rss-home", home_binary)
+    home_binary.chmod(0o755)
+    verify_elf(home_binary)
     if build_inputs() != inputs:
         raise RuntimeError("Source inputs changed during the ARM build; rebuild before packaging")
     (BUILD / "build-info.json").write_text(json.dumps({
         "target": TARGET, "cpu": CPU, "zig": "0.15.2", "binary_sha256": sha256(binary),
+        "home_bridge_sha256": sha256(home_binary),
         "inputs": inputs, "device_tested": False,
         "reader": {"name": "crengine", "revision": reader_sources()["cre"]["revision"],
                    "public_release_ready": False},

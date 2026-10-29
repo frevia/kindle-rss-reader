@@ -44,12 +44,13 @@ int read_int(Store& store,const std::string& key,int fallback,int low,int high){
     try{return std::clamp(std::stoi(store.setting(key)),low,high);}catch(...){return fallback;}
 }
 }
-App::App(Store& store,Canvas& canvas):store_(store),c_(canvas){
+App::App(Store& store,Canvas& canvas,std::int64_t initial_article):store_(store),c_(canvas){
     font_size_=read_int(store_,"font_size",34,24,48);
     line_gap_=read_int(store_,"line_gap",24,10,42);
     margin_=read_int(store_,"margin",32,32,100);
     cre_requested_=store_.setting("reader_engine")!="classic"&&CreReader::available();
     reload();
+    if(initial_article){try{open(initial_article);}catch(const std::exception& e){show_error(e.what());}}
 }
 int App::row_height(const Entry& e){
     const int width=c_.width-108;const auto metadata=article_metadata(e);
@@ -139,6 +140,7 @@ void App::draw(){
     else if(screen_==Screen::Opml)opml_screen();
     else if(screen_==Screen::Sync)sync_screen();
     else if(screen_==Screen::Cache)management_screen();
+    else if(screen_==Screen::Settings)settings_screen();
     else {list_screen();if(brand_menu_)app_menu();}
     if(!reader_visible)device_status(0,true);
     dirty=false;
@@ -162,7 +164,7 @@ void App::list_screen(){
     c_.icon(Icon::Sync,{w-66,37,34,34});
     hits_.push_back({{w-120,28,88,64},[this]{screen_=Screen::Sync;if(sync_state_!=SyncState::Running){request_="sync";sync_started();}}});
     c_.rule(32,96,w-64,150);
-    const auto total=std::to_string(list_.size());const int total_width=c_.measure(total,48),extra=search_.empty()?0:200;
+    const auto total=view_==View::Unread?std::to_string(store_.entry_count(view_,feed_,search_,midnight(),group_)):std::to_string(list_.size());const int total_width=c_.measure(total,48),extra=search_.empty()?0:200;
     c_.text(m,160,c_.ellipsize(view_name(),48,w-2*m-total_width-40-extra),48);
     c_.text(w-m-total_width-extra,160,total,48,75);
     if(!search_.empty())button({w-244,104,180,88},"退出搜索",[this]{clear_search();},false,28);
@@ -547,10 +549,24 @@ void App::restore_home(){
 }
 void App::app_menu(){
     hits_.clear();hits_.push_back({{0,0,c_.width,c_.height},[this]{brand_menu_=false;}});
-    frame(c_,{32,96,400,212},2);
+    frame(c_,{32,96,400,316},2);
     button({56,100,352,100},"订阅",[this]{open_subscriptions();},false,32,Icon::Folder,true,Align::Left);
     c_.rule(34,202,396,180);
-    button({56,204,352,100},"退出",[this]{brand_menu_=false;confirmation_="exit";},false,32,Icon::Exit,true,Align::Left);
+    button({56,204,352,100},"设置",[this]{brand_menu_=false;screen_=Screen::Settings;},false,32,Icon::Settings,true,Align::Left);
+    c_.rule(34,306,396,180);
+    button({56,308,352,100},"退出",[this]{brand_menu_=false;confirmation_="exit";},false,32,Icon::Exit,true,Align::Left);
+}
+void App::settings_screen(){
+    const int w=c_.width;page_header("设置");
+    const bool enabled=store_.setting("home_visible")!="0";
+    const auto toggle=[this,enabled]{store_.set_setting("home_visible",enabled?"0":"1");};
+    button({32,270,w-316,112},"在 Kindle 首页显示 RSS订阅",toggle,false,32,Icon::None,true,Align::Left);
+    button({w-252,282,220,88},enabled?"已开启":"已关闭",toggle,enabled,28);
+    c_.rule(32,398,w-64,180);
+    int y=468;
+    for(const auto& line:c_.wrap("退出阅读器返回 Kindle 首页后生效。\n\n关闭后收起 RSS 区域，订阅和阅读记录会保留。",28,w-64)){
+        c_.text(32,y,line.text,28,85);y+=44;
+    }
 }
 void App::nav_screen(){
     const bool groups=screen_==Screen::Groups;const int w=c_.width,h=c_.height;
@@ -967,6 +983,7 @@ void App::back(){
     else if(screen_==Screen::Subscriptions)restore_home();
     else if(screen_==Screen::Groups||screen_==Screen::Opml)screen_=Screen::Subscriptions;
     else if(screen_==Screen::Cache)screen_=Screen::Sync;
+    else if(screen_==Screen::Settings)screen_=Screen::List;
     else if(screen_==Screen::Sync){screen_=Screen::List;if(sync_state_!=SyncState::Running){status_.clear();reload();}}
     else if(source_list_)screen_=Screen::Subscriptions;
     dirty=true;

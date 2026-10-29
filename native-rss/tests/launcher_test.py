@@ -45,7 +45,10 @@ elif name=="timeout":
     try:sys.exit(subprocess.run(args[1:],timeout=float(args[0])).returncode)
     except subprocess.TimeoutExpired:sys.exit(124)
 elif name=="pidof":
-    print({"awesome":900001,"JunoStatusBarDriver":900002,"volumd":900003}[args[0]])
+    if args[0]=="kindle-rss-home":
+        if not mode.startswith("home-") and mode!="launcher-killed-home":sys.exit(1)
+        print("900004 900005" if mode=="home-ambiguous" else "900004")
+    else:print({"awesome":900001,"JunoStatusBarDriver":900002,"volumd":900003}[args[0]])
 elif name=="get":
     if mode=="power-error" and (root/"started").exists():sys.exit(1)
     print("screenSaver" if mode=="sleep" and (root/"started").exists() else "active")
@@ -57,6 +60,7 @@ elif name=="kill":
     sig,pid=args[0],int(args[1])
     if pid>=900000:
         log(sig+" "+str(pid))
+        if mode=="home-stop-error" and sig=="-STOP" and pid==900004:sys.exit(1)
         if mode=="launcher-killed-early" and sig=="-STOP" and pid==900001:
             os.kill(os.getppid(),signal.SIGKILL)
         if mode=="stop-error" and sig=="-STOP" and pid==900002:sys.exit(1)
@@ -68,6 +72,9 @@ elif name=="app":
         print("width=1072\nheight=1448\nstride=1088\nbpp=8\nxoffset=0\nyoffset=0\nrotation=3\ndriver=mxc_epdc_fb\nlayout=accepted")
     else:
         assert os.environ["RSS_UI_GUARD"]=="1"
+        if mode=="article":
+            assert args[-3:]==["--article","42","device"],args
+            log("article-start 42")
         cache=pathlib.Path(os.environ["RSS_CRE_CACHE"])
         assert cache.is_dir() and cache.stat().st_uid==os.geteuid()
         assert cache.stat().st_mode & 0o777 == 0o700
@@ -75,7 +82,7 @@ elif name=="app":
         (root/"started").touch()
         with (root/"fb").open("r+b") as f:f.write(b"!")
         log("app-start")
-        if mode=="launcher-killed":
+        if mode in ("launcher-killed", "launcher-killed-home"):
             owner=int(os.environ["RSS_LAUNCHER_PID"])
             while os.getppid()==owner:time.sleep(.02)
             time.sleep(2)
@@ -106,6 +113,14 @@ class LauncherTests(unittest.TestCase):
                 (p/"comm").write_text(name+"\n")
                 (p/"stat").write_text(" ".join([str(pid),"("+name+")","S"]+["0"]*18+["123"])+"\n")
                 (p/"status").write_text("State:\tS (sleeping)\n")
+            if mode.startswith("home-") or mode=="launcher-killed-home":
+                for pid in (900004,900005):
+                    p=root/"proc"/str(pid);p.mkdir(parents=True)
+                    comm="not-the-bridge" if mode=="home-identity" and pid==900004 else "kindle-rss-home"
+                    state="Z" if mode=="home-zombie" and pid==900004 else "S"
+                    (p/"comm").write_text(comm+"\n")
+                    (p/"stat").write_text(" ".join([str(pid),"("+comm+")",state]+["0"]*18+["123"]) +"\n")
+                    (p/"status").write_text("State:\t"+state+" (sleeping)\n")
             (root/"fb").write_bytes(b"x"*1575424)
             if mode=="passcode":(root/"passcode").touch()
             values={"STATE":root/"state","APP":root/"bin/app","DB":root/"rss.sqlite","FB":root/"fb",
@@ -127,7 +142,7 @@ class LauncherTests(unittest.TestCase):
             if mode.startswith("launcher-killed"):
                 process=subprocess.Popen(["/bin/sh",str(launch)],env=env,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
                 try:
-                    if mode=="launcher-killed":
+                    if mode in ("launcher-killed", "launcher-killed-home"):
                         end=time.monotonic()+10
                         while not (root/"started").exists() and time.monotonic()<end:time.sleep(.02)
                         self.assertTrue((root/"started").exists())
@@ -143,7 +158,7 @@ class LauncherTests(unittest.TestCase):
                 finally:
                     if process.poll() is None:process.kill();process.wait()
             else:
-                result=subprocess.run(["/bin/sh",str(launch)],env=env,capture_output=True,text=True,timeout=15)
+                result=subprocess.run(["/bin/sh",str(launch)]+(["--article","42"] if mode=="article" else []),env=env,capture_output=True,text=True,timeout=15)
             events=(root/"events").read_text().splitlines() if (root/"events").exists() else []
             self.assertFalse(list((root/"state").glob("frame.*")))
             if mode not in ("passcode","log-symlink"):
@@ -161,6 +176,20 @@ class LauncherTests(unittest.TestCase):
                 if "app-terminated" in events:
                     self.assertLess(events.index("app-terminated"),events.index("cache-rm"))
             return result,events,(root/"fb").read_bytes()[0:1]
+
+    def test_article_launch_preserves_target_through_service_discovery(self):
+        result,events,pixel=self.run_case("article")
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertIn("article-start 42",events)
+        self.assertEqual(pixel,b"x")
+
+    def test_invalid_article_arguments_rejected_before_device_access(self):
+        for args in [("--article",),("--article","0"),("--article","-1"),("--article","01"),
+                     ("--article","42;echo"),("--article","9007199254740992"),("--db","other")]:
+            with self.subTest(args=args):
+                result=subprocess.run(["/bin/sh",str(SOURCE),*args],capture_output=True,text=True,timeout=2)
+                self.assertEqual(result.returncode,1)
+                self.assertIn("Kindle RSS",result.stderr)
 
     def test_normal_and_crash_restore(self):
         for mode,code in (("normal",0),("inherited-setgid",0),("crash",7)):
@@ -234,7 +263,7 @@ class LauncherTests(unittest.TestCase):
                 self.assertEqual(pixel,b"x")
                 for pid in (900001,900002,900003):self.assertIn("-CONT "+str(pid),events)
                 self.assertLess(events.index("refresh"),events.index("-CONT 900003"))
-                if mode=="launcher-killed":
+                if mode in ("launcher-killed", "launcher-killed-home"):
                     self.assertLess(events.index("app-terminated"),events.index("-CONT 900001"))
 
     def test_cache_creation_failure_prevents_takeover(self):
@@ -248,6 +277,40 @@ class LauncherTests(unittest.TestCase):
         self.assertEqual(result.returncode,1)
         self.assertIn("cache-rm",events)
         for pid in (900001,900002,900003):self.assertIn("-CONT "+str(pid),events)
+
+    def test_optional_home_bridge_is_paused_and_resumed(self):
+        result,events,pixel=self.run_case("home-running")
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertEqual(pixel,b"x")
+        self.assertIn("-STOP 900004",events)
+        self.assertIn("-CONT 900004",events)
+        self.assertLess(events.index("-STOP 900004"),events.index("app-start"))
+        self.assertLess(events.index("refresh"),events.index("-CONT 900004"))
+
+    def test_optional_home_bridge_is_resumed_by_guardian_after_launcher_death(self):
+        result,events,pixel=self.run_case("launcher-killed-home")
+        self.assertEqual(result.returncode,-9,result.stderr)
+        self.assertEqual(pixel,b"x")
+        self.assertIn("-STOP 900004",events)
+        self.assertIn("-CONT 900004",events)
+        self.assertLess(events.index("-STOP 900004"),events.index("app-start"))
+        self.assertLess(events.index("refresh"),events.index("-CONT 900004"))
+
+    def test_invalid_optional_home_process_is_rejected_before_takeover(self):
+        for mode in ("home-identity", "home-zombie", "home-ambiguous"):
+            with self.subTest(mode=mode):
+                result,events,pixel=self.run_case(mode)
+                self.assertEqual(result.returncode,1,result.stderr)
+                self.assertNotIn("app-start",events)
+                self.assertNotIn("-STOP 900004",events)
+                self.assertEqual(pixel,b"x")
+
+    def test_optional_home_stop_failure_is_recovered(self):
+        result,events,pixel=self.run_case("home-stop-error")
+        self.assertEqual(result.returncode,1,result.stderr)
+        self.assertNotIn("app-start",events)
+        self.assertIn("-STOP 900004",events)
+        self.assertIn("-CONT 900004",events)
 
 
 if __name__=="__main__":unittest.main()

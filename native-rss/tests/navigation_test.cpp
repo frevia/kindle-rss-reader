@@ -35,7 +35,7 @@ int main(){
     touch(150,206);touch(960,50);assert(app.screen()==rss::App::Screen::List&&app.take_request().empty());app.draw();assert(canvas.pixels==paper);
     app.show_view(rss::View::Unread);touch(150,206);touch(940,330);app.text_input("不存在的分组");app.submit();shot("group-dropdown-no-match");touch(200,440);assert(app.screen()==rss::App::Screen::GroupPicker);touch(940,600);assert(app.screen()==rss::App::Screen::List&&!app.reading());touch(150,206);touch(940,330);app.text_input("不存在的分组");app.submit();touch(940,330);shot("group-dropdown-cleared");app.back();assert(app.screen()==rss::App::Screen::List&&app.selected_group()==std::nullopt);assert(store.entries(rss::View::Unread).size()==7);
     // A menu dismisses outside taps, including taps over articles and sync.
-    touch(150,50);shot("brand-menu");touch(150,400);assert(!app.menu_open()&&!app.reading());
+    touch(150,50);shot("brand-menu");touch(150,500);assert(!app.menu_open()&&!app.reading());
     touch(150,50);touch(960,50);assert(!app.menu_open()&&app.take_request().empty());
     // Home grouping is independent of subscription management.
     touch(150,206);assert(app.screen()==rss::App::Screen::GroupPicker);shot("group-picker");
@@ -76,9 +76,9 @@ int main(){
     app.sync_started();bool blocked=false;try{touch(950,1380);}catch(const std::runtime_error&){blocked=true;}assert(blocked&&store.feeds()[0].url=="https://example.test/0");
     app.back();assert(store.feeds()[0].url=="https://example.test/0");app.sync_finished(true);app.back();
     // Exit is a separate confirmation; cancellation never quits or clicks through.
-    touch(150,50);touch(140,260);shot("exit-confirm");touch(300,484);assert(!app.quit);
-    touch(150,50);touch(140,260);touch(100,900);assert(!app.quit);
-    touch(150,50);touch(140,260);touch(780,484);assert(app.quit);
+    touch(150,50);touch(140,360);shot("exit-confirm");touch(300,484);assert(!app.quit);
+    touch(150,50);touch(140,360);touch(100,900);assert(!app.quit);
+    touch(150,50);touch(140,360);touch(780,484);assert(app.quit);
     {
         rss::Store empty_store(":memory:");empty_store.set_setting("reader_engine","classic");rss::App empty_app(empty_store,canvas);
         auto capture=[&](const char* name){empty_app.draw();if(auto dir=std::getenv("RSS_TEST_SNAPSHOTS"))canvas.write_pgm((std::filesystem::path(dir)/(std::string("empty-")+name+".pgm")).string());};

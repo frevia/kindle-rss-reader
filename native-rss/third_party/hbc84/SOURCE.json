@@ -1,0 +1,10 @@
+{
+  "name": "hbctool HBC84 format tables",
+  "url": "https://github.com/Sighery/hbctool",
+  "revision": "8f9bd718445abc4d1068f9cf9702f79f090fc74b",
+  "license": "MIT",
+  "files": {
+    "opcode.json": "56ee78b1ad080ae40a13303a5bcfdedd7be30ce40f0d5262678f35b5ebf01c2d",
+    "structure.json": "e6c6c53e9db4afda326ec9954e884b1f6b94db0bb5b2a6632ee8c95449d28817"
+  }
+}

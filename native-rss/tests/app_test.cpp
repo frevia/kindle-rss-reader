@@ -11,6 +11,46 @@ int main(){
     std::string font=std::getenv("RSS_FONT")?std::getenv("RSS_FONT"):"/System/Library/Fonts/STHeiti Light.ttc";
     if(!std::filesystem::exists(font))font="/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf";
     rss::Store store(":memory:");store.set_setting("reader_engine","classic");rss::Canvas canvas(1072,1448,font);
+    {
+        rss::Store opened(":memory:");opened.set_setting("reader_engine","classic");
+        rss::Feed feed;feed.url="https://home-entry.test/rss";const auto fid=opened.add_feed(feed);
+        rss::ParsedFeed batch;
+        for(int i=0;i<2;++i){rss::Entry item;item.guid=std::to_string(i);item.title="首页文章 "+std::to_string(i);item.text="正文内容";batch.entries.push_back(item);}
+        opened.save_entries(fid,batch);const auto entries=opened.entries(rss::View::Unread);
+        rss::App direct(opened,canvas,entries.back().id);
+        assert(direct.reading()&&direct.current_id()==entries.back().id);
+        assert(opened.entry(entries.back().id)->read);
+        assert(!opened.entry(entries.front().id)->read);
+        direct.draw();direct.back();assert(!direct.reading());
+        direct.draw();
+        rss::Canvas expected_count(1072,1448,font);
+        expected_count.text(1040-expected_count.measure("1",48),160,"1",48,75);
+        for(int y=104;y<174;++y)for(int x=900;x<1040;++x)
+            assert(canvas.pixels[y*1072+x]==expected_count.pixels[y*1072+x]);
+
+        assert(opened.entries(rss::View::Unread).size()==1);
+        rss::App missing(opened,canvas,999999);assert(!missing.reading());
+        missing.draw();missing.back();missing.draw();
+        rss::App normal(opened,canvas);assert(!normal.reading());
+    }
+    {
+        rss::Store preferences(":memory:");preferences.set_setting("reader_engine","classic");
+        rss::Feed feed;feed.url="https://home-settings.test/rss";const auto fid=preferences.add_feed(feed);
+        rss::Entry entry;entry.guid="untouched";entry.title="保留的未读文章";entry.text="保留的正文";
+        rss::ParsedFeed batch;batch.entries={entry};preferences.save_entries(fid,batch);
+        rss::App settings(preferences,canvas);settings.show_view(rss::View::All,fid);
+        auto touch=[&](int x,int y){settings.draw();settings.tap(x,y);};
+        auto shot=[&](const char* name){settings.draw();if(const auto folder=std::getenv("RSS_TEST_SNAPSHOTS")){std::filesystem::create_directories(folder);canvas.write_pgm((std::filesystem::path(folder)/name).string());}};
+        touch(150,50);touch(140,254);assert(settings.screen()==rss::App::Screen::Settings&&!settings.menu_open());
+        assert(preferences.setting("home_visible").empty());shot("settings-home-on.pgm");const auto on=canvas.pixels;
+        touch(950,326);assert(preferences.setting("home_visible")=="0");shot("settings-home-off.pgm");const auto off=canvas.pixels;assert(off!=on);
+        settings.back();assert(settings.screen()==rss::App::Screen::List);settings.draw();const auto list=canvas.pixels;
+        {rss::App reopened(preferences,canvas);reopened.draw();reopened.tap(150,50);reopened.draw();reopened.tap(140,254);reopened.draw();assert(canvas.pixels==off);}
+        touch(150,50);touch(140,254);touch(200,326);assert(preferences.setting("home_visible")=="1");
+        settings.back();settings.draw();assert(canvas.pixels==list);
+        assert(preferences.entry_count(rss::View::Unread)==1&&!preferences.entries(rss::View::All).front().read);
+        assert(settings.take_request().empty());
+    }
     const auto expect_pager=[&](const std::vector<std::uint8_t>& paper,int page,int total){
         rss::Canvas footer(1072,1448,font);
         const auto label="第 "+std::to_string(page)+" / "+std::to_string(total)+" 页";
