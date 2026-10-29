@@ -88,7 +88,7 @@ void Canvas::fill(Rect r,std::uint8_t color){
     for(int y=std::max(0,r.y);y<std::min(height,r.y+r.h);++y)
         std::fill(pixels.begin()+y*width+left,pixels.begin()+y*width+right,color);
 }
-// Icons use one 24-unit grid and a consistent two-unit stroke, independent of font glyphs.
+// Icons use one 24-unit grid; status symbols have thinner strokes than controls.
 void Canvas::icon(Icon kind,Rect area,std::uint8_t color){
     if(kind==Icon::None||area.w<=0||area.h<=0)return;
     struct Segment { double x1,y1,x2,y2; };
@@ -121,8 +121,11 @@ void Canvas::icon(Icon kind,Rect area,std::uint8_t color){
     case Icon::Exit:line(10,4,4,4);line(4,4,4,20);line(4,20,10,20);line(10,12,21,12);line(16,7,21,12);line(21,12,16,17);break;
     case Icon::Check:line(4,12,9,17);line(9,17,20,6);break;
     case Icon::Info:arc(12,12,9,0,2*pi);arc(12,7,0.5,0,2*pi);line(12,11,12,17);break;
-    case Icon::Battery:box(3,7,17,10);line(20,10,21,10);line(21,10,21,14);line(21,14,20,14);break;
-    case Icon::Wifi:arc(12,20,3,pi*1.15,pi*1.85);arc(12,20,7,pi*1.15,pi*1.85);arc(12,20,11,pi*1.15,pi*1.85);arc(12,20,0.7,0,2*pi);break;
+    case Icon::Battery:
+        line(3,7,19,7);arc(19,8,1,-pi/2,0);line(20,8,20,15.5);arc(19,15.5,1,0,pi/2);
+        line(19,16.5,3,16.5);arc(3,15.5,1,pi/2,pi);line(2,15.5,2,8);arc(3,8,1,pi,pi*1.5);
+        line(20,11,21.5,11);line(20,12,21.5,12);line(20,13,21.5,13);break;
+    case Icon::Wifi:arc(12,20,3,pi*1.25,pi*1.75);arc(12,20,7,pi*1.25,pi*1.75);arc(12,20,11,pi*1.25,pi*1.75);arc(12,20,.6,0,2*pi);break;
     case Icon::BackCircle:arc(12,12,10,0,2*pi);line(14,8,10,12);line(10,12,14,16);break;
     case Icon::None:break;
     }
@@ -146,7 +149,8 @@ void Canvas::icon(Icon kind,Rect area,std::uint8_t color){
                 if((edge.y1>py)!=(edge.y2>py) &&
                    px<(edge.x2-edge.x1)*(py-edge.y1)/(edge.y2-edge.y1)+edge.x1)inside=!inside;
             }
-            double alpha=std::clamp((1+(inside?distance:-distance))*scale+.5,0.0,1.0);
+            const double stroke=kind==Icon::Battery?.5:kind==Icon::Wifi?.85:1;
+            double alpha=std::clamp((stroke+(inside?distance:-distance))*scale+.5,0.0,1.0);
             auto& pixel=pixels[y*width+x];pixel=static_cast<std::uint8_t>(pixel*(1-alpha)+color*alpha);
         }
 }

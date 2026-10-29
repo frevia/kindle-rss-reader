@@ -29,7 +29,14 @@ def do_unmount(target):
     if mounted(): (root/"mounted").unlink()
     mounts=root/"proc/mounts"; lines=[x for x in mounts.read_text().splitlines() if x.split()[1]!=target]
     mounts.write_text("\n".join(lines)+("\n" if lines else ""))
-if name=="stat": print("2943085" if args[:2]==["-c", "%s"] else "700:0")
+if name=="stat":
+    if args[:2]==["-c", "%s"]: print("2943085")
+    else:
+        info=pathlib.Path(args[-1]).stat(); owner="9000" if mode=="nonroot" else "0"
+        print(f"{info.st_mode & 0o7777:o}:{owner}")
+elif name=="chmod":
+    if mode=="chmod-error" and args[0] in ("700", "0700") and args[-1] in (os.environ["NATIVE"], os.environ["STATE"]): sys.exit(1)
+    sys.exit(subprocess.run(["/bin/chmod", *args]).returncode)
 elif name=="df": print("Filesystem 1024-blocks Used Available Capacity Mounted on\nfixture 10000 0 "+("128" if mode=="low-space" else "10000")+" 0% /fixture")
 elif name=="sha256sum":
     path=pathlib.Path(args[-1]); text=str(path); value="c"*64
@@ -101,6 +108,7 @@ class HomeManagerTests(unittest.TestCase):
         self.app.joinpath("home").mkdir(parents=True)
         self.app.joinpath("bin").mkdir()
         self.state.mkdir(parents=True)
+        self.native.chmod(0o700); self.state.chmod(0o700)
         self.target.parent.mkdir(parents=True)
         self.job.parent.mkdir(parents=True)
         self.target.write_bytes(b"original adapter fixture")
@@ -115,7 +123,7 @@ class HomeManagerTests(unittest.TestCase):
         reader = self.root / "mnt/us/documents/RSS阅读器.sh"
         reader.parent.mkdir(parents=True); reader.write_text("stub\n")
         self.bin.mkdir()
-        for name in ("stat", "sha256sum", "get", "set", "mntroot", "mount", "umount", "timeout", "sleep", "flock", "initctl", "nohup", "cp", "df"):
+        for name in ("stat", "chmod", "sha256sum", "get", "set", "mntroot", "mount", "umount", "timeout", "sleep", "flock", "initctl", "nohup", "cp", "df"):
             path = self.bin / name; path.write_text(STUB.replace("#!/usr/bin/env python3", "#!" + sys.executable)); path.chmod(0o755)
         homebin = self.app / "bin/kindle-rss-home"
         homebin.write_text(STUB.replace("#!/usr/bin/env python3", "#!" + sys.executable).replace('name=pathlib.Path(sys.argv[0]).name', 'name="homebin"'))
@@ -143,7 +151,7 @@ class HomeManagerTests(unittest.TestCase):
         self.self_script.write_text(source); self.self_script.chmod(0o755)
         self.env = dict(os.environ, FIXTURE=str(self.root), PATH=str(self.bin) + os.pathsep + os.environ["PATH"],
                         SCENARIO="ready", STATE=str(self.state), JOB=str(self.job), SELF=str(self.self_script),
-                        ORIGINAL_HASH=ORIGINAL, PATCHED_HASH=PATCHED, PATCH_HASH=PATCH)
+                        NATIVE=str(self.native), ORIGINAL_HASH=ORIGINAL, PATCHED_HASH=PATCHED, PATCH_HASH=PATCH)
 
     def tearDown(self): self.temp.cleanup()
 
@@ -210,6 +218,49 @@ class HomeManagerTests(unittest.TestCase):
         self.assertEqual(self.events().count("mntroot ro"), 1)
         self.assertFalse((self.state / "root-was-ro").exists())
         self.assertEqual(self.target.read_bytes(), b"original adapter fixture")
+
+    def test_mount_recovers_real_2770_state_directories(self):
+        self.native.chmod(0o2770); self.state.chmod(0o2770)
+        result = self.invoke("mount")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue((self.root / "mounted").exists())
+        self.assertEqual(self.native.stat().st_mode & 0o7777, 0o700)
+        self.assertEqual(self.state.stat().st_mode & 0o7777, 0o700)
+
+    def test_enable_recovers_real_2770_state_directories_on_cold_start(self):
+        self.native.chmod(0o2770); self.state.chmod(0o2770)
+        result = self.invoke("enable")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue((self.root / "mounted").exists())
+        self.assertTrue((self.state / "enabled").exists())
+        self.assertEqual(self.native.stat().st_mode & 0o7777, 0o700)
+        self.assertEqual(self.state.stat().st_mode & 0o7777, 0o700)
+
+    def test_private_state_rejects_unsafe_directories_without_mutation(self):
+        cases = ("nonroot", "unsafe", "chmod-error", "state-symlink", "parent-symlink")
+        for scenario in cases:
+            with self.subTest(scenario=scenario):
+                self.native.chmod(0o700); self.state.chmod(0o700)
+                if scenario in ("nonroot", "chmod-error"):
+                    self.native.chmod(0o2770); self.state.chmod(0o2770)
+                if scenario == "unsafe": self.state.chmod(0o777)
+                if scenario == "state-symlink":
+                    backup = self.root / "home-state"
+                    self.state.rename(backup); self.state.symlink_to(backup, target_is_directory=True)
+                if scenario == "parent-symlink":
+                    backup = self.root / "native-state"
+                    self.native.rename(backup); self.native.symlink_to(backup, target_is_directory=True)
+                before = self.events()
+                result = self.invoke("mount", scenario)
+                self.assertNotEqual(result.returncode, 0, result.stderr)
+                self.assertFalse((self.root / "mounted").exists())
+                self.assertEqual(self.events(), before)
+                if scenario in ("nonroot", "unsafe", "chmod-error"):
+                    expected=0o777 if scenario=="unsafe" else 0o2770
+                    self.assertEqual(self.native.stat().st_mode & 0o7777,expected if scenario!="unsafe" else 0o700)
+                    self.assertEqual(self.state.stat().st_mode & 0o7777,expected)
+                if scenario == "state-symlink": self.assertTrue(self.state.is_symlink())
+                if scenario == "parent-symlink": self.assertTrue(self.native.is_symlink())
 
     def test_stale_or_forged_ack_automatically_restores_original(self):
         for scenario in ("health-pid-mismatch", "health-wrong-comm", "health-never-ready"):

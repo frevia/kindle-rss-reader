@@ -1,5 +1,6 @@
 """Cross-check device patch reconstruction without distributing any firmware."""
 import hashlib
+import copy
 import os
 from pathlib import Path
 import struct
@@ -77,6 +78,59 @@ class HomePatchTests(unittest.TestCase):
         with self.assertRaises(ValueError): hbc84.disassemble(b"\xff")
         with self.assertRaises(ValueError): hbc84.HBC84(bytes(160))
         with self.assertRaises(ValueError): hbc84.assemble([("GetById", [("UInt8", False, 0)])])
+
+    def test_arrow_margin_top_calibration_changes_only_constant(self):
+        cases = (
+            ("LoadConstUInt8", ("UInt8", False, 3), 0, 1),
+            ("LoadConstDouble", ("Double", False, 13.5), 4.5, 2),
+        )
+        for load_op, old_constant, new_value, call_count in cases:
+            with self.subTest(load_op=load_op):
+                margin_top_id, width_id, height_id = 44, 45, 46
+                value_reg = 2
+                instructions = [
+                    ("LoadConstUInt8", [("Reg8", False, 6), ("UInt8", False, 11)]),
+                    ("PutNewOwnByIdShort", [("Reg8", False, 0), ("Reg8", False, 6), ("UInt8", True, width_id)]),
+                    ("LoadConstUInt8", [("Reg8", False, 7), ("UInt8", False, 19)]),
+                    ("PutNewOwnByIdShort", [("Reg8", False, 0), ("Reg8", False, 7), ("UInt8", True, height_id)]),
+                    (load_op, [("Reg8", False, value_reg), old_constant]),
+                ]
+                for _ in range(call_count):
+                    instructions.append(("Call2", [("Reg8", False, value_reg), ("Reg8", False, 8),
+                                                    ("Reg8", False, 9), ("Reg8", False, value_reg)]))
+                instructions.extend([
+                    ("PutNewOwnByIdShort", [("Reg8", False, 0), ("Reg8", False, value_reg), ("UInt8", True, margin_top_id)]),
+                    ("Ret", [("Reg8", False, 0)]),
+                ])
+                original = copy.deepcopy(instructions)
+                before_bytes = hbc84.assemble(instructions)
+                changed = patcher.calibrate_margin_top(instructions, margin_top_id,
+                                                       old_constant[2], new_value, call_count)
+                self.assertEqual(instructions, original)
+                self.assertEqual(len(hbc84.assemble(changed)), len(before_bytes))
+                self.assertEqual(changed[:4], original[:4])
+                self.assertEqual(changed[5:], original[5:])
+                self.assertEqual(changed[4][1][1][2], new_value)
+
+    def test_arrow_margin_top_calibration_rejects_unverified_layouts(self):
+        margin_id = 44
+        base = [
+            ("LoadConstUInt8", [("Reg8", False, 2), ("UInt8", False, 3)]),
+            ("Call2", [("Reg8", False, 2), ("Reg8", False, 8), ("Reg8", False, 9), ("Reg8", False, 2)]),
+            ("PutNewOwnByIdShort", [("Reg8", False, 0), ("Reg8", False, 2), ("UInt8", True, margin_id)]),
+            ("Ret", [("Reg8", False, 0)]),
+        ]
+        invalid = []
+        invalid.append(base[:1] + [("LoadConstUInt8", [("Reg8", False, 2), ("UInt8", False, 4)])] + base[1:])
+        invalid.append([item for item in base if item != base[2]])
+        invalid.append(base[:3] + [base[2], base[3]])
+        invalid.append(base[:2] + [("PutNewOwnByIdShort", [("Reg8", False, 0), ("Reg8", False, 3), ("UInt8", True, margin_id)])] + base[3:])
+        invalid.append(base[:1] + [("Call2", [("Reg8", False, 2), ("Reg8", False, 8), ("Reg8", False, 9), ("Reg8", False, 3)])] + base[2:])
+        invalid.append(base[:1] + [("Jmp", [("Addr8", False, 0)])] + base[1:])
+        for instructions in invalid:
+            with self.subTest(instructions=instructions):
+                with self.assertRaises(ValueError):
+                    patcher.calibrate_margin_top(instructions, margin_id, 3, 0, 1)
 
 
 if __name__ == "__main__": unittest.main()

@@ -157,6 +157,9 @@ function useRssCard(React, RN, props) {
         var height = Array.isArray(originalStyle) && originalStyle[1] && originalStyle[1].height;
         if (typeof height !== "number" || !(height > 0 && height <= 4096)) return original;
         var nativeButton = original.props.children[1].props.children[1].props.children[1];
+        // SVG resources need the card's image wrapper rather than RN.Image.
+        var nativeImage = original.props.children[1].props.children[0];
+        if (!nativeImage || !nativeImage.type) return original;
         if (!root.rssHomeButtonBase) {
             // The primary wrapper forces black; its base retains Kindle's native touch handling.
             var probeProps = Object.assign({}, nativeButton.props);
@@ -201,14 +204,19 @@ function useRssCard(React, RN, props) {
         headerProps.onPress = function () { next.rssHomeOpen(); }; headerProps.accessibilityLabel = "打开 RSS 阅读器";
         var name = {}; name.flexDirection = "row"; name.alignItems = "center";
         var nameProps = {}; nameProps.style = name;
-        var arrow = {}; arrow.marginLeft = 20 * unit;
+        var arrow = {}; arrow.marginLeft = titleSize * 0.825;
+        arrow.width = titleSize * 0.55; arrow.height = titleSize * 0.95;
+        arrow.marginTop = 0; arrow.flexShrink = 0;
         var arrowProps = {}; arrowProps.style = arrow;
+        var arrowSource = {}; arrowSource.uri = "file://KPPHome/Fill.svg";
+        arrowProps.source = arrowSource;
+        arrowProps.resizeMode = "contain"; arrowProps.accessible = false;
         var unread = snapshot && (snapshot.status === "ready" || snapshot.status === "empty") ?
             (snapshot.unread ? snapshot.unread + " 条未读" : "已读完") : "";
         var headingView = create(root.rssHomeButtonBase, headerProps,
             create(RN.View, nameProps,
                 label("RSS订阅", headingStyle, titleSize, "bold", 1),
-                create(RN.View, arrowProps, label("〉", headingStyle, titleSize * 1.2, "bold", 1))),
+                create(nativeImage.type, arrowProps)),
             label(unread, bodyStyle, bodySize * 0.72, "normal", 1));
         var body = {}; body.flex = 1; body.flexDirection = "row";
         body.paddingTop = 12 * unit;

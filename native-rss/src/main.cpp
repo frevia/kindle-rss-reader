@@ -35,6 +35,11 @@ std::string font_path(){
         if(std::filesystem::exists(path))return path;
     throw std::runtime_error("请通过 --font 指定中文字体");
 }
+std::string status_font_path(){
+    const std::string path="/mnt/us/fonts/AlibabaPuHuiTi-3-55-Regular.ttf";
+    std::error_code error;
+    return std::filesystem::is_regular_file(path,error)?path:std::string{};
+}
 void demo(rss::Store& store){
     rss::Feed feed;feed.url="https://example.invalid/demo.xml";feed.title="阅读示例";feed.group="示例内容";
     const auto id=store.add_feed(feed);rss::ParsedFeed parsed;
@@ -126,7 +131,7 @@ void device(rss::Store& store,rss::Canvas& canvas,const std::string& db,std::int
     stop_device=0;
     const auto term=std::signal(SIGTERM,stop_device_handler),interrupt=std::signal(SIGINT,stop_device_handler),hangup=std::signal(SIGHUP,stop_device_handler);
     try{
-        rss::KindleDevice hardware;rss::App app(store,canvas,article);UiTasks tasks(store,app,db);
+        rss::KindleDevice hardware;rss::App app(store,canvas,article,status_font_path());UiTasks tasks(store,app,db);
         auto last_activity=std::chrono::steady_clock::now()-std::chrono::seconds(5);
         while(!stop_device&&!app.quit){
             if(app.dirty){app.draw();hardware.present(canvas.pixels);}
@@ -153,7 +158,7 @@ void desktop(rss::Store& store,rss::Canvas& canvas,const std::string& db,std::in
     auto texture=renderer?SDL_CreateTexture(renderer,SDL_PIXELFORMAT_ARGB8888,SDL_TEXTUREACCESS_STREAMING,canvas.width,canvas.height):nullptr;
     if(!texture){if(renderer)SDL_DestroyRenderer(renderer);SDL_DestroyWindow(window);SDL_Quit();throw std::runtime_error("无法创建模拟窗口");}
     SDL_RenderSetLogicalSize(renderer,canvas.width,canvas.height);SDL_StartTextInput();
-    rss::App app(store,canvas,article);std::vector<std::uint32_t> rgba(canvas.pixels.size());
+    rss::App app(store,canvas,article,status_font_path());std::vector<std::uint32_t> rgba(canvas.pixels.size());
     UiTasks tasks(store,app,db);
     try {
         while(!app.quit){
@@ -253,7 +258,7 @@ int main(int argc,char** argv){
             if(command=="device")device(store,canvas,db,article);
             else if(command=="render"){
                 if(arg.empty())throw std::runtime_error("需要输出 PGM 路径");
-                rss::App app(store,canvas);if(article)app.open(article,false);app.draw();canvas.write_pgm(arg);
+                rss::App app(store,canvas,0,status_font_path());if(article)app.open(article,false);app.draw();canvas.write_pgm(arg);
             }else{
 #ifdef RSS_DESKTOP
                 desktop(store,canvas,db,article);

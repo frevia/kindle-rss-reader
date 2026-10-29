@@ -18,8 +18,12 @@ fail() { printf '首页 RSS：%s\n' "$*" >&2; exit 1; }
 hash() { sha256sum "$1" | awk '{print $1}'; }
 private_state() {
     [ ! -L /var/local/native-rss ] && [ ! -L "$STATE" ] || fail '状态目录不能是符号链接'
-    mkdir -p "$STATE" || fail '无法创建状态目录'
-    case "$(stat -c '%a:%u' "$STATE")" in 700:0|2700:0) ;; *) fail '状态目录必须属于 root 且仅 root 可访问' ;; esac
+    # Lock down the parent before creating home; framework startup applies g=u and setgid.
+    for directory in /var/local/native-rss "$STATE"; do
+        mkdir -p "$directory" || fail '无法创建状态目录'
+        case "$(stat -c '%a:%u' "$directory")" in 700:0|2700:0|2770:0) ;; *) fail '状态目录必须属于 root 且仅 root 可访问' ;; esac
+        chmod 0700 "$directory" || fail '无法恢复状态目录的私有权限'
+    done
 }
 hex_value() {
     value=$(awk -F= -v key="$1" '$1 == key {print $2}' "$APP/home/profile.env") || return 1

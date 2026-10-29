@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cstdio>
 #include <ctime>
 #include <stdexcept>
 #include <set>
@@ -44,7 +45,9 @@ int read_int(Store& store,const std::string& key,int fallback,int low,int high){
     try{return std::clamp(std::stoi(store.setting(key)),low,high);}catch(...){return fallback;}
 }
 }
-App::App(Store& store,Canvas& canvas,std::int64_t initial_article):store_(store),c_(canvas){
+App::App(Store& store,Canvas& canvas,std::int64_t initial_article,const std::string& status_font):store_(store),c_(canvas){
+    if(!status_font.empty())try{status_canvas_=std::make_unique<Canvas>(c_.width,100,status_font);}
+    catch(const std::exception&){std::fprintf(stderr,"RSS Reader: status font unavailable; using default\n");}
     font_size_=read_int(store_,"font_size",34,24,48);
     line_gap_=read_int(store_,"line_gap",24,10,42);
     margin_=read_int(store_,"margin",32,32,100);
@@ -146,14 +149,23 @@ void App::draw(){
     dirty=false;
 }
 void App::device_status(int top,bool clock){
-    const int w=c_.width,size=clock?24:28;
-    if(clock)c_.text(32,top+26,reader_status_.clock.empty()?"--:--":reader_status_.clock,24,70);
+    auto& status=status_canvas_?*status_canvas_:c_;
+    if(status_canvas_)status.clear();
+    const int w=c_.width,size=clock?31:28,baseline=top+size;
+    if(clock)status.text(34,baseline,reader_status_.clock.empty()?"--:--":reader_status_.clock,size,0);
     const auto battery=reader_status_.battery<0?"--%":std::string(reader_status_.charging?"+":"")+std::to_string(reader_status_.battery)+"%";
-    const int text_x=w-32-c_.measure(battery,size),battery_x=text_x-48;
-    if(reader_status_.wifi)c_.icon(Icon::Wifi,{battery_x-40,top-2,32,32},60);
-    c_.icon(Icon::Battery,{battery_x,top-2,40,40},60);
-    if(reader_status_.battery>=0)c_.fill({battery_x+7,top+13,std::min(100,reader_status_.battery)*24/100,10},60);
-    c_.text(text_x,top+(clock?26:29),battery,size,60);
+    const int text_x=w-34-status.measure(battery,size),battery_x=text_x-49;
+    if(reader_status_.wifi)status.icon(Icon::Wifi,{battery_x-47,top-4,40,40},0);
+    status.icon(Icon::Battery,{battery_x-3,top-4,48,48},0);
+    if(reader_status_.battery>=0)status.fill({battery_x+4,top+13,std::clamp(reader_status_.battery,0,100)*30/100,13},0);
+    status.text(text_x,baseline,battery,size,0);
+    if(status_canvas_){
+        const int rows=std::min(status.height,c_.height);
+        for(int y=0;y<rows;++y)for(int x=0;x<w;++x){
+            const auto pixel=status.pixels[static_cast<std::size_t>(y)*w+x];
+            if(pixel!=255)c_.pixels[static_cast<std::size_t>(y)*w+x]=pixel;
+        }
+    }
 }
 void App::list_screen(){
     // Cache all page boundaries once so the first footer includes the exact total.
@@ -349,7 +361,7 @@ void App::reader_screen(){
             current_->starred=!current_->starred;store_.set_starred(current_->id,current_->starred);
         },false,28,current_->starred?Icon::StarFilled:Icon::Star,true,Align::Right);
         if(reader_panel_!=ReaderPanel::None)c_.text(144,57,c_.ellipsize(current_->title,24,w-440),24,85);
-    }else device_status(28,false);
+    }else device_status(35,false);
     const int heading=cre_?0:page_==0?article_heading_height():0;
     const int top=120+heading;
     const int cover_top=reader_panel_==ReaderPanel::None?(reader_tools_?h-reader_bar_height:h-72):h-reader_bar_height-reader_panel_height();

@@ -18,7 +18,14 @@ mode=os.environ["SCENARIO"]
 def log(text):
     with (root/"events").open("a") as f:f.write(text+"\n")
 if name=="stat":
-    print("2700:0" if mode=="inherited-setgid" else "700:0")
+    if args[:2]==["-c", "%a:%u"]:
+        path=pathlib.Path(args[-1]); info=path.stat()
+        owner="9000" if mode=="state-nonroot" else "0"
+        print(f"{info.st_mode & 0o7777:o}:{owner}")
+    else:sys.exit(subprocess.run(["/usr/bin/stat",*args]).returncode)
+elif name=="chmod":
+    if mode=="state-chmod-error" and args[0] in ("700", "0700") and args[-1]==str(root/"state"):sys.exit(1)
+    sys.exit(subprocess.run(["/bin/chmod",*args]).returncode)
 elif name=="mktemp":
     if args[0]=="-d":
         if mode=="cache-create-error":sys.exit(1)
@@ -100,13 +107,18 @@ else:raise RuntimeError(name)
 class LauncherTests(unittest.TestCase):
     def run_case(self, mode):
         with tempfile.TemporaryDirectory() as folder:
-            root=Path(folder);(root/"bin").mkdir();(root/"state").mkdir()
+            root=Path(folder);(root/"bin").mkdir();(root/"state").mkdir();(root/"state").chmod(0o700)
+            if mode in ("state-2770", "state-nonroot", "state-chmod-error"):(root/"state").chmod(0o2770)
+            elif mode=="state-unsafe":(root/"state").chmod(0o777)
+            elif mode=="inherited-setgid":(root/"state").chmod(0o2700)
+            elif mode=="state-symlink":
+                (root/"real-state").mkdir();(root/"state").rmdir();(root/"state").symlink_to(root/"real-state",target_is_directory=True)
             (root/"state/session.log").write_text("previous session fixture\n")
             if mode=="log-symlink":
                 (root/"protected").write_text("untouched")
                 (root/"state/session.log").unlink()
                 (root/"state/session.log").symlink_to(root/"protected")
-            for name in ("stat","flock","timeout","pidof","get","set","refresh","kill","app","mktemp","rm"):
+            for name in ("stat","chmod","flock","timeout","pidof","get","set","refresh","kill","app","mktemp","rm"):
                 tool=root/"bin"/name;tool.write_text("#!"+sys.executable+"\n"+FAKE);tool.chmod(0o755)
             for pid,name in ((900001,"awesome"),(900002,"JunoStatusBarDr"),(900003,"volumd")):
                 p=root/"proc"/str(pid);p.mkdir(parents=True)
@@ -161,7 +173,7 @@ class LauncherTests(unittest.TestCase):
                 result=subprocess.run(["/bin/sh",str(launch)]+(["--article","42"] if mode=="article" else []),env=env,capture_output=True,text=True,timeout=15)
             events=(root/"events").read_text().splitlines() if (root/"events").exists() else []
             self.assertFalse(list((root/"state").glob("frame.*")))
-            if mode not in ("passcode","log-symlink"):
+            if mode not in ("passcode","log-symlink","state-nonroot","state-unsafe","state-symlink","state-chmod-error") and not (mode=="state-2770" and result.returncode!=0):
                 self.assertEqual((root/"state/session.previous.log").read_text(),"previous session fixture\n")
                 log=(root/"state/session.log").read_text()
                 self.assertIn("session_start",log);self.assertIn("session_end",log)
@@ -175,6 +187,11 @@ class LauncherTests(unittest.TestCase):
                     self.assertLess(events.index("cache-rm"),events.index("-CONT 900003"))
                 if "app-terminated" in events:
                     self.assertLess(events.index("app-terminated"),events.index("cache-rm"))
+            if mode=="state-2770" and result.returncode==0:
+                self.assertEqual((root/"state").stat().st_mode & 0o7777,0o700)
+            if mode in ("state-nonroot", "state-unsafe", "state-chmod-error"):
+                expected={"state-nonroot":0o2770,"state-unsafe":0o777,"state-chmod-error":0o2770}[mode]
+                self.assertEqual((root/"state").stat().st_mode & 0o7777,expected)
             return result,events,(root/"fb").read_bytes()[0:1]
 
     def test_article_launch_preserves_target_through_service_discovery(self):
@@ -199,6 +216,20 @@ class LauncherTests(unittest.TestCase):
                 self.assertEqual(pixel,b"x")
                 for pid in (900001,900002,900003):self.assertIn("-CONT "+str(pid),events)
                 self.assertLess(events.index("refresh"),events.index("-CONT 900003"))
+
+    def test_real_2770_state_directory_is_recovered_before_launch(self):
+        result,events,pixel=self.run_case("state-2770")
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertEqual(pixel,b"x")
+        for pid in (900001,900002,900003):self.assertIn("-CONT "+str(pid),events)
+        self.assertLess(events.index("refresh"),events.index("-CONT 900003"))
+
+    def test_unsafe_state_directories_are_rejected_without_takeover(self):
+        for mode in ("state-nonroot", "state-unsafe", "state-symlink", "state-chmod-error"):
+            with self.subTest(mode=mode):
+                result,events,pixel=self.run_case(mode)
+                self.assertEqual(result.returncode,1,result.stderr)
+                self.assertEqual(events,[]);self.assertEqual(pixel,b"x")
 
     def test_sleep_and_unknown_power_do_not_overwrite_screen(self):
         for mode in ("sleep","power-error"):

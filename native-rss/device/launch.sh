@@ -29,8 +29,9 @@ for tool in "$APP" "$GET" "$SET" "$REFRESH"; do
 done
 [ ! -L "$STATE" ] || fail '状态目录不能是符号链接'
 mkdir -p "$STATE" || fail '无法创建状态目录'
-# /var/local on Kindle inherits setgid; it does not grant group access to a 2700 directory.
-case "$(stat -c '%a:%u' "$STATE")" in 700:0|2700:0) ;; *) fail '状态目录必须属于 root 且仅 root 可访问' ;; esac
+# Framework startup applies g=u and setgid recursively under /var/local.
+case "$(stat -c '%a:%u' "$STATE")" in 700:0|2700:0|2770:0) ;; *) fail '状态目录必须属于 root 且仅 root 可访问' ;; esac
+chmod 0700 "$STATE" || fail '无法恢复状态目录的私有权限'
 [ ! -L "$STATE/session.lock" ] || fail '无效锁文件'
 exec 9>"$STATE/session.lock" || fail '无法打开锁'
 flock -n 9 || fail '阅读器已经运行'

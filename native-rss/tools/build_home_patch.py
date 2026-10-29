@@ -22,6 +22,62 @@ ROOT = Path(__file__).resolve().parents[1]
 MAGIC = b"RSSHBC1\n"
 MAXIMUM = 16 * 1024 * 1024
 
+# KPW3 firmware-specific visual calibration. These functions are included in
+# the source hash allowlist; each layout is still checked before it is edited.
+CALIBRATED_MARGIN_TOP = (
+    (6607, "FillLibraryArrowIcon", 13.5, 4.5, 2),
+    (6612, "FillSideKickArrowIcon", 3, 0, 1),
+)
+LIBRARY_DIVIDER_FUNCTION = 4669
+
+
+def calibrate_margin_top(instructions, margin_top_id, expected_value, new_value, scale_call_count):
+    """Return a copy with only the verified marginTop constant changed."""
+    result = copy.deepcopy(instructions)
+    writes = []
+    for index, (op, operands) in enumerate(result):
+        if op == "PutNewOwnByIdShort" and any(
+            is_string and value == margin_top_id for _, is_string, value in operands
+        ):
+            writes.append(index)
+    if len(writes) != 1:
+        raise ValueError("Unsupported arrow marginTop layout")
+
+    write_index = writes[0]
+    op, operands = result[write_index]
+    if (op != "PutNewOwnByIdShort" or len(operands) != 3
+            or operands[0] != ("Reg8", False, 0)):
+        raise ValueError("Unsupported arrow marginTop write")
+    value_operand = operands[1]
+    if value_operand[0] not in ("Reg8", "Reg32") or value_operand[1]:
+        raise ValueError("Unsupported arrow marginTop value register")
+    value_reg = value_operand[2]
+    if result[-1] != ("Ret", [("Reg8", False, 0)]):
+        raise ValueError("Unsupported arrow return layout")
+
+    load_index = write_index - scale_call_count - 1
+    if load_index < 0:
+        raise ValueError("Unsupported arrow scale call chain")
+    load_op, load_operands = result[load_index]
+    expected_load_op = "LoadConstDouble" if isinstance(expected_value, float) else "LoadConstUInt8"
+    expected_constant_kind = "Double" if isinstance(expected_value, float) else "UInt8"
+    if (load_op != expected_load_op or len(load_operands) != 2
+            or load_operands[0] != ("Reg8", False, value_reg)
+            or load_operands[1][0] != expected_constant_kind or load_operands[1][1]
+            or load_operands[1][2] != expected_value):
+        raise ValueError("Unexpected arrow marginTop source value")
+
+    for index in range(load_index + 1, write_index):
+        call_op, call_operands = result[index]
+        if (call_op != "Call2" or len(call_operands) != 4
+                or call_operands[0] != ("Reg8", False, value_reg)
+                or call_operands[-1] != ("Reg8", False, value_reg)):
+            raise ValueError("Unsupported arrow scale call chain")
+    result[load_index] = (load_op, [load_operands[0], (load_operands[1][0], False, new_value)])
+    if len(assemble(result)) != len(assemble(instructions)):
+        raise ValueError("Arrow calibration changed bytecode length")
+    return result
+
 
 def merge(source, helper_bytes, profile):
     if hashlib.sha256(source).hexdigest() != profile["original_sha256"]:
@@ -38,6 +94,46 @@ def merge(source, helper_bytes, profile):
         raise ValueError("Unsupported HBC layout")
     if not (original.getHeader()["functionSourceCount"] == 0):
         raise ValueError("Unsupported HBC layout")
+
+    calibrated = {}
+    for fid, name, old_value, new_value, scale_call_count in CALIBRATED_MARGIN_TOP:
+        if fid >= original.getFunctionCount():
+            raise ValueError("Unsupported arrow function layout")
+        function = original.getFunction(fid)
+        header = original.getObj()["functionHeaders"][fid]
+        if (function[0] != name or header["flags"] & 8 or "small" in header):
+            raise ValueError("Unsupported arrow function layout")
+        margin_top_id = next((sid for sid in range(original.getStringCount())
+                              if original.getString(sid)[0] == "marginTop"), None)
+        if margin_top_id is None:
+            raise ValueError("Unsupported arrow marginTop identifier")
+        calibrated[fid] = calibrate_margin_top(
+            function[4], margin_top_id, old_value, new_value, scale_call_count
+        )
+
+    # The divider after Library precedes RSS; use the same thin grey rule as other cards.
+    divider = original.getFunction(LIBRARY_DIVIDER_FUNCTION)
+    divider_header = divider[5]
+    instructions = divider[4]
+    if (divider_header["flags"] & 8 or "small" in divider_header
+            or divider_header["frameSize"] != 27 or divider_header["paramCount"] != 3
+            or len(instructions) != 66
+            or instructions[2] != ("LoadConstUInt8", [("Reg8", False, 11), ("UInt8", False, 2)])
+            or instructions[3] != ("LoadConstUInt8", [("Reg8", False, 10), ("UInt8", False, 1)])
+            or instructions[45][0] != "GetById" or instructions[49][0] != "GetById"
+            or instructions[45][1][-1][:2] != ("UInt16", True)
+            or instructions[49][1][-1][:2] != ("UInt16", True)
+            or original.getString(instructions[45][1][-1][2])[0] != "divider"
+            or original.getString(instructions[49][1][-1][2])[0] != "dividerTemplateLibrary"
+            or instructions[56] != ("Mov", [("Reg8", False, 10), ("Reg8", False, 11)])
+            or original.getString(instructions[57][1][-1][2])[0] != "barThickness"
+            or [i for i, (_, args) in enumerate(instructions) if ("Reg8", False, 11) in args] != [2, 56]):
+        raise ValueError("Unsupported homepage divider layout")
+    calibrated[LIBRARY_DIVIDER_FUNCTION] = copy.deepcopy(instructions)
+    calibrated[LIBRARY_DIVIDER_FUNCTION][2][1][1] = ("UInt8", False, 1)
+    calibrated[LIBRARY_DIVIDER_FUNCTION][49][1][-1] = instructions[45][1][-1]
+    if len(assemble(calibrated[LIBRARY_DIVIDER_FUNCTION])) != len(assemble(instructions)):
+        raise ValueError("Divider style changed bytecode length")
 
 
     def kinds_and_hashes(container):
@@ -191,6 +287,10 @@ def merge(source, helper_bytes, profile):
 
     for fid, (_, bytecode, handlers) in compiled.items():
         append_code(obj["functionHeaders"][function_map[fid]], bytecode, handlers)
+    for fid, instructions in calibrated.items():
+        header = obj["functionHeaders"][fid]
+        header["flags"] &= ~16
+        append_code(header, bytes(assemble(instructions)), [])
     # Insert before the original render's first call, using registers not live yet.
     template = copy.deepcopy(original.getFunction(profile["render_function"])[4])
     if not (template[4] == ("LoadFromEnvironment", [("Reg8", False, 21), ("Reg8", False, 20), ("UInt8", False, 0)])):
@@ -260,12 +360,21 @@ def merge(source, helper_bytes, profile):
             raise ValueError("Unsupported HBC layout")
     for fid in range(first_new):
         before, after = original.getBareFunction(fid), check.getBareFunction(fid)
-        if fid not in (profile["render_function"], profile["press_function"]):
+        if fid not in (profile["render_function"], profile["press_function"], *calibrated):
             if not (before[:5] == after[:5]):
                 raise ValueError("Unsupported HBC layout")
             for key in ("highestReadCacheIndex", "highestWriteCacheIndex", "flags"):
                 if not (before[5][key] == after[5][key]):
                     raise ValueError("Unsupported HBC layout")
+    for fid, instructions in calibrated.items():
+        before, after = original.getBareFunction(fid), check.getBareFunction(fid)
+        if check.getFunction(fid)[4] != instructions:
+            raise ValueError("Unsupported HBC layout")
+        for key in ("highestReadCacheIndex", "highestWriteCacheIndex"):
+            if before[5][key] != after[5][key]:
+                raise ValueError("Unsupported HBC layout")
+        if after[5]["flags"] != (before[5]["flags"] & ~16):
+            raise ValueError("Unsupported HBC layout")
     if not (check.getFunction(profile["render_function"])[4] == template):
         raise ValueError("Unsupported HBC layout")
     for fid, (instructions, _, _) in compiled.items():
@@ -363,7 +472,8 @@ def main():
     manifest = dict(profile, format=1, patch_sha256=hashlib.sha256(recipe).hexdigest(),
                     patched_sha256=hashlib.sha256(patched).hexdigest(),
                     source_sha256=hashlib.sha256((ROOT / "home/card.js").read_bytes()).hexdigest(),
-                    modified_original_functions=[profile["render_function"], profile["press_function"]],
+                    modified_original_functions=sorted([profile["render_function"], profile["press_function"], LIBRARY_DIVIDER_FUNCTION,
+                                                        *(fid for fid, *_ in CALIBRATED_MARGIN_TOP)]),
                     contains_original_firmware=False, enabled_by_default=False)
     args.output_dir.mkdir(parents=True, exist_ok=True)
     for name, data in (("patch.rhp", recipe), ("patched.hbc", patched),

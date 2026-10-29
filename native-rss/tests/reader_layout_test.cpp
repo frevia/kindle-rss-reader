@@ -13,6 +13,21 @@ int main(){
     rss::Canvas canvas(1072,1448,font);
     {
         rss::Store store(":memory:");store.set_setting("reader_engine","classic");
+        rss::Feed feed;feed.url="https://status-font.test/rss";feed.title="状态字体";
+        const auto id=store.add_feed(feed);rss::ParsedFeed batch;
+        rss::Entry entry;entry.guid="status-font";entry.title="独立状态栏字体";entry.text="正文和返回按钮应保持不变。";
+        batch.entries.push_back(entry);store.save_entries(id,batch);
+        const auto article=store.entries(rss::View::All).front().id;
+        rss::App fallback(store,canvas);fallback.set_reader_status({69,false,true,"22:05"});fallback.draw();
+        const auto list=canvas.pixels;fallback.open(article,false);fallback.draw();const auto reader=canvas.pixels;
+        for(const auto& status_font:{font,std::string("/missing/rss-status-font.ttf")}){
+            rss::App app(store,canvas,0,status_font);app.set_reader_status({69,false,true,"22:05"});app.draw();
+            assert(canvas.pixels==list);
+            app.open(article,false);app.draw();assert(canvas.pixels==reader);
+        }
+    }
+    {
+        rss::Store store(":memory:");store.set_setting("reader_engine","classic");
         rss::Feed feed;feed.url="https://ui.test/rss";feed.title="界面一致性";store.add_feed(feed);store.add_group("设计");
         rss::App app(store,canvas);app.set_reader_status({68,false,true,"09:19"});
         const auto tap=[&](int x,int y){app.draw();app.tap(x,y);};
@@ -76,7 +91,7 @@ int main(){
                 int battery_left=650;while(battery_left<1040&&!ink(battery_left))++battery_left;
                 assert(battery_left-right>=6&&battery_left-right<=20);
                 int battery_right=battery_left;while(battery_right<1040&&ink(battery_right))++battery_right;
-                assert(battery_right-battery_left>=24&&battery_right-battery_left<=40);
+                assert(battery_right-battery_left==41);
                 int text_left=battery_right;while(text_left<1040&&!ink(text_left))++text_left;
                 assert(text_left-battery_right>=6&&text_left-battery_right<=20);
                 int battery_top=1448,battery_bottom=0;
@@ -99,7 +114,7 @@ int main(){
         app.tap(960,50);assert(app.take_request()=="sync");app.back();
 
         app.open(entries.front().id);app.draw();assert(app.reading());
-        aligned_status(28);
+        aligned_status(35);
         capture("reader");
         assert(app.reader_page()==0);app.next();app.next();app.draw();assert(app.reader_page()==2);
         const auto saved_anchor=store.setting("reader_cre:"+std::to_string(app.current_id()));

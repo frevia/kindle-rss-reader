@@ -14,7 +14,7 @@ public:
     enum class ReaderPanel { None, Type, Images, Info, Content };
     enum class Screen { List, Subscriptions, GroupPicker, Groups, GroupEdit, Opml, Sync, Cache, Settings };
     enum class SyncState { Idle, Running, Complete, Cancelled, Failed };
-    App(Store& store, Canvas& canvas, std::int64_t initial_article = 0);
+    App(Store& store, Canvas& canvas, std::int64_t initial_article = 0, const std::string& status_font = {});
     void draw();
     void set_reader_status(const ReaderStatus& status);
     void tap(int x, int y);
@@ -51,6 +51,7 @@ public:
 private:
     struct Hit { Rect rect; std::function<void()> action; };
     Store& store_; Canvas& c_;
+    std::unique_ptr<Canvas> status_canvas_;
     std::vector<Feed> feeds_;
     std::vector<Entry> list_;
     std::vector<std::size_t> list_starts_{0};

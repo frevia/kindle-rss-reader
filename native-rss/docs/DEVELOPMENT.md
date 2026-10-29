@@ -98,6 +98,8 @@ GUI 的导入按钮读取数据库同目录下的 `feeds.opml`；导出写入 `s
 
 `--font /absolute/path/font.ttf` 或 `RSS_FONT` 可以指定字体。macOS 默认使用本机系统字体，仅本机读取，不随项目分发。
 
+顶部时间与电量使用独立的界面字体：设备已有 `/mnt/us/fonts/AlibabaPuHuiTi-3-55-Regular.ttf` 时直接读取，用于对齐微信读书的状态栏；缺失或加载失败时回退到应用字体，不影响启动。该可选字体不随安装包分发，正文仍使用原来的字体。状态栏由本应用绘制并读取系统实时状态；启动器仍暂停原生状态栏，避免争用 framebuffer。
+
 ## 界面约定
 
 普通页面共用 `page_header`：状态行 32 px，返回按钮位于左上角、图标 40 px、触控范围 96×64，分隔线 y96，标题基线 y160；阅读页共用同一返回图标，保持原 96×88 触控范围和逐层返回行为。搜索与编辑输入页沿用同一页头，候选区下移 50 px，底部键盘位置不变。
@@ -156,6 +158,6 @@ rtk proxy native-rss/build/kindle-rss --db native-rss/output/demo.sqlite --artic
 
 ### 本应用与微信读书安装包的边界
 
-- RSS Reader 通过自己的 C++ 程序直接处理文章和屏幕，不调用微信读书运行时、Mesquito 的 `apps` 入口、微信读书的 `weread` 或根目录 `fonts`。字体与证书随 RSS 安装包提供。
+- RSS Reader 通过自己的 C++ 程序直接处理文章和屏幕，不调用微信读书运行时、Mesquito 的 `apps` 入口或微信读书的 `weread` 目录。正文所需字体与证书随 RSS 安装包提供；顶部状态栏可复用设备 `/mnt/us/fonts` 中已有的界面字体，缺失时自动回退，无需安装微信读书。
 - Scriptlets 是可选的共享书库启动能力；两者的 `.sh` 入口都会使用它，但这不等于应用本体共享插件。KUAL 入口不经过 SH_Integration。
 - `# DontUseFBInk` 只禁止 SH_Integration 把脚本输出额外绘制到屏幕，不能据此认为 RSS 不需要 FBInk：`launch.sh` 仍在恢复系统画面时执行它。

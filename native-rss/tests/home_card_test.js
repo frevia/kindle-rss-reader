@@ -11,7 +11,7 @@ function harness(title = 'Kindle Unlimited 现已升级为 Kindle+', sharedRoot)
     };
     if (!sharedRoot) { vm.createContext(root); vm.runInContext(source, root); }
     const emit = (type, event) => { for (const fn of callbacks[type] || []) fn(event); };
-    const RN = {View: "View", Text: "Text", TouchableOpacity: "TouchableOpacity", DeviceEventEmitter: {addListener(type, fn) {
+    const RN = {View: "View", Text: "Text", Image: "UnsupportedImage", TouchableOpacity: "TouchableOpacity", DeviceEventEmitter: {addListener(type, fn) {
         (callbacks[type] ||= new Set()).add(fn); return {remove() { callbacks[type].delete(fn); }};
     }}, NativeModules: {
         WebSocketModule: {
@@ -145,9 +145,10 @@ layout.message(snapshot('a', {items: [
 ]}));
 const layoutProps = layout.render();
 class NativePrimary { constructor(props) { this.props = props; } render() { return {type: "KindleButton", props: this.props}; } }
+class NativeImage {}
 const originalCard = {key: "original", props: {
     testID: "Card_native", style: [{marginHorizontal: 12}, {height: 360}],
-    children: [{type: "Text", props: {style: {fontFamily: "Kindle native heading", fontSize: 32}}}, {props: {children: [null, {props: {children: [
+    children: [{type: "Text", props: {style: {fontFamily: "Kindle native heading", fontSize: 32}}}, {props: {children: [{type: NativeImage, props: {}}, {props: {children: [
         {type: "Text", props: {style: {fontFamily: "Kindle native body", fontSize: 28, flexShrink: 1}}}, {type: NativePrimary, props: {testID: "Card_native_button"}}
     ]}}]}}]
 }};
@@ -161,7 +162,13 @@ const nodes = flatten(card), texts = nodes.filter(node => node?.type === 'Text')
 assert.equal(card.props.testID, 'Card_native', 'retain native card identity');
 assert.equal(card.props.key, 'original');
 assert.equal(card.props.style[0][1].height, 360, 'retain the original firmware dimensions as the scale reference');
-assert.equal(nodes.some(node => node?.type === 'Image'), false, 'article previews use the native text styles');
+const arrows = nodes.filter(node => node?.type === NativeImage);
+assert.equal(arrows.length, 1, 'only the section heading uses an image; article cards retain native text');
+assert.equal(nodes.some(node => node?.type === 'UnsupportedImage'), false, 'SVG uses the original firmware image wrapper');
+assert.equal(arrows[0].props.source.uri, 'file://KPPHome/Fill.svg', 'reuse the native homepage chevron');
+assert.equal(arrows[0].props.style.width / arrows[0].props.style.height, 11 / 19);
+assert.equal(arrows[0].props.accessible, false, 'decorative arrow does not add a second touch target');
+assert.equal(texts.some(node => node.props.children[0] === '〉'), false, 'no font glyph with a separate baseline');
 assert.equal(card.props.children[1].props.style.flexDirection, 'row');
 for (const title of ['第一篇文章标题', '第二篇文章标题很长也保持在单独的一行']) {
     const node = texts.find(node => node.props.children[0] === title);
