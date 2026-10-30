@@ -7,11 +7,15 @@
 #include <iostream>
 #include <stdexcept>
 
+void require(bool condition, const char* message) {
+    if (!condition) throw std::runtime_error(message);
+}
+
 template<class F> void measure(const char* name, int repetitions, F action) {
     const auto start = std::chrono::steady_clock::now();
     for (int i = 0; i < repetitions; ++i) action();
     const auto ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
-    std::cout << name << "," << std::fixed << std::setprecision(3) << ms / repetitions << "\n";
+    std::cout << name << "," << std::fixed << std::setprecision(3) << ms / repetitions << std::endl;
 }
 int main(int argc, char** argv) {
     try {
@@ -38,7 +42,7 @@ int main(int argc, char** argv) {
         measure("metadata_query", 3, [&] { store.entries(rss::View::All); });
         rss::Canvas canvas(1072, 1448, argv[1]);
         std::optional<rss::App> app;
-        measure("startup_and_list", 1, [&] { app.emplace(store, canvas); app->draw(); });
+        measure("startup_and_list", 1, [&] { app.emplace(store, canvas); app->set_reader_status({92, true, true, "10:00"}); app->draw(); });
         auto snapshot = [&](const char* name) {
             if (const auto folder = std::getenv("RSS_BENCH_SNAPSHOTS")) {
                 std::filesystem::create_directories(folder);
@@ -47,7 +51,12 @@ int main(int argc, char** argv) {
         };
         measure("all_switch_and_draw", 3, [&] { app->show_view(rss::View::All); app->draw(); });
         snapshot("list.pgm");
-        measure("navigation_first", 1, [&] { app->tap(150, 50); app->draw(); app->tap(120, 154); app->draw(); });
+        app->tap(100, 1392); app->draw();
+        require(app->menu_open(), "menu benchmark missed footer menu");
+        measure("menu_redraw", 5, [&] { app->draw(); });
+        app->back(); app->draw();
+        measure("navigation_first", 1, [&] { app->tap(100, 1392); app->draw(); app->tap(140, 966); app->draw();
+            require(app->screen() == rss::App::Screen::Subscriptions, "navigation benchmark missed subscriptions"); });
         snapshot("navigation.pgm");
         measure("navigation_redraw", 10, [&] { app->draw(); });
         app->back(); app->draw();
@@ -55,7 +64,8 @@ int main(int argc, char** argv) {
         measure("list_previous_and_draw", 10, [&] { app->previous(); app->draw(); });
         measure("group_switch_and_draw", 3, [&] { app->show_group("测试"); app->draw(); });
         measure("search_and_draw", 1, [&] {
-            app->tap(950, 260); app->text_input("性能"); app->submit(); app->draw();
+            app->tap(990, 120); app->text_input("性能"); app->submit(); app->draw();
+            require(app->query() == "性能", "search benchmark missed search input");
         });
         rss::ArticleImage image; image.url = "https://benchmark.invalid/image";
         rss::Entry picture; picture.guid = "picture"; picture.title = "图片性能测试";
@@ -67,6 +77,7 @@ int main(int argc, char** argv) {
         measure("image_open_and_draw", 1, [&] {
             app->open(picture_id); app->draw(); app->tap(536, 600); app->draw();
             app->tap(536, 1380); app->draw();
+            require(app->reader_panel() == rss::App::ReaderPanel::Images, "image benchmark missed image panel");
         });
         measure("image_redraw", 10, [&] { app->draw(); });
         app->back(); app->back(); app->back();
@@ -76,6 +87,7 @@ int main(int argc, char** argv) {
         measure("reader_next_and_draw", 10, [&] { app->next(); app->draw(); });
         app->tap(536, 600); app->draw();
         app->tap(200, 1380);
+        require(app->reader_panel() == rss::App::ReaderPanel::Type, "settings benchmark missed typography panel");
         measure("reader_settings_draw", 1, [&] { app->draw(); });
         snapshot("settings.pgm");
         app->back(); app->back();

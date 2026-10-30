@@ -43,13 +43,14 @@ elif name=="sha256sum":
     if text.endswith("patch.rhp"): value=PATCH
     elif text.endswith("original.hbc"): value=ORIGINAL
     elif text.endswith("patched.hbc"): value=PATCHED
+    elif text.endswith(".conf") or text.endswith(".rss-tmp"): value=__import__("hashlib").sha256(path.read_bytes()).hexdigest()
     elif text.endswith("KPPMainApp.js.hbc"):
         value=("d"*64 if mode=="unknown-bind" and mounted() else PATCHED if mounted() else "e"*64 if mode=="target-hash-bad" else ORIGINAL)
     if mode=="patch-hash-bad" and text.endswith("patch.rhp"): value="c"*64
     print(value+"  "+text)
 elif name=="nohup": log("guard-armed")
 elif name=="cp":
-    if mode=="job-copy-fail" and args[-1].endswith(".rss-tmp"):
+    if (mode=="job-copy-fail" and args[-1].endswith(".rss-tmp")) or (mode=="recovery-copy-fail" and args[-1].endswith("-recover.conf.rss-tmp")):
         pathlib.Path(args[-1]).write_bytes(b""); sys.exit(1)
     sys.exit(subprocess.run(["/bin/cp", *args]).returncode)
 elif name=="get": print("active")
@@ -69,10 +70,12 @@ elif name=="timeout":
     try: sys.exit(subprocess.run(args[1:], timeout=float(args[0])).returncode)
     except subprocess.TimeoutExpired: sys.exit(124)
 elif name=="sleep": time.sleep(.01 if args[0]=="1" else 2)
-elif name=="flock": sys.exit(2 if any(a.startswith("-") and a not in ("-n", "-u", "-s", "-x") for a in args) else 0)
+elif name=="flock":
+    if mode=="reader-busy" and args==["-n", "9"]: sys.exit(1)
+    sys.exit(2 if any(a.startswith("-") and a not in ("-n", "-u", "-s", "-x") for a in args) else 0)
 elif name=="initctl":
     log("init "+" ".join(args))
-    if args[0]=="status" and args[1]=="kppmainapp": print("kppmainapp start/running, process 321")
+    if args[0]=="status" and args[1]=="kppmainapp": print("kppmainapp stop/waiting" if mode=="home-stopped" else "kppmainapp start/running, process 321")
     elif args[0]=="status" and args[1]=="native-rss-home": print("native-rss-home start/running, process 900004")
     elif args[0]=="restart" and args[1]=="kppmainapp":
         job=pathlib.Path(os.environ["JOB"])
@@ -103,6 +106,7 @@ class HomeManagerTests(unittest.TestCase):
         self.native = self.root / "var/local/native-rss"
         self.proc = self.root / "proc"
         self.job = self.root / "etc/upstart/native-rss-home.conf"
+        self.recovery_job = self.root / "etc/upstart/native-rss-home-recover.conf"
         self.target = self.root / "app/KPPMainApp/js/KPPMainApp.js.hbc"
         self.bin = self.root / "bin"
         self.app.joinpath("home").mkdir(parents=True)
@@ -116,6 +120,7 @@ class HomeManagerTests(unittest.TestCase):
         self.proc.joinpath("mounts").write_text("/dev/root / ext4 ro,relatime 0 0\n")
         self.app.joinpath("home/patch.rhp").write_bytes(b"recipe fixture")
         self.app.joinpath("home/native-rss-home.conf").write_text("# RSS Reader optional home card v1\n")
+        self.app.joinpath("home/native-rss-home-recover.conf").write_text("# RSS Reader optional home recovery v1\nstart on user_store_available\n")
         self.app.joinpath("home/profile.env").write_text(
             f"ORIGINAL_SHA256={ORIGINAL}\nPATCHED_SHA256={PATCHED}\nPATCH_SHA256={PATCH}\n")
         reader_bin = self.app / "bin/kindle-rss"
@@ -130,12 +135,13 @@ class HomeManagerTests(unittest.TestCase):
         homebin.chmod(0o755)
         self.self_script = self.root / "mnt/us/native-rss/home.sh"
         self.self_script.parent.mkdir(parents=True, exist_ok=True)
-        source = SOURCE.read_text().replace('while [ "$n" -lt 60 ]', 'while [ "$n" -lt 3 ]')
+        source = SOURCE.read_text().replace('while [ "$n" -lt 60 ]', 'while [ "$n" -lt 3 ]').replace('while [ "$n" -lt 20 ]', 'while [ "$n" -lt 3 ]')
         replacements = {
             "/var/local/native-rss": str(self.native),
             "/mnt/us/native-rss": str(self.app),
             "/app/KPPMainApp/js/KPPMainApp.js.hbc": str(self.target),
             "/etc/upstart/native-rss-home.conf": str(self.job),
+            "/etc/upstart/native-rss-home-recover.conf": str(self.recovery_job),
             "/sbin/initctl": str(self.bin / "initctl"),
             "/usr/sbin/mntroot": str(self.bin / "mntroot"),
             "/usr/bin/lipc-get-prop": str(self.bin / "get"),
@@ -214,8 +220,10 @@ class HomeManagerTests(unittest.TestCase):
         self.assertTrue((self.state / "enabled").exists())
         self.assertIn("ready=1", (self.state / "health").read_text())
         self.assertEqual(self.job.read_text().splitlines()[0], "# RSS Reader optional home card v1")
+        self.assertEqual(self.recovery_job.read_text(), (self.app / "home/native-rss-home-recover.conf").read_text())
         self.assertEqual(self.events().count("mntroot rw"), 1)
         self.assertEqual(self.events().count("mntroot ro"), 1)
+        self.assertIn("set com.lab126.appmgrd start app://com.lab126.booklet.home", self.events())
         self.assertFalse((self.state / "root-was-ro").exists())
         self.assertEqual(self.target.read_bytes(), b"original adapter fixture")
 
@@ -315,10 +323,13 @@ class HomeManagerTests(unittest.TestCase):
 
     def test_disable_detaches_owned_bind_while_home_still_maps_it(self):
         self.assertEqual(self.invoke("enable").returncode, 0)
+        before = self.events()
         result = self.invoke("disable", "busy-bind")
         self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("set com.lab126.appmgrd start app://com.lab126.booklet.home", self.events()[len(before):])
         self.assertFalse((self.root / "mounted").exists())
         self.assertFalse(self.job.exists())
+        self.assertFalse(self.recovery_job.exists())
         self.assertEqual(self.target.read_bytes(), b"original adapter fixture")
 
     def test_disable_is_idempotent_and_unknown_bind_is_never_unmounted(self):
@@ -334,6 +345,103 @@ class HomeManagerTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertTrue((self.root / "mounted").exists())
         self.assertFalse(any(x.startswith("umount ") for x in self.events()))
+
+
+    def stopped_enabled_home(self):
+        self.job.write_text("# RSS Reader optional home card v1\n")
+        (self.state / "enabled").touch()
+        (self.state / "health").write_text("pid=13624\nready=1\nclients=1\n")
+
+    def test_recover_ignores_stale_health_and_restarts_missing_service(self):
+        self.stopped_enabled_home()
+        result = self.invoke("recover")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.events().count("init restart kppmainapp"), 1)
+        self.assertTrue((self.root / "mounted").exists())
+        self.assertEqual((self.state / "health").read_text().splitlines()[0], "pid=900004")
+        self.assertIn("ready=1", (self.state / "health").read_text())
+        self.assertFalse(any(x.startswith("set com.lab126.appmgrd start app://com.lab126.booklet.home") for x in self.events()))
+        self.assertFalse(any(x.startswith("mntroot ") for x in self.events()))
+
+    def test_recover_skips_disabled_reading_or_not_yet_running_home(self):
+        result = self.invoke("recover")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.events(), [])
+        self.stopped_enabled_home()
+        for scenario in ("reader-busy", "home-stopped"):
+            before = self.events()
+            result = self.invoke("recover", scenario)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertNotIn("init restart kppmainapp", self.events()[len(before):])
+            self.assertIn("pid=13624", (self.state / "health").read_text())
+        self.job.write_text("# another component\n")
+        before = self.events()
+        self.assertEqual(self.invoke("recover").returncode, 0)
+        self.assertEqual(self.events(), before)
+
+    def test_recover_does_not_restart_a_running_bridge_waiting_for_client(self):
+        self.assertEqual(self.invoke("enable").returncode, 0)
+        (self.state / "health").write_text("pid=900004\nready=0\nclients=0\n")
+        before = self.events()
+        result = self.invoke("recover")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("init restart kppmainapp", self.events()[len(before):])
+        self.assertFalse(any(x.startswith("mntroot ") for x in self.events()[len(before):]))
+
+    def test_recover_timeout_keeps_enabled_installation(self):
+        self.stopped_enabled_home()
+        result = self.invoke("recover", "health-never-ready")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertTrue(self.job.exists())
+        self.assertTrue((self.state / "enabled").exists())
+        self.assertTrue((self.root / "mounted").exists())
+        self.assertEqual(self.events().count("init restart kppmainapp"), 1)
+
+    def test_recover_preserves_unknown_mount(self):
+        self.stopped_enabled_home()
+        self.assertEqual(self.invoke("mount").returncode, 0)
+        before = self.events()
+        result = self.invoke("recover", "unknown-bind")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn("init restart kppmainapp", self.events()[len(before):])
+        self.assertTrue((self.root / "mounted").exists())
+
+    def test_healthy_enable_upgrades_recovery_job_without_restarting_home(self):
+        self.assertEqual(self.invoke("enable").returncode, 0)
+        self.recovery_job.unlink()
+        before = self.events()
+        result = self.invoke("enable")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(self.recovery_job.exists())
+        self.assertNotIn("init restart kppmainapp", self.events()[len(before):])
+        self.assertIn("mntroot ro", self.events()[len(before):])
+
+    def test_foreign_recovery_configuration_is_preserved(self):
+        self.recovery_job.write_text("# another component\n")
+        for command in ("enable", "disable"):
+            result = self.invoke(command)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(self.recovery_job.read_text(), "# another component\n")
+        self.assertFalse(any(x.startswith("mntroot ") for x in self.events()))
+
+    def test_recovery_copy_failure_rolls_back_new_activation_but_preserves_upgrade(self):
+        result = self.invoke("enable", "recovery-copy-fail")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(self.job.exists())
+        self.assertFalse(self.recovery_job.exists())
+        self.assertFalse(Path(str(self.recovery_job) + ".rss-tmp").exists())
+        self.assertFalse((self.state / "root-was-ro").exists())
+        self.assertEqual(self.invoke("enable").returncode, 0)
+        self.recovery_job.unlink()
+        before = self.events()
+        result = self.invoke("enable", "recovery-copy-fail")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertTrue(self.job.exists())
+        self.assertTrue((self.state / "enabled").exists())
+        self.assertTrue((self.root / "mounted").exists())
+        self.assertNotIn("init restart kppmainapp", self.events()[len(before):])
+        self.assertFalse(Path(str(self.recovery_job) + ".rss-tmp").exists())
+        self.assertFalse((self.state / "root-was-ro").exists())
 
 
 if __name__ == "__main__": unittest.main()

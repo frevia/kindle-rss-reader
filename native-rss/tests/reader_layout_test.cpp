@@ -19,7 +19,14 @@ int main(){
         batch.entries.push_back(entry);store.save_entries(id,batch);
         const auto article=store.entries(rss::View::All).front().id;
         rss::App fallback(store,canvas);fallback.set_reader_status({69,false,true,"22:05"});fallback.draw();
-        const auto list=canvas.pixels;fallback.open(article,false);fallback.draw();const auto reader=canvas.pixels;
+        const auto list=canvas.pixels;
+        rss::Canvas expected_clock(1072,1448,font);expected_clock.clear();
+        expected_clock.text(32,48,"22:05",31,0);
+        for(int y=0;y<64;++y)for(int x=0;x<672;++x)assert(list[y*1072+x]==expected_clock.pixels[y*1072+x]);
+        fallback.open(article,false);fallback.draw();const auto reader=canvas.pixels;
+        for(int y=0;y<76;++y)for(int x=700;x<1072;++x)assert(reader[y*1072+x]==list[y*1072+x]);
+        expected_clock.clear();expected_clock.text(32,1448-20,"22:05",31,80);
+        for(int y=1380;y<1448;++y)for(int x=0;x<240;++x)assert(reader[y*1072+x]==expected_clock.pixels[y*1072+x]);
         for(const auto& status_font:{font,std::string("/missing/rss-status-font.ttf")}){
             rss::App app(store,canvas,0,status_font);app.set_reader_status({69,false,true,"22:05"});app.draw();
             assert(canvas.pixels==list);
@@ -31,29 +38,36 @@ int main(){
         rss::Feed feed;feed.url="https://ui.test/rss";feed.title="界面一致性";store.add_feed(feed);store.add_group("设计");
         rss::App app(store,canvas);app.set_reader_status({68,false,true,"09:19"});
         const auto tap=[&](int x,int y){app.draw();app.tap(x,y);};
+        app.draw();const auto home_status=std::vector<std::uint8_t>(canvas.pixels.begin(),canvas.pixels.begin()+64*1072);
         const auto capture=[&](const char* name){
-            app.draw();if(auto folder=std::getenv("RSS_TEST_SNAPSHOTS")){
+            app.draw();
+            for(int y=0;y<64;++y)for(int x=700;x<1072;++x)assert(canvas.pixels[y*1072+x]==home_status[y*1072+x]);
+            if(auto folder=std::getenv("RSS_TEST_SNAPSHOTS")){
                 std::filesystem::create_directories(folder);
                 canvas.write_pgm((std::filesystem::path(folder)/(std::string("ui-")+name+".pgm")).string());
             }
         };
-        tap(150,50);tap(140,154);capture("subscriptions");const auto header=canvas.pixels;
+        tap(100,1392);tap(140,966);capture("subscriptions");const auto header=canvas.pixels;
+        rss::Canvas centered_clock(1072,1448,font);
+        centered_clock.text((1072-centered_clock.measure("09:19",31))/2,48,"09:19",31,0);
+        for(int y=0;y<64;++y)for(int x=400;x<650;++x)assert(header[y*1072+x]==centered_clock.pixels[y*1072+x]);
         const auto same_back=[&](const char* name){
             capture(name);
-            for(int y=28;y<92;++y)for(int x=24;x<120;++x)assert(canvas.pixels[y*1072+x]==header[y*1072+x]);
+            for(int y=6;y<70;++y)for(int x=24;x<120;++x)assert(canvas.pixels[y*1072+x]==header[y*1072+x]);
+            for(int y=0;y<70;++y)for(int x=400;x<1072;++x)assert(canvas.pixels[y*1072+x]==header[y*1072+x]);
         };
-        tap(950,50);same_back("add-feed");tap(200,330);app.text_input("尚未保存");same_back("name-input");
+        tap(950,140);same_back("add-feed");tap(200,330);app.text_input("尚未保存");same_back("name-input");
         tap(62,60);tap(62,60);assert(store.feeds().front().title=="界面一致性");
-        tap(150,1380);same_back("groups");tap(950,50);same_back("group-edit");
+        tap(150,1380);same_back("groups");tap(950,140);same_back("group-edit");
         tap(200,550);same_back("parent-picker");tap(62,60);tap(62,60);tap(62,60);
         assert(app.screen()==rss::App::Screen::Subscriptions&&store.groups().size()==2);
         tap(950,1380);same_back("opml");tap(200,350);same_back("confirmation");tap(62,60);
         assert(app.screen()==rss::App::Screen::Opml&&app.take_request().empty());tap(62,60);tap(62,60);
-        tap(950,235);app.text_input("未确认的关键词");same_back("search");tap(400,246);same_back("search-scope");
-        tap(950,50);app.text_input("设计");same_back("find-group");tap(62,60);tap(62,60);
+        tap(990,160);app.text_input("未确认的关键词");same_back("search");tap(400,246);same_back("search-scope");
+        tap(950,140);app.text_input("设计");same_back("find-group");tap(62,60);tap(62,60);
         app.submit();assert(app.query()=="未确认的关键词");app.show_view(rss::View::All);
-        tap(960,50);assert(app.take_request()=="sync");same_back("sync");tap(950,1380);same_back("cache");
-        tap(200,1380);same_back("clean-confirm");tap(62,60);tap(62,60);app.sync_finished(true);tap(62,60);
+        tap(100,1392);tap(140,1174);assert(app.take_request()=="sync");capture("sync");tap(880,548);same_back("cache");
+        tap(200,1380);same_back("clean-confirm");tap(62,60);tap(62,60);app.sync_finished(true);tap(800,904);
         app.show_error("界面检查示例：操作暂时无法完成");same_back("error");tap(62,60);
         assert(app.screen()==rss::App::Screen::List&&store.feeds().size()==1&&store.groups().size()==2);
     }
@@ -100,21 +114,24 @@ int main(){
                 assert(std::abs(first_y+last_y-battery_top-battery_bottom)<=6);
             }
         };
-        aligned_status(0);
+        aligned_status(17);
         app.draw();const auto list_before=canvas.pixels;
         capture("list");
         app.dirty=false;app.set_reader_status({68,false,true,"09:19"});assert(app.dirty);app.draw();
         assert(std::equal(list_before.begin()+112*1072,list_before.end(),canvas.pixels.begin()+112*1072));
         app.dirty=false;app.set_reader_status({68,false,true,"09:19"});assert(!app.dirty);
-        app.tap(150,50);assert(app.menu_open());app.draw();app.tap(120,154);app.draw();
+        app.tap(100,1392);assert(app.menu_open());app.draw();app.tap(120,966);app.draw();
         assert(app.screen()==rss::App::Screen::Subscriptions);const auto navigation=canvas.pixels;
         app.set_reader_status({67,false,true,"09:20"});assert(app.dirty);app.draw();
         assert(std::equal(navigation.begin()+112*1072,navigation.end(),canvas.pixels.begin()+112*1072));
         app.back();app.draw();
-        app.tap(960,50);assert(app.take_request()=="sync");app.back();
+        app.tap(100,1392);app.draw();app.tap(140,1174);assert(app.take_request()=="sync");app.back();
 
-        app.open(entries.front().id);app.draw();assert(app.reading());
-        aligned_status(35);
+        app.set_reader_status({68,false,true,"09:19"});app.draw();
+        const auto status_strip=std::vector<std::uint8_t>(canvas.pixels.begin(),canvas.pixels.begin()+64*1072);
+        const auto same_status=[&]{for(int y=0;y<64;++y)for(int x=700;x<1072;++x)assert(status_strip[y*1072+x]==canvas.pixels[y*1072+x]);};
+        app.open(entries.front().id);app.draw();assert(app.reading());same_status();
+        aligned_status(17);
         capture("reader");
         assert(app.reader_page()==0);app.next();app.next();app.draw();assert(app.reader_page()==2);
         const auto saved_anchor=store.setting("reader_cre:"+std::to_string(app.current_id()));
@@ -137,7 +154,10 @@ int main(){
         if(!app.reader_tools_open()){app.tap(536,600);app.draw();assert(app.reader_tools_open());}
         app.tap(178,1400);app.draw();assert(app.reader_panel()==rss::App::ReaderPanel::Type);
         assert(app.reader_page()==tool_page&&store.entry(app.current_id())->position==tool_position);
-        assert(std::equal(article_before.begin()+96*1072,article_before.begin()+700*1072,canvas.pixels.begin()+96*1072));
+        // Classic layout omits the entire 58px line box when it intersects the panel at y712.
+        // Compare only the fully visible area; page and anchor checks above cover repagination.
+        constexpr int unobscured_bottom=712-58;
+        assert(std::equal(article_before.begin()+96*1072,article_before.begin()+unobscured_bottom*1072,canvas.pixels.begin()+96*1072));
         capture("type-panel");
         app.tap(62,54);app.draw();assert(app.reading()&&app.reader_tools_open()&&app.reader_panel()==rss::App::ReaderPanel::None);
         app.tap(62,54);app.draw();assert(app.reading()&&!app.reader_tools_open());

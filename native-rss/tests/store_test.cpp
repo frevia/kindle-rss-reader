@@ -48,6 +48,36 @@ int main() {
 
     const std::string path = "/tmp/kindle-rss-store-test-" + std::to_string(getpid()) + ".sqlite";
     std::remove(path.c_str());
+    {
+        Store opening(path);Feed feed;feed.url="https://atomic-open.test/rss";const auto fid=opening.add_feed(feed);
+        auto article=make_entry("atomic","Atomic opening",1);article.text="RSS body";
+        ParsedFeed parsed;parsed.entries={article};opening.save_entries(fid,parsed);
+        const auto id=opening.entries(View::All).front().id;
+        assert(opening.queue_fulltext(id));
+        auto web=article;web.html="<p>Web body</p>";web.text="Web body";opening.save_fulltext(id,web);
+        sqlite3* audit=nullptr;assert(sqlite3_open(path.c_str(),&audit)==SQLITE_OK);
+        assert(sqlite3_exec(audit,"CREATE TABLE deferred_open_failure(feed_id INTEGER REFERENCES feeds(id) DEFERRABLE INITIALLY DEFERRED)",nullptr,nullptr,nullptr)==SQLITE_OK);
+        for(const bool fail_commit:{false,true}){
+            opening.set_read(id,false);opening.set_position(id,11);opening.set_position(id,17,true);
+            opening.set_setting("reader_content:"+std::to_string(id),"rss");opening.set_setting("last_entry","previous");
+            const char* trigger=fail_commit?
+                "CREATE TRIGGER fail_open BEFORE INSERT ON settings WHEN NEW.key='last_entry' BEGIN INSERT INTO deferred_open_failure VALUES(-999); END;":
+                "CREATE TRIGGER fail_open BEFORE UPDATE OF in_progress ON entries BEGIN SELECT RAISE(ABORT,'database or disk is full'); END;";
+            assert(sqlite3_exec(audit,trigger,nullptr,nullptr,nullptr)==SQLITE_OK);
+            bool failed=false;try{opening.begin_reading(id,99,true);}catch(const std::runtime_error&){failed=true;}
+            assert(failed&&!opening.entry(id)->read&&opening.entry(id)->in_progress);
+            assert(opening.entry(id)->position==11&&opening.fulltext_entry(id)->position==17);
+            assert(opening.setting("reader_content:"+std::to_string(id))=="rss"&&opening.setting("last_entry")=="previous");
+            assert(opening.entry_count(View::Unread)==1);
+            assert(sqlite3_exec(audit,"DROP TRIGGER fail_open",nullptr,nullptr,nullptr)==SQLITE_OK);
+            opening.begin_reading(id,99,true); // A failed transaction must not poison a later open.
+            assert(opening.entry(id)->read&&opening.entry(id)->in_progress&&opening.fulltext_entry(id)->position==99);
+            assert(opening.entry(id)->position==11);
+            assert(opening.setting("reader_content:"+std::to_string(id))=="web"&&opening.setting("last_entry")==std::to_string(id));
+        }
+        sqlite3_close(audit);
+    }
+    std::remove(path.c_str());
     std::int64_t feed_id = 0;
     std::int64_t first_id = 0;
     std::int64_t old_published = 0;
@@ -168,6 +198,26 @@ int main() {
         assert(group_failed && std::find(after_failed_add.begin(),after_failed_add.end(),"broken")==after_failed_add.end());
         group_failed=false; try { reopened.rename_group("news","Rollback"); } catch(const std::runtime_error&) { group_failed=true; }
         assert(group_failed && reopened.feeds()[0].group=="news");
+    }
+    std::remove(path.c_str());
+    {
+        // Unchanged RSS image references must not rewrite cached pixel blobs during background sync.
+        Store images(path);Feed feed;feed.url="https://image-reuse.test/rss";const auto fid=images.add_feed(feed);
+        auto article=make_entry("reuse","Cached images",1);ArticleImage a,b;
+        a.url="https://image-reuse.test/a.png";b.url="https://image-reuse.test/b.png";article.images={a,b};
+        ParsedFeed parsed;parsed.entries={article};images.save_entries(fid,parsed);
+        const auto id=images.entries(View::All).front().id;
+        for(auto ref:{a,b}){ref.width=2;ref.height=1;ref.pixels={17,239};images.save_image(id,ref);}
+        sqlite3* audit=nullptr;assert(sqlite3_open(path.c_str(),&audit)==SQLITE_OK);
+        assert(sqlite3_exec(audit,"CREATE TABLE image_writes(n INTEGER); INSERT INTO image_writes VALUES(0); CREATE TRIGGER image_write AFTER UPDATE ON article_images BEGIN UPDATE image_writes SET n=n+1; END",nullptr,nullptr,nullptr)==SQLITE_OK);
+        const auto writes=[&]{sqlite3_stmt* q=nullptr;assert(sqlite3_prepare_v2(audit,"SELECT n FROM image_writes",-1,&q,nullptr)==SQLITE_OK);assert(sqlite3_step(q)==SQLITE_ROW);const int count=sqlite3_column_int(q,0);sqlite3_finalize(q);return count;};
+        images.save_entries(fid,parsed);assert(writes()==0);
+        std::reverse(parsed.entries[0].images.begin(),parsed.entries[0].images.end());images.save_entries(fid,parsed);
+        assert(images.entry(id)->images.front().url==b.url&&writes()==2);
+        assert(images.image(id,a.url)->pixels==std::vector<std::uint8_t>({17,239}));
+        parsed.entries[0].images.pop_back();images.save_entries(fid,parsed);
+        assert(!images.image(id,a.url)&&images.image(id,b.url)->pixels==std::vector<std::uint8_t>({17,239}));
+        sqlite3_close(audit);
     }
     std::remove(path.c_str());
     {

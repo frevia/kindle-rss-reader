@@ -32,7 +32,7 @@ constexpr std::size_t kMaxOut = 64 * 1024;
 volatile std::sig_atomic_t g_stop = 0;
 
 struct Item { std::int64_t id = 0; std::string title, source; };
-struct FeedCard { std::int64_t id = 0, unread = 0, entry_id = 0; std::string title, latest_title; };
+struct FeedCard { std::int64_t id = 0, unread = 0, entry_id = 0, published = 0; std::string title, latest_title, excerpt; };
 struct Snapshot {
     std::string status = "unavailable", revision;
     std::int64_t unread = 0, feeds = 0, updated_at = 0;
@@ -82,6 +82,31 @@ std::string json_string(const std::string& input, std::size_t limit) {
     out.push_back('"'); return out;
 }
 
+std::string normalized_excerpt(const std::string& input, const std::string& title) {
+    const auto first_line_end = input.find_first_of("\r\n");
+    std::size_t start = 0;
+    std::size_t first_line_start = 0, first_line_stop = first_line_end == std::string::npos ? input.size() : first_line_end;
+    while (first_line_start < first_line_stop && (input[first_line_start] == ' ' || input[first_line_start] == '\t' || input[first_line_start] == '\v' || input[first_line_start] == '\f')) ++first_line_start;
+    while (first_line_stop > first_line_start && (input[first_line_stop - 1] == ' ' || input[first_line_stop - 1] == '\t' || input[first_line_stop - 1] == '\v' || input[first_line_stop - 1] == '\f')) --first_line_stop;
+    if (!title.empty() && input.compare(first_line_start, first_line_stop - first_line_start, title) == 0) {
+        start = first_line_end == std::string::npos ? input.size() : first_line_end + 1;
+        if (first_line_end != std::string::npos && input[first_line_end] == '\r' && start < input.size() && input[start] == '\n') ++start;
+    }
+    std::string out;
+    bool pending_space = false;
+    for (std::size_t i = start; i < input.size(); ++i) {
+        const auto c = static_cast<unsigned char>(input[i]);
+        if (c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\v' || c == '\f') {
+            pending_space = !out.empty();
+        } else {
+            if (pending_space) out.push_back(' ');
+            out.push_back(static_cast<char>(c));
+            pending_space = false;
+        }
+    }
+    return out;
+}
+
 std::string content_json(const Snapshot& s) {
     std::string out = "{\"type\":\"rss-home-v1\",\"status\":" + json_string(s.status, 32) +
         ",\"enabled\":" + std::string(s.enabled ? "true" : "false") +
@@ -98,7 +123,8 @@ std::string content_json(const Snapshot& s) {
         const auto& card = s.feed_cards[i];
         out += "{\"id\":" + std::to_string(card.id) + ",\"title\":" + json_string(card.title, 24) +
                ",\"unread\":" + std::to_string(card.unread) + ",\"entryId\":" + std::to_string(card.entry_id) +
-               ",\"latestTitle\":" + json_string(card.latest_title, 48) + "}";
+               ",\"latestTitle\":" + json_string(card.latest_title, 48) + ",\"excerpt\":" + json_string(card.excerpt, 160) +
+               ",\"published\":" + std::to_string(card.published) + "}";
     }
     return out + "]}";
 }
@@ -239,23 +265,29 @@ Snapshot read_snapshot(const std::string& path, const std::string& open_dir = {}
     }
     if (ok) {
         sqlite3_stmt* q = nullptr;
-        const char* sql = "SELECT f.id,substr(f.title,1,96),"
+        const bool has_entry_text = schema_has(db, "entries", "text");
+        const std::string sql = std::string("SELECT f.id,substr(f.title,1,96),") +
             "(SELECT count(*) FROM entries WHERE feed_id=f.id AND read=0),"
-            "coalesce(e.id,0),coalesce(substr(e.title,1,192),'') FROM feeds f "
+            "coalesce(e.id,0),coalesce(substr(e.title,1,192),''),coalesce(e.published,0)," +
+            (has_entry_text ? "coalesce(substr(e.text,1,2048),'') " : "'' ") + "FROM feeds f "
             "LEFT JOIN entries e ON e.id=(SELECT id FROM entries WHERE feed_id=f.id "
             "ORDER BY CASE WHEN read=0 THEN 0 ELSE 1 END,published DESC,id DESC LIMIT 1) "
             "WHERE f.active=1 "
             "ORDER BY (SELECT max(published) FROM entries WHERE feed_id=f.id) DESC,f.id ASC LIMIT 3";
-        ok = sqlite3_prepare_v2(db, sql, -1, &q, nullptr) == SQLITE_OK;
+        ok = sqlite3_prepare_v2(db, sql.c_str(), -1, &q, nullptr) == SQLITE_OK;
         if (ok) {
             int rc;
             while ((rc = sqlite3_step(q)) == SQLITE_ROW) {
                 FeedCard card; card.id = sqlite3_column_int64(q, 0); card.unread = sqlite3_column_int64(q, 2);
                 card.entry_id = sqlite3_column_int64(q, 3);
+                const auto selected_published = sqlite3_column_int64(q, 5);
+                if (selected_published >= 0 && selected_published <= 8640000000000LL) card.published = selected_published;
                 const auto* title = sqlite3_column_text(q, 1); const auto title_bytes = sqlite3_column_bytes(q, 1);
                 const auto* latest = sqlite3_column_text(q, 4); const auto latest_bytes = sqlite3_column_bytes(q, 4);
+                const auto* excerpt = sqlite3_column_text(q, 6); const auto excerpt_bytes = sqlite3_column_bytes(q, 6);
                 if (title && title_bytes > 0) card.title.assign(reinterpret_cast<const char*>(title), static_cast<std::size_t>(title_bytes));
                 if (latest && latest_bytes > 0) card.latest_title.assign(reinterpret_cast<const char*>(latest), static_cast<std::size_t>(latest_bytes));
+                if (excerpt && excerpt_bytes > 0) card.excerpt = normalized_excerpt(std::string(reinterpret_cast<const char*>(excerpt), static_cast<std::size_t>(excerpt_bytes)), card.latest_title);
                 s.feed_cards.push_back(std::move(card));
             }
             ok = rc == SQLITE_DONE;

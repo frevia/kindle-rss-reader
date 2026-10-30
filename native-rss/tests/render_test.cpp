@@ -38,6 +38,49 @@ int main(){
     assert(golden.gcount()==static_cast<std::streamsize>(expected.size()));
     for(std::size_t i=0;i<expected.size();++i)
         assert(std::abs(static_cast<int>(icons.pixels[i])-static_cast<unsigned char>(expected[i]))<=1);
+    // Cached coverage must be independent of the destination, ink, and background.
+    const auto patterned=[](rss::Canvas& canvas){
+        for(int y=0;y<canvas.height;++y)for(int x=0;x<canvas.width;++x)
+            canvas.pixels[y*canvas.width+x]=static_cast<std::uint8_t>((x*17+y*31)%256);
+    };
+    rss::Canvas warm(256,192,font);
+    const rss::Rect test_areas[]={{83,17,52,35},{171,22,31,58},{-12,-9,49,37},{240,175,49,37}};
+    for(int value=static_cast<int>(rss::Icon::Rss);value<=static_cast<int>(rss::Icon::BackCircle);++value){
+        for(const auto& area:test_areas)for(int background=0;background<2;++background){
+            const auto icon=static_cast<rss::Icon>(value);
+            // Seed the reused canvas at another position, color and background.
+            warm.clear(255);warm.icon(icon,{15,20,area.w,area.h},11);
+            rss::Canvas fresh(256,192,font);
+            if(background){patterned(fresh);patterned(warm);}
+            else {fresh.clear(203);warm.clear(203);}
+            fresh.icon(icon,area,67);warm.icon(icon,area,67);
+            assert(fresh.pixels==warm.pixels);
+            if(background)patterned(warm);else warm.clear(203);
+            warm.icon(icon,area,67);assert(fresh.pixels==warm.pixels);
+        }
+    }
+    // A clipped cold draw still builds coverage relative to the full icon origin.
+    rss::Canvas reference(256,192,font),clipped(256,192,font);
+    reference.clear(211);clipped.clear(211);
+    reference.icon(rss::Icon::Wifi,{0,0,49,37},42);
+    clipped.icon(rss::Icon::Wifi,{-12,-9,49,37},42);
+    clipped.clear(211);clipped.icon(rss::Icon::Wifi,{0,0,49,37},42);
+    assert(reference.pixels==clipped.pixels);
+    // Evict a previously used mask, then verify its regenerated output.
+    reference.clear(173);warm.clear(173);
+    reference.icon(rss::Icon::Battery,{101,31,127,96},39);
+    warm.icon(rss::Icon::Battery,{101,31,127,96},39);
+    assert(reference.pixels==warm.pixels);
+    for(int w=122;w<=128;w+=2)warm.icon(rss::Icon::Plus,{10,10,w,128},73);
+    warm.clear(173);warm.icon(rss::Icon::Battery,{101,31,127,96},39);
+    assert(reference.pixels==warm.pixels);
+    const auto unchanged=warm.pixels;
+    warm.icon(rss::Icon::Wifi,{2147483647,0,128,128});
+    warm.icon(rss::Icon::Wifi,{-2147483647,0,128,128});
+    warm.icon(rss::Icon::Wifi,{0,0,0,30});
+    warm.icon(rss::Icon::Wifi,{0,0,-1,30});
+    warm.icon(rss::Icon::None,{0,0,30,30});
+    assert(unchanged==warm.pixels);
     c.clear();c.icon(rss::Icon::Rss,{100,100,200,1});
     assert(c.pixels[100*c.width+100]==255); // Far outside a very narrow icon's stroke.
     c.clear();

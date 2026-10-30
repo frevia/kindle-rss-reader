@@ -3,6 +3,7 @@
 #include "store.hpp"
 #include "status.hpp"
 #include "cre_reader.hpp"
+#include "device.hpp"
 #include <functional>
 #include <map>
 #include <memory>
@@ -18,6 +19,7 @@ public:
     void draw();
     void set_reader_status(const ReaderStatus& status);
     void tap(int x, int y);
+    void touch(const TouchGesture& gesture);
     void next();
     void previous();
     void back();
@@ -112,9 +114,9 @@ private:
     void set_reader_engine(bool use_cre);
     enum class Align { Center, Left, Right };
     void button(Rect rect,const std::string& label,std::function<void()> action,bool filled=false,int size=28,Icon icon=Icon::None,bool enabled=true,Align align=Align::Center);
-    void back_button(int top=28,int height=64);
+    void back_button(int top=6,int height=64);
     void page_header(const std::string& title);
-    void device_status(int top,bool clock);
+    void device_status(bool clock,bool clock_left=false);
     void list_screen();
     void reader_screen();
     void nav_screen();
@@ -134,7 +136,7 @@ private:
     void clear_search();
     std::string source_group(std::int64_t id) const;
     std::string article_metadata(const Entry& entry) const;
-    int list_top() const { return search_.empty() && !feed_ && !group_ ? 278 : 322; }
+    int list_top() const { return search_.empty() ? 164 : 252; }
     int list_bottom() const { return c_.height - (status_.empty() ? 104 : 208); }
     void input_screen();
     void reader_tools();
@@ -145,7 +147,7 @@ private:
     int article_heading_height();
     void management_screen();
     void confirmation_screen();
-    std::string view_name() const;
+    std::string scope_name() const;
     std::string source(std::int64_t id) const;
 };
 }

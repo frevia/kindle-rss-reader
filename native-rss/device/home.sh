@@ -6,6 +6,7 @@ STATE=/var/local/native-rss/home
 REPORTS=/mnt/us/native-rss-backups/home-restart-reports
 TARGET=/app/KPPMainApp/js/KPPMainApp.js.hbc
 JOB=/etc/upstart/native-rss-home.conf
+RECOVERY_JOB=/etc/upstart/native-rss-home-recover.conf
 INIT=/sbin/initctl
 MNTROOT=/usr/sbin/mntroot
 GET=/usr/bin/lipc-get-prop
@@ -107,12 +108,38 @@ root_restore() {
     fi
 }
 owned_job() { [ ! -L "$JOB" ] && [ "$(head -n 1 "$JOB" 2>/dev/null)" = '# RSS Reader optional home card v1' ]; }
+owned_recovery_job() { [ ! -L "$RECOVERY_JOB" ] && [ "$(head -n 1 "$RECOVERY_JOB" 2>/dev/null)" = '# RSS Reader optional home recovery v1' ]; }
+check_recovery_job() {
+    [ ! -e "$RECOVERY_JOB" ] && [ ! -L "$RECOVERY_JOB" ] || owned_recovery_job || fail '恢复配置不属于 RSS，拒绝修改'
+}
+cleanup_recovery_install() {
+    if [ -f "$STATE/installing-recovery-job" ]; then
+        [ ! -L "$RECOVERY_JOB.rss-tmp" ] || fail '恢复配置临时文件异常'
+        root_rw
+        rm -f "$RECOVERY_JOB.rss-tmp" && rm -f "$STATE/installing-recovery-job" || fail '无法清理中断的恢复配置'
+    fi
+}
+install_recovery_job() {
+    check_recovery_job
+    template=$APP/home/native-rss-home-recover.conf
+    [ -f "$template" ] && [ ! -L "$template" ] || fail '缺少恢复配置模板'
+    cleanup_recovery_install
+    if owned_recovery_job && [ "$(hash "$RECOVERY_JOB")" = "$(hash "$template")" ]; then return 0; fi
+    [ ! -e "$RECOVERY_JOB.rss-tmp" ] && [ ! -L "$RECOVERY_JOB.rss-tmp" ] || fail '恢复配置临时文件已存在'
+    root_rw
+    : >"$STATE/installing-recovery-job" || fail '无法保存恢复配置安装标记'
+    cp "$template" "$RECOVERY_JOB.rss-tmp" && chmod 644 "$RECOVERY_JOB.rss-tmp" && mv "$RECOVERY_JOB.rss-tmp" "$RECOVERY_JOB" || fail '无法安装恢复配置'
+    rm -f "$STATE/installing-recovery-job"
+}
+bridge_running() {
+    bridge_pid=$(timeout 3 "$INIT" status native-rss-home 2>/dev/null | awk '/start\/running, process/ {print $NF}')
+    case "$bridge_pid" in ''|*[!0-9]*) return 1 ;; esac
+    [ "$(cat "$PROC/$bridge_pid/comm" 2>/dev/null)" = kindle-rss-home ]
+}
 bridge_ready() {
     [ -f "$STATE/health" ] && [ ! -L "$STATE/health" ] || return 1
     grep -qx 'ready=1' "$STATE/health" || return 1
-    bridge_pid=$(timeout 3 "$INIT" status native-rss-home 2>/dev/null | awk '/start\/running, process/ {print $NF}')
-    case "$bridge_pid" in ''|*[!0-9]*) return 1 ;; esac
-    grep -qx "pid=$bridge_pid" "$STATE/health" && [ "$(cat "$PROC/$bridge_pid/comm" 2>/dev/null)" = kindle-rss-home ]
+    bridge_running && grep -qx "pid=$bridge_pid" "$STATE/health"
 }
 main_pid() { timeout 3 "$INIT" status kppmainapp 2>/dev/null | awk '/start\/running, process/ {print $NF}'; }
 archive_report() {
@@ -130,7 +157,7 @@ archive_report() {
 reload_home() {
     previous=$(main_pid)
     timeout 25 "$INIT" restart kppmainapp >/dev/null || return 1
-    if [ "$(timeout 2 "$GET" com.lab126.powerd state 2>/dev/null)" = active ]; then
+    if [ "${1:-}" != keep-foreground ] && [ "$(timeout 2 "$GET" com.lab126.powerd state 2>/dev/null)" = active ]; then
         timeout 5 "$SET" com.lab126.appmgrd start app://com.lab126.booklet.home >/dev/null 2>&1 || :
     fi
     archive_report "$previous"
@@ -139,6 +166,14 @@ reload_home() {
 }
 disable_home() {
     changed=0
+    check_recovery_job
+    [ ! -e "$JOB" ] && [ ! -L "$JOB" ] || owned_job || fail '启动配置不属于 RSS，拒绝修改'
+    if owned_recovery_job; then
+        root_rw
+        rm "$RECOVERY_JOB" || fail '无法移除恢复配置'
+        timeout 5 "$INIT" reload-configuration || fail '无法重载恢复配置'
+    fi
+    cleanup_recovery_install
     if [ -e "$JOB" ] || [ -L "$JOB" ]; then
         owned_job || fail '启动配置不属于 RSS，拒绝修改'
         root_rw
@@ -168,8 +203,15 @@ enable_home() {
     [ ! -L /var/local/native-rss/session.lock ] || fail '无效阅读器会话锁'
     exec 9>/var/local/native-rss/session.lock; flock -n 9 || fail '请先退出 RSS 阅读器'
     flock -u 9; exec 9>&-
+    check_recovery_job
     if mounted && [ -f "$STATE/enabled" ] && owned_job; then
-        if bridge_ready; then printf '%s\n' '首页 RSS 已启用'; return; fi
+        if bridge_ready; then
+            install_recovery_job
+            timeout 5 "$INIT" reload-configuration || fail '无法重载恢复配置'
+            root_restore || fail '无法恢复根分区只读状态'
+            printf '%s\n' '首页 RSS 已启用'
+            return
+        fi
         disable_home
     fi
     prepare_copy
@@ -184,6 +226,7 @@ enable_home() {
     : >"$STATE/installing-job" || fail '无法保存启动配置恢复标记'
     cp "$APP/home/native-rss-home.conf" "$JOB.rss-tmp" && chmod 644 "$JOB.rss-tmp" && mv "$JOB.rss-tmp" "$JOB" || fail '无法安装启动配置'
     rm -f "$STATE/installing-job"
+    install_recovery_job
     timeout 5 "$INIT" reload-configuration || fail '无法重载启动配置'
     root_restore || fail '无法恢复根分区只读状态'
     : >"$STATE/enabled"
@@ -200,6 +243,30 @@ enable_home() {
         sleep 1; n=$((n+1))
     done
     fail '未收到首页数据确认，正在恢复原首页'
+}
+recover_home() {
+    # USB export can hide /mnt/us during boot; recover only an opted-in installation.
+    [ -f "$STATE/enabled" ] && [ ! -L "$STATE/enabled" ] && owned_job || return 0
+    case "$(main_pid)" in ''|*[!0-9]*) return 0 ;; esac
+    [ ! -L /var/local/native-rss/session.lock ] || fail '无效阅读器会话锁'
+    exec 9>/var/local/native-rss/session.lock
+    flock -n 9 || return 0
+    if mounted; then
+        [ -f "$STATE/mounted.sha256" ] && [ ! -L "$STATE/mounted.sha256" ] && [ "$(hash "$TARGET")" = "$(cat "$STATE/mounted.sha256")" ] || fail '保留未知首页挂载'
+        bridge_running && return 0
+    else
+        prepare_copy
+    fi
+    # KPP must load the bind-mounted adapter afresh; its start event starts the bridge.
+    rm -f "$STATE/health"
+    reload_home keep-foreground || fail '首页恢复暂未完成'
+    flock -u 9; exec 9>&-
+    n=0
+    while [ "$n" -lt 20 ]; do
+        if bridge_ready; then printf '%s\n' '首页 RSS 已恢复'; return 0; fi
+        sleep 1; n=$((n+1))
+    done
+    fail '尚未收到首页确认，保留已启用配置'
 }
 
 [ "$#" -ge 1 ] || fail '用法：home.sh enable|disable|status'
@@ -222,7 +289,7 @@ case "$1" in
         exit ;;
     mount) mount_home; exit ;;
     unmount) unmount_home; exit ;;
-    enable|disable) [ "$#" -eq 1 ] || fail '不接受额外参数' ;;
+    enable|disable|recover) [ "$#" -eq 1 ] || fail '不接受额外参数' ;;
     *) fail '不支持的操作' ;;
 esac
 for tool in timeout flock stat sha256sum awk mktemp mount umount df; do command -v "$tool" >/dev/null 2>&1 || fail "缺少工具 $tool"; done
@@ -235,10 +302,15 @@ finish() {
     if [ "$result" -ne 0 ] && [ -n "${pending:-}" ] && [ -f "$pending" ]; then
         if ( disable_home ); then rm -f "$pending"; else result=1; fi
     fi
+    if ! ( cleanup_recovery_install ); then result=1; fi
     root_restore || result=1
     exit "$result"
 }
 trap finish 0
 trap 'exit 130' INT
 trap 'exit 143' TERM HUP
-if [ "$1" = enable ]; then enable_home; else disable_home; fi
+case "$1" in
+    enable) enable_home ;;
+    disable) disable_home ;;
+    recover) recover_home ;;
+esac

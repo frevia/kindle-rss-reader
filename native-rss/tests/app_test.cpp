@@ -2,6 +2,7 @@
 #include "feed.hpp"
 #include <cassert>
 #include <algorithm>
+#include <chrono>
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
@@ -11,6 +12,64 @@ int main(){
     std::string font=std::getenv("RSS_FONT")?std::getenv("RSS_FONT"):"/System/Library/Fonts/STHeiti Light.ttc";
     if(!std::filesystem::exists(font))font="/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf";
     rss::Store store(":memory:");store.set_setting("reader_engine","classic");rss::Canvas canvas(1072,1448,font);
+    for(const std::string engine:{"classic","cre"}){
+        if(engine=="cre"&&!rss::CreReader::available())continue;
+        const auto path=std::filesystem::temp_directory_path()/("rss-write-failure-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())+".sqlite");
+        {
+            rss::Store disk(path.string());disk.set_setting("reader_engine",engine);
+            rss::Feed feed;feed.url="https://write-failure.invalid/feed";const auto fid=disk.add_feed(feed);
+            rss::Entry entry;entry.guid="full";entry.title="写入失败也能返回";
+            for(int i=0;i<100;++i)entry.html+="<p>数据库空间不足时，应保留旧进度并允许返回文章列表。</p>";
+            entry.text=rss::html_to_text(entry.html);rss::ParsedFeed batch;batch.entries={entry};disk.save_entries(fid,batch);
+            const auto id=disk.entries(rss::View::All).front().id;
+            sqlite3* control=nullptr;assert(sqlite3_open(path.c_str(),&control)==SQLITE_OK);
+            const auto block_writes=[&]{
+                // Fail the real SQLite calls made by open/save_position, without filling the host disk.
+                assert(sqlite3_exec(control,
+                    "CREATE TRIGGER fail_entry BEFORE UPDATE ON entries BEGIN SELECT RAISE(ABORT,'database or disk is full'); END;"
+                    "CREATE TRIGGER fail_setting BEFORE INSERT ON settings BEGIN SELECT RAISE(ABORT,'database or disk is full'); END;",
+                    nullptr,nullptr,nullptr)==SQLITE_OK);
+            };
+            const auto allow_writes=[&]{assert(sqlite3_exec(control,"DROP TRIGGER fail_entry; DROP TRIGGER fail_setting;",nullptr,nullptr,nullptr)==SQLITE_OK);};
+            rss::App reader(disk,canvas);reader.show_view(rss::View::All);reader.draw();block_writes();
+            bool failed=false;
+            try{reader.tap(150,244);}catch(const std::exception& e){failed=true;assert(std::string(e.what())=="database or disk is full");reader.show_error(e.what());}
+            assert(failed&&!reader.reading());reader.draw();reader.back();reader.draw();assert(!reader.reading());
+            assert(!disk.entry(id)->read&&disk.entry(id)->position==0);
+            allow_writes();
+            disk.set_setting("last_entry","previous");
+            for(const std::string phase:{"position","content","last"}){
+                // Earlier writes succeed before this failure; the whole open must still roll back.
+                const std::string trigger=phase=="position"?
+                    "CREATE TRIGGER fail_open BEFORE UPDATE OF position ON entries BEGIN SELECT RAISE(ABORT,'database or disk is full'); END;":
+                    "CREATE TRIGGER fail_open BEFORE INSERT ON settings WHEN NEW.key='"+
+                        (phase=="content"?"reader_content:"+std::to_string(id):"last_entry")+
+                        "' BEGIN SELECT RAISE(ABORT,'database or disk is full'); END;";
+                assert(sqlite3_exec(control,trigger.c_str(),nullptr,nullptr,nullptr)==SQLITE_OK);
+                failed=false;
+                try{reader.open(id);}catch(const std::exception& e){failed=true;assert(std::string(e.what())=="database or disk is full");reader.show_error(e.what());}
+                assert(failed&&!reader.reading());reader.back();reader.reload();reader.draw();
+                const auto retained=disk.entry(id);
+                assert(!retained->read&&!retained->in_progress&&retained->position==0);
+                assert(disk.entry_count(rss::View::Unread)==1&&disk.entries(rss::View::Unread).size()==1);
+                assert(disk.setting("reader_content:"+std::to_string(id)).empty());
+                assert(disk.setting("last_entry")=="previous");
+                assert(sqlite3_exec(control,"DROP TRIGGER fail_open",nullptr,nullptr,nullptr)==SQLITE_OK);
+            }
+            reader.open(id);
+            assert(disk.entry(id)->read&&disk.entry(id)->in_progress);
+            assert(disk.setting("reader_content:"+std::to_string(id))=="rss"&&disk.setting("last_entry")==std::to_string(id));
+            reader.next();reader.draw();assert(reader.reader_page()>0);
+            const auto saved_position=disk.entry(id)->position;
+            const auto saved_anchor=disk.setting("reader_cre:"+std::to_string(id));
+            block_writes();reader.back();assert(!reader.reading());reader.draw();
+            assert(disk.entry(id)->position==saved_position&&disk.setting("reader_cre:"+std::to_string(id))==saved_anchor);
+            reader.tap(100,1392);assert(reader.menu_open());reader.back();
+            allow_writes();reader.open(id);assert(reader.reader_page()>0);reader.back();assert(!reader.reading());
+            assert(sqlite3_close(control)==SQLITE_OK);
+        }
+        std::filesystem::remove(path);
+    }
     {
         rss::Store opened(":memory:");opened.set_setting("reader_engine","classic");
         rss::Feed feed;feed.url="https://home-entry.test/rss";const auto fid=opened.add_feed(feed);
@@ -24,8 +83,9 @@ int main(){
         direct.draw();direct.back();assert(!direct.reading());
         direct.draw();
         rss::Canvas expected_count(1072,1448,font);
-        expected_count.text(1040-expected_count.measure("1",48),160,"1",48,75);
-        for(int y=104;y<174;++y)for(int x=900;x<1040;++x)
+        const std::string count_label="第 1 / 1 页 · 共 1 篇";
+        expected_count.text(536-expected_count.measure(count_label,24)/2,1406,count_label,24,90);
+        for(int y=1348;y<1448;++y)for(int x=336;x<712;++x)
             assert(canvas.pixels[y*1072+x]==expected_count.pixels[y*1072+x]);
 
         assert(opened.entries(rss::View::Unread).size()==1);
@@ -41,21 +101,60 @@ int main(){
         rss::App settings(preferences,canvas);settings.show_view(rss::View::All,fid);
         auto touch=[&](int x,int y){settings.draw();settings.tap(x,y);};
         auto shot=[&](const char* name){settings.draw();if(const auto folder=std::getenv("RSS_TEST_SNAPSHOTS")){std::filesystem::create_directories(folder);canvas.write_pgm((std::filesystem::path(folder)/name).string());}};
-        touch(150,50);touch(140,254);assert(settings.screen()==rss::App::Screen::Settings&&!settings.menu_open());
+        touch(100,1392);touch(140,1070);assert(settings.screen()==rss::App::Screen::Settings&&!settings.menu_open());
         assert(preferences.setting("home_visible").empty());shot("settings-home-on.pgm");const auto on=canvas.pixels;
         touch(950,326);assert(preferences.setting("home_visible")=="0");shot("settings-home-off.pgm");const auto off=canvas.pixels;assert(off!=on);
         settings.back();assert(settings.screen()==rss::App::Screen::List);settings.draw();const auto list=canvas.pixels;
-        {rss::App reopened(preferences,canvas);reopened.draw();reopened.tap(150,50);reopened.draw();reopened.tap(140,254);reopened.draw();assert(canvas.pixels==off);}
-        touch(150,50);touch(140,254);touch(200,326);assert(preferences.setting("home_visible")=="1");
+        {rss::App reopened(preferences,canvas);reopened.draw();reopened.tap(100,1392);reopened.draw();reopened.tap(140,1070);reopened.draw();assert(canvas.pixels==off);}
+        touch(100,1392);touch(140,1070);touch(200,326);assert(preferences.setting("home_visible")=="1");
         settings.back();settings.draw();assert(canvas.pixels==list);
         assert(preferences.entry_count(rss::View::Unread)==1&&!preferences.entries(rss::View::All).front().read);
         assert(settings.take_request().empty());
     }
-    const auto expect_pager=[&](const std::vector<std::uint8_t>& paper,int page,int total){
+    {
+        // Hiding sync preserves the filtered page; the overlay consumes underlying article taps.
+        rss::Store background(":memory:");background.set_setting("reader_engine","classic");
+        rss::Feed feed;feed.url="https://sync-dialog.test/rss";feed.title="后台测试";feed.group="博客";
+        const auto fid=background.add_feed(feed);rss::ParsedFeed batch;
+        for(int i=0;i<12;++i){rss::Entry e;e.guid=std::to_string(i);e.title="同步测试 "+std::to_string(i);e.text="正文";batch.entries.push_back(e);}
+        background.save_entries(fid,batch);rss::App dialog(background,canvas);
+        auto touch=[&](int x,int y){dialog.draw();dialog.tap(x,y);};
+        dialog.show_group("博客");touch(990,140);dialog.text_input("同步测试");dialog.submit();dialog.next();dialog.draw();const auto list=canvas.pixels;
+        touch(100,1392);touch(140,1174);assert(dialog.take_request()=="sync");dialog.draw();
+        for(int y=0;y<1448;++y)for(int x=0;x<1072;++x)if(x<48||x>=1024||y<484||y>=964)assert(canvas.pixels[y*1072+x]==(y<76?list[y*1072+x]:192+list[y*1072+x]/4));
+        touch(150,350);dialog.next();assert(!dialog.reading()&&dialog.screen()==rss::App::Screen::Sync);
+        touch(800,904);assert(dialog.screen()==rss::App::Screen::List&&dialog.sync_state()==rss::App::SyncState::Running&&dialog.take_request().empty());
+        dialog.draw();assert(canvas.pixels==list);
+        dialog.sync_progress(1,2,0,"正在更新第二个订阅");assert(!dialog.dirty);
+        touch(100,1392);touch(140,1174);assert(dialog.take_request().empty());
+        touch(200,904);assert(dialog.take_request()=="cancel-sync");dialog.sync_finished(true);
+        touch(800,904);assert(dialog.screen()==rss::App::Screen::List&&dialog.query()=="同步测试"&&dialog.selected_group()==std::optional<std::string>("博客"));
+        touch(100,1392);touch(140,1174);assert(dialog.take_request()=="sync");touch(800,904);
+        touch(150,350);assert(dialog.reading());const auto id=dialog.current_id();const auto page=dialog.reader_page();
+        dialog.draw();dialog.sync_progress(2,2,0,"更新完成");assert(!dialog.dirty);dialog.sync_finished(false);
+        assert(dialog.reading()&&dialog.current_id()==id&&dialog.reader_page()==page&&dialog.sync_state()==rss::App::SyncState::Complete);
+    }
+    {
+        rss::Store compact(":memory:");compact.set_setting("reader_engine","classic");
+        rss::Feed feed;feed.url="https://compact-list.test/rss";feed.title="博客来源";feed.group="博客";
+        const auto fid=compact.add_feed(feed);rss::ParsedFeed batch;
+        for(int i=0;i<14;++i){rss::Entry e;e.guid=std::to_string(i);e.title=i%2?"适当留白，让阅读更轻松":"Kindle typography "+std::to_string(i);e.text="正文";e.published=i+1;batch.entries.push_back(e);}
+        compact.save_entries(fid,batch);rss::App list(compact,canvas);list.show_view(rss::View::All);list.draw();const auto paper=canvas.pixels;
+        const auto entries=compact.entries(rss::View::All);
+        for(int row=0;row<7;++row){
+            const int top=164+row*160,bottom=top+159;int first=bottom,last=top;
+            for(int y=top+1;y<bottom;++y)for(int x=76;x<1040;++x)if(paper[y*1072+x]<160){first=std::min(first,y);last=std::max(last,y);}
+            assert(first<last&&std::abs((first-top)-(bottom-last))<=3);
+            list.draw();list.tap(100,top+80);assert(list.current_id()==entries[row].id);list.back();
+        }
+        if(auto dir=std::getenv("RSS_TEST_SNAPSHOTS")){std::filesystem::create_directories(dir);list.draw();canvas.write_pgm((std::filesystem::path(dir)/"list-seven-centered.pgm").string());}
+        list.next();list.draw();list.tap(100,268);assert(list.current_id()==entries[7].id);
+    }
+    const auto expect_pager=[&](const std::vector<std::uint8_t>& paper,int page,int total,int count=24){
         rss::Canvas footer(1072,1448,font);
-        const auto label="第 "+std::to_string(page)+" / "+std::to_string(total)+" 页";
+        const auto label="第 "+std::to_string(page)+" / "+std::to_string(total)+" 页 · 共 "+std::to_string(count)+" 篇";
         footer.text(536-footer.measure(label,24)/2,1406,label,24,90);
-        for(int y=1348;y<1448;++y)for(int x=300;x<772;++x)
+        for(int y=1348;y<1448;++y)for(int x=336;x<712;++x)
             assert(paper[y*1072+x]==footer.pixels[y*1072+x]);
     };
     {
@@ -65,18 +164,18 @@ int main(){
         totals.save_entries(fid,batch);rss::App pager(totals,canvas);
         pager.draw();expect_pager(canvas.pixels,1,4); // Exact total is available before visiting later pages.
         pager.next();pager.next();pager.draw();expect_pager(canvas.pixels,3,4);
-        pager.notify("同步已完成，点击更新列表");pager.draw();expect_pager(canvas.pixels,3,5);
-        pager.tap(960,50);assert(pager.take_request()=="sync");pager.back();pager.draw();expect_pager(canvas.pixels,3,4);
-        pager.sync_finished(true);pager.draw();expect_pager(canvas.pixels,3,5);
+        pager.notify("同步已完成，点击更新列表");pager.draw();expect_pager(canvas.pixels,3,4);
+        pager.tap(100,1392);pager.draw();pager.tap(140,1174);assert(pager.take_request()=="sync");pager.back();pager.draw();expect_pager(canvas.pixels,3,4);
+        pager.sync_finished(true);pager.draw();expect_pager(canvas.pixels,3,4);
         pager.tap(200,1288);pager.draw();expect_pager(canvas.pixels,3,4);
-        pager.show_group("目录");pager.draw();expect_pager(canvas.pixels,1,5);
-        pager.show_view(rss::View::All);pager.draw();pager.tap(950,234);pager.text_input("没有匹配");pager.submit();pager.draw();expect_pager(canvas.pixels,1,1);
+        pager.show_group("目录");pager.draw();expect_pager(canvas.pixels,1,4);
+        pager.show_view(rss::View::All);pager.draw();pager.tap(990,160);pager.text_input("没有匹配");pager.submit();pager.draw();expect_pager(canvas.pixels,1,1,0);
         for(const auto& entry:totals.entries(rss::View::All))totals.set_read(entry.id,true);
-        pager.show_view(rss::View::Unread);pager.draw();expect_pager(canvas.pixels,1,1);
+        pager.show_view(rss::View::Unread);pager.draw();expect_pager(canvas.pixels,1,1,0);
         pager.show_view(rss::View::All);pager.draw();expect_pager(canvas.pixels,1,4);
         if(auto dir=std::getenv("RSS_TEST_SNAPSHOTS")){std::filesystem::create_directories(dir);canvas.write_pgm((std::filesystem::path(dir)/"list-exact-page-total.pgm").string());}
         source.id=fid;source.title.clear();for(int i=0;i<140;++i)source.title+="长";
-        totals.update_feed(source);pager.reload();pager.draw();expect_pager(canvas.pixels,1,5);
+        totals.update_feed(source);pager.reload();pager.draw();expect_pager(canvas.pixels,1,4);
         source.title="分页测试";totals.update_feed(source);pager.reload();pager.draw();expect_pager(canvas.pixels,1,4);
         for(auto& entry:batch.entries){entry.title.clear();for(int i=0;i<100;++i)entry.title+="长";}
         totals.save_entries(fid,batch);pager.reload();pager.draw();const auto changed_titles=canvas.pixels;
@@ -91,7 +190,7 @@ int main(){
         rss::App pages(pages_store,canvas);pages.show_view(rss::View::All,feed_id);
         auto scan_page=[&]{
             std::vector<std::int64_t> found;
-            for(int y=342;y<1335;y+=40){
+            for(int y=180;y<1335;y+=40){
                 pages.draw();pages.tap(100,y);
                 if(!pages.reading())continue;
                 found.push_back(pages.current_id());pages.back();
@@ -113,8 +212,9 @@ int main(){
             if(candidate==visible)break;
             visible=std::move(candidate);
         }
+        pages.draw();pages.tap(970,1392);assert(scan_page()==seen_pages.back()&&!pages.menu_open());
         assert(seen.size()==ordered.size());
-        expect_pager(first_list_page,1,static_cast<int>(seen_pages.size()));
+        expect_pager(first_list_page,1,static_cast<int>(seen_pages.size()),45);
         for(std::size_t p=seen_pages.size()-1;p>0;--p){pages.previous();assert(scan_page().front()==seen_pages[p-1].front());}
         pages.previous();assert(scan_page().front()==ordered.front().id);
         // Navigation may arrive before the next draw, and reload preserves the ordinal.
@@ -122,16 +222,16 @@ int main(){
         pages.reload();assert(scan_page().front()==current);
         // The on-screen pager has distinct targets; changing a filter resets its page.
         pages.draw();pages.tap(900,1380);assert(scan_page().front()==seen_pages[3].front());
-        pages.draw();pages.tap(140,1380);assert(scan_page().front()==current);
-        pages.draw();pages.tap(468,270);assert(scan_page().front()==ordered.front().id);
-        pages.draw();pages.tap(140,1380);assert(scan_page().front()==ordered.front().id);
+        pages.draw();pages.tap(800,1380);assert(scan_page().front()==current);
+        pages.draw();pages.tap(750,160);assert(scan_page().front()==ordered.front().id);
+        pages.draw();pages.tap(800,1380);assert(scan_page().front()==ordered.front().id);
         pages.next();pages.next();
         // Shrinking the snapshot clamps to the remaining page, then to the empty page.
         pages_store.set_starred(ordered.back().id,true);pages_store.remove_feed(feed_id);
         pages.reload();assert(scan_page().front()==ordered.back().id);
         pages.next();assert(scan_page().front()==ordered.back().id);
         pages_store.set_starred(ordered.back().id,false);pages_store.remove_feed(feed_id);
-        pages.reload();pages.next();pages.previous();pages.draw();pages.tap(100,400);assert(!pages.reading());
+        pages.reload();pages.next();pages.previous();pages.draw();pages.tap(100,300);assert(!pages.reading());
         assert(ordered.size()==45);
     }
     {
@@ -146,13 +246,13 @@ int main(){
         const auto local_entry=scoped.entries(rss::View::All,local_id,"needle").front().id;
         rss::App filtered(scoped,canvas);filtered.show_view(rss::View::All,local_id);
         auto scope_tap=[&](int x,int y){filtered.draw();filtered.tap(x,y);};
-        scope_tap(940,260);filtered.text_input("needle");filtered.submit();
-        scope_tap(360,270); // Changing a filter retains the keyword and feed scope.
-        scope_tap(100,400);assert(filtered.current_id()==local_entry);
+        scope_tap(990,160);filtered.text_input("needle");filtered.submit();
+        scope_tap(638,160); // Changing a filter retains the keyword and feed scope.
+        scope_tap(100,300);assert(filtered.current_id()==local_entry);
         filtered.back();
         scoped.set_starred(local_entry,true);
         scoped.set_starred(scoped.entries(rss::View::All,remote_id).front().id,true);
-        filtered.show_group("科技");scope_tap(610,270);scope_tap(100,400);
+        filtered.show_group("科技");scope_tap(870,160);scope_tap(100,300);
         assert(filtered.current_id()==local_entry);
     }
     {
@@ -200,19 +300,19 @@ int main(){
         }
     };
     snapshot("list.pgm");
-    // The sync icon stays inside the content boundary, while its original touch target remains active.
+    // Sync is only reachable through the brand menu; its former target is inert.
     for(int y=30;y<90;++y)for(int x=1040;x<1072;++x)assert(canvas.pixels[y*1072+x]==255);
-    app.tap(960,64);assert(app.take_request()=="sync");app.sync_finished(true);app.back();
-    app.draw();app.tap(150,50);app.draw();app.tap(120,154);app.draw();snapshot("navigation.pgm");app.back();
-    app.draw();app.tap(100,400);assert(app.reading());assert(store.entry(entry.id)->read);
+    app.tap(960,64);assert(app.take_request().empty());app.tap(100,1392);app.draw();app.tap(140,1174);assert(app.take_request()=="sync");app.sync_finished(true);app.back();
+    app.draw();app.tap(100,1392);app.draw();app.tap(120,966);app.draw();snapshot("navigation.pgm");app.back();
+    app.draw();app.tap(100,300);assert(app.reading());assert(store.entry(entry.id)->read);
     snapshot("reader.pgm");
     app.next();app.next();assert(app.reader_page()==2);const auto position=store.entry(entry.id)->position;assert(position>0);
-    app.back();assert(!app.reading());app.draw();app.tap(100,400);assert(app.reading());assert(app.reader_page()==2);
+    app.back();assert(!app.reading());app.draw();app.tap(100,300);assert(app.reading());assert(app.reader_page()==2);
     app.draw();app.tap(530,400);snapshot("reader-tools.pgm");
     app.tap(178,1380);snapshot("reader-type.pgm");app.tap(960,856);app.draw(); // Increase font in the type panel.
     assert(app.reading()&&app.reader_panel()==rss::App::ReaderPanel::Type);app.back();app.back();app.back();app.show_view(rss::View::Unread);app.draw();
     assert(store.entries(rss::View::Unread).empty());
-    app.show_view(rss::View::All);app.draw();app.tap(100,400);app.draw();
+    app.show_view(rss::View::All);app.draw();app.tap(100,300);app.draw();
     const auto page_before_star=app.reader_page();app.tap(950,50);assert(!store.entry(entry.id)->starred);
     app.draw();app.tap(536,600);app.draw();app.tap(950,50);assert(store.entry(entry.id)->starred&&app.reader_page()==page_before_star);
     app.back();app.back();app.show_view(rss::View::Starred);app.draw();
@@ -220,13 +320,13 @@ int main(){
     // Navigation and draft edits preserve the confirmed data until save.
     auto tap=[&](int x,int y){app.draw();app.tap(x,y);};
     auto manage=[&]{
-        tap(150,50);tap(120,154);
+        tap(100,1392);tap(120,966);
         const auto group=store.feeds().front().group;const int headers=group.empty()?1:1+static_cast<int>(std::count(group.begin(),group.end(),'/'));
         tap(950,250+headers*104+44);
     };
     manage();snapshot("subscription.pgm");tap(200,1124);snapshot("unsubscribe.pgm");tap(200,1380);
     assert(store.feeds().size()==1);app.back();app.back();
-    store.set_read(entry.id,false);tap(100,400);tap(536,600);tap(894,1380);tap(536,1296);
+    store.set_read(entry.id,false);tap(100,300);tap(536,600);tap(894,1380);tap(536,1296);
     assert(!store.entry(entry.id)->read);
     app.back();app.back();app.back();manage();tap(800,1124);tap(900,1380);
     assert(store.entry(entry.id)->read);app.back();app.back();
@@ -235,18 +335,18 @@ int main(){
     const auto other_id=store.add_feed(other);rss::ParsedFeed old;rss::Entry clean;clean.guid="clean";clean.title="Old";clean.text="text";clean.published=100;
     old.entries={clean};store.save_entries(other_id,old);const auto clean_id=store.entries(rss::View::All,other_id)[0].id;
     store.set_read(clean_id,true);app.reload();
-    tap(960,50);app.take_request();app.sync_finished(true);tap(950,1380);tap(200,1380);tap(200,1380);
+    tap(100,1392);tap(140,1174);app.take_request();app.sync_finished(true);tap(880,548);tap(200,1380);tap(200,1380);
     assert(store.entry(clean_id));tap(200,1380);tap(900,1380);assert(!store.entry(clean_id));assert(store.entry(entry.id));
     app.back();app.back();manage();tap(200,330);
     for(int i=0;i<5;++i)app.backspace();app.text_input("新的名称");app.submit();assert(store.feeds()[0].title=="Other");tap(950,1380);assert(store.feeds()[0].title=="新的名称");
     store.add_group("科技/编程");app.reload();app.back();manage();tap(400,770);tap(300,530);tap(950,1380);assert(store.feeds()[0].group=="科技/编程");
     app.back();manage();tap(200,330);app.text_input("取消修改");app.back();app.back();assert(store.feeds()[0].title=="新的名称");app.back();
-    tap(150,50);tap(120,154);tap(150,1380);snapshot("groups.pgm");app.back();app.back();app.show_group("科技");
+    tap(100,1392);tap(120,966);tap(150,1380);snapshot("groups.pgm");app.back();app.back();app.show_group("科技");
     old.entries[0].guid="new-child";
     rss::ArticleImage photo;photo.url="https://example.test/photo.png";photo.alt="离线图片";
     rss::ArticleImage missing;missing.url="https://example.test/missing.png";
     old.entries[0].images={photo,missing};store.save_entries(other_id,old);app.reload();
-    tap(100,400);assert(app.current_id()==store.entries(rss::View::All,other_id)[0].id);
+    tap(100,300);assert(app.current_id()==store.entries(rss::View::All,other_id)[0].id);
     photo.width=320;photo.height=180;photo.pixels.resize(320*180);
     for(int y=0;y<180;++y)for(int x=0;x<320;++x)photo.pixels[y*320+x]=x%256;
     store.save_image(app.current_id(),photo);
@@ -256,7 +356,7 @@ int main(){
     app.back();
     const auto current=app.current_id();
     app.show_error("网络暂时不可用，已有文章仍可阅读");
-    tap(100,400);assert(app.current_id()==current);app.back();assert(app.reading());
+    tap(100,300);assert(app.current_id()==current);app.back();assert(app.reading());
     // An image-only article must reopen the exact image page despite identical text offsets.
     {
         rss::Store image_store(":memory:");image_store.set_setting("reader_engine","classic");rss::Feed feed;feed.url="https://example.test/rss";
@@ -348,7 +448,7 @@ int main(){
             assert(found);
         }
     };
-    auto edit_title=[&]{touch(150,50);touch(120,154);touch(950,398);touch(200,330);};
+    auto edit_title=[&]{touch(100,1392);touch(120,966);touch(950,398);touch(200,330);};
     auto commit=[&]{touch(900,1364);touch(950,1380);typing.back();};
     edit_title();typing.backspace();typing.backspace();keys("kejix");typing.backspace();
     typing.submit();assert(typing_store.feeds()[0].title=="旧名");typing.back();
@@ -369,7 +469,7 @@ int main(){
         rss::Store names(":memory:");names.set_setting("reader_engine","classic");rss::App optional(names,canvas);
         auto tap=[&](int x,int y){optional.draw();optional.tap(x,y);};
         auto shot=[&](const char* name){optional.draw();if(const auto folder=std::getenv("RSS_TEST_SNAPSHOTS"))canvas.write_pgm((std::filesystem::path(folder)/name).string());};
-        tap(150,50);tap(140,154);tap(950,50); // Add a feed without entering a name.
+        tap(100,1392);tap(140,966);tap(950,140); // Add a feed without entering a name.
         tap(200,500);for(int i=0;i<8;++i)optional.backspace();optional.text_input("https://optional.test/rss");shot("keyboard-url.pgm");optional.submit();
         shot("optional-name-draft.pgm");tap(950,1380);assert(names.feeds().size()==1&&names.feeds()[0].title.empty());
         const auto id=names.feeds()[0].id;rss::ParsedFeed discovered;discovered.title="博客名称";names.save_entries(id,discovered);optional.reload();

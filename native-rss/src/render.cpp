@@ -91,6 +91,28 @@ void Canvas::fill(Rect r,std::uint8_t color){
 // Icons use one 24-unit grid; status symbols have thinner strokes than controls.
 void Canvas::icon(Icon kind,Rect area,std::uint8_t color){
     if(kind==Icon::None||area.w<=0||area.h<=0)return;
+    const auto right=static_cast<std::int64_t>(area.x)+area.w;
+    const auto bottom=static_cast<std::int64_t>(area.y)+area.h;
+    const int left=std::max(0,area.x),top=std::max(0,area.y);
+    const int clipped_right=static_cast<int>(std::min<std::int64_t>(width,right));
+    const int clipped_bottom=static_cast<int>(std::min<std::int64_t>(height,bottom));
+    if(left>=clipped_right||top>=clipped_bottom)return;
+    auto composite=[&](const std::vector<std::uint16_t>& mask){
+        for(int y=top;y<clipped_bottom;++y)for(int x=left;x<clipped_right;++x){
+            const auto dx=static_cast<std::size_t>(static_cast<std::int64_t>(x)-area.x);
+            const auto dy=static_cast<std::size_t>(static_cast<std::int64_t>(y)-area.y);
+            const std::uint32_t alpha=mask[dy*area.w+dx];
+            if(!alpha)continue;
+            auto& pixel=pixels[y*width+x];
+            pixel=static_cast<std::uint8_t>((static_cast<std::uint32_t>(pixel)*(65535-alpha)+
+                                             static_cast<std::uint32_t>(color)*alpha)/65535);
+        }
+    };
+    const auto key=std::make_tuple(kind,area.w,area.h);
+    if(area.w<=128&&area.h<=128){
+        const auto found=icon_coverage_cache_.find(key);
+        if(found!=icon_coverage_cache_.end()){composite(found->second);return;}
+    }
     struct Segment { double x1,y1,x2,y2; };
     std::vector<Segment> lines;
     auto line=[&](double x,double y,double xx,double yy){lines.push_back({x,y,xx,yy});};
@@ -135,10 +157,8 @@ void Canvas::icon(Icon kind,Rect area,std::uint8_t color){
     std::vector<PreparedSegment> segments;segments.reserve(lines.size());
     for(const auto& l:lines){const double dx=l.x2-l.x1,dy=l.y2-l.y1,length=dx*dx+dy*dy;
         segments.push_back({l.x1,l.y1,dx,dy,length?1.0/length:0.0});}
-    for(int y=std::max(0,area.y);y<std::min(height,area.y+area.h);++y)
-        for(int x=std::max(0,area.x);x<std::min(width,area.x+area.w);++x){
+    auto coverage=[&](double px,double py){
             double distance=10000;
-            const double px=(x+.5-ox)/scale,py=(y+.5-oy)/scale;
             for(const auto& l:segments){
                 const double t=std::clamp(((px-l.x1)*l.dx+(py-l.y1)*l.dy)*l.inverse_length,0.0,1.0);
                 const double ex=px-l.x1-t*l.dx,ey=py-l.y1-t*l.dy;
@@ -150,9 +170,28 @@ void Canvas::icon(Icon kind,Rect area,std::uint8_t color){
                    px<(edge.x2-edge.x1)*(py-edge.y1)/(edge.y2-edge.y1)+edge.x1)inside=!inside;
             }
             const double stroke=kind==Icon::Battery?.5:kind==Icon::Wifi?.85:1;
-            double alpha=std::clamp((stroke+(inside?distance:-distance))*scale+.5,0.0,1.0);
+            return std::clamp((stroke+(inside?distance:-distance))*scale+.5,0.0,1.0);
+    };
+    auto paint=[&](int x,int y,double alpha){
             auto& pixel=pixels[y*width+x];pixel=static_cast<std::uint8_t>(pixel*(1-alpha)+color*alpha);
+    };
+    if(area.w<=128&&area.h<=128){
+        // Cache coverage only; integer blending preserves arbitrary backgrounds and ink.
+        constexpr std::size_t max_entries=(128*1024)/sizeof(std::uint16_t);
+        std::vector<std::uint16_t> mask(static_cast<std::size_t>(area.w)*area.h);
+        const double offset_x=(area.w-24*scale)/2,offset_y=(area.h-24*scale)/2;
+        for(int y=0;y<area.h;++y)for(int x=0;x<area.w;++x){
+            const auto alpha=coverage((x+.5-offset_x)/scale,(y+.5-offset_y)/scale);
+            mask[static_cast<std::size_t>(y)*area.w+x]=static_cast<std::uint16_t>(std::lround(alpha*65535.0));
         }
+        if(icon_coverage_entries_+mask.size()>max_entries){icon_coverage_cache_.clear();icon_coverage_entries_=0;}
+        const auto found=icon_coverage_cache_.emplace(key,std::move(mask)).first;
+        icon_coverage_entries_+=found->second.size();
+        composite(found->second);
+        return;
+    }
+    for(int y=top;y<clipped_bottom;++y)for(int x=left;x<clipped_right;++x)
+        paint(x,y,coverage((x+.5-ox)/scale,(y+.5-oy)/scale));
 }
 void Canvas::rule(int x,int y,int w,std::uint8_t color){fill({x,y,w,1},color);}
 int Canvas::text(int x,int baseline,const std::string& value,int size,std::uint8_t color){
@@ -169,6 +208,16 @@ int Canvas::text(int x,int baseline,const std::string& value,int size,std::uint8
         x+=g.advance;
     }
     return x-start;
+}
+std::pair<int,int> Canvas::text_vertical_bounds(const std::string& value,int size){
+    int top=0,bottom=0;bool visible=false;
+    for(const auto& c:characters(value)){
+        if(c.cp=='\n'||c.cp=='\r')continue;
+        const auto& g=glyph(c.cp,size);if(!g.width||!g.height)continue;
+        top=visible?std::min(top,-g.top):-g.top;
+        bottom=visible?std::max(bottom,g.height-g.top):g.height-g.top;visible=true;
+    }
+    return {top,bottom};
 }
 int Canvas::measure(const std::string& s,int size){int w=0;for(auto c:characters(s))w+=glyph(c.cp,size).advance;return w;}
 std::vector<Line> Canvas::wrap(const std::string& s,int size,int max_width){

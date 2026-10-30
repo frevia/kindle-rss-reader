@@ -34,6 +34,10 @@ def make_db(path, items=True):
     return db
 
 
+def add_text_column(db):
+    db.execute("ALTER TABLE entries ADD COLUMN text TEXT NOT NULL DEFAULT ''")
+
+
 def read_frame(sock):
     def exact(n):
         data = bytearray()
@@ -133,7 +137,7 @@ class HomeBridgeTest(unittest.TestCase):
         self.assertEqual([x["id"] for x in value["items"]], [3, 2])
         self.assertEqual(value["items"][0]["source"], "off")
         self.assertEqual(value["items"][0]["title"], 'inactive "unread\\')
-        self.assertEqual(value["feedCards"], [{"id": 1, "title": 'F"eed\\', "unread": 1, "entryId": 2, "latestTitle": "unread-old"}])
+        self.assertEqual(value["feedCards"], [{"id": 1, "title": 'F"eed\\', "unread": 1, "entryId": 2, "latestTitle": "unread-old", "excerpt": "", "published": 10}])
         self.assertEqual(self.db_path.read_bytes(), before)
         self.assertEqual(json.loads(self.run_summary())["revision"], value["revision"])
         canonical = dict(value); canonical.pop("revision")
@@ -210,10 +214,10 @@ class HomeBridgeTest(unittest.TestCase):
         before = self.db_path.read_bytes()
         cards = json.loads(self.run_summary())["feedCards"]
         self.assertEqual([card["id"] for card in cards], [4, 6, 1])
-        self.assertEqual(cards[0], {"id": 4, "title": "tie-later-id", "unread": 2, "entryId": 11, "latestTitle": "tie unread"})
+        self.assertEqual(cards[0], {"id": 4, "title": "tie-later-id", "unread": 2, "entryId": 11, "latestTitle": "tie unread", "excerpt": "", "published": 200})
         self.assertEqual(cards[1]["latestTitle"], "same time")
         self.assertEqual(cards[1]["entryId"], 12)
-        self.assertEqual(cards[2], {"id": 1, "title": 'F"eed\\', "unread": 1, "entryId": 2, "latestTitle": "unread-old"})
+        self.assertEqual(cards[2], {"id": 1, "title": 'F"eed\\', "unread": 1, "entryId": 2, "latestTitle": "unread-old", "excerpt": "", "published": 10})
         self.assertEqual(len(cards), 3)
         self.assertEqual(self.db_path.read_bytes(), before)
 
@@ -223,7 +227,89 @@ class HomeBridgeTest(unittest.TestCase):
         db.commit(); db.close()
         cards = json.loads(self.run_summary())["feedCards"]
         self.assertEqual([card["id"] for card in cards], [1, 3])
-        self.assertEqual(cards[1], {"id": 3, "title": "empty", "unread": 0, "entryId": 0, "latestTitle": ""})
+        self.assertEqual(cards[1], {"id": 3, "title": "empty", "unread": 0, "entryId": 0, "latestTitle": "", "excerpt": "", "published": 0})
+
+    def test_feed_card_excerpt_comes_from_the_selected_entry_and_normalizes_title(self):
+        db = make_db(self.db_path)
+        add_text_column(db)
+        db.execute("UPDATE entries SET text=? WHERE id=1", ("ignored read body",))
+        db.execute("UPDATE entries SET text=? WHERE id=2", ("  unread-old  \r\n  First\tline\n\n😀 quote \"yes\" \\",))
+        db.commit(); db.close()
+        before = self.db_path.read_bytes()
+        value = json.loads(self.run_summary())
+        card = value["feedCards"][0]
+        self.assertEqual((card["entryId"], card["latestTitle"], card["published"]), (2, "unread-old", 10))
+        self.assertEqual(card["excerpt"], 'First line 😀 quote "yes" \\')
+        self.assertEqual(self.db_path.read_bytes(), before)
+
+        db = sqlite3.connect(self.db_path)
+        db.execute("UPDATE entries SET read=1 WHERE id=2")
+        db.commit(); db.close()
+        card = json.loads(self.run_summary())["feedCards"][0]
+        self.assertEqual((card["entryId"], card["latestTitle"], card["excerpt"], card["published"]), (1, "read-new", "ignored read body", 99))
+
+    def test_feed_card_excerpt_codepoint_limit_invalid_utf8_and_invalid_dates(self):
+        db = make_db(self.db_path)
+        add_text_column(db)
+        db.execute("UPDATE entries SET text=? WHERE id=2", ("界😀" * 100,))
+        db.commit(); db.close()
+        card = json.loads(self.run_summary())["feedCards"][0]
+        self.assertEqual(card["excerpt"], ("界😀" * 80))
+        self.assertEqual(len(card["excerpt"]), 160)
+
+        db = sqlite3.connect(self.db_path)
+        db.execute("UPDATE entries SET text=CAST(? AS TEXT),published=-1 WHERE id=2", (sqlite3.Binary(b'bad\xff "quoted"'),))
+        db.commit(); db.close()
+        card = json.loads(self.run_summary())["feedCards"][0]
+        self.assertEqual(card["excerpt"], 'bad\ufffd "quoted"')
+        self.assertEqual(card["published"], 0)
+        db = sqlite3.connect(self.db_path)
+        db.execute("UPDATE entries SET published=8640000000001 WHERE id=2")
+        db.commit(); db.close()
+        self.assertEqual(json.loads(self.run_summary())["feedCards"][0]["published"], 0)
+
+    def test_excerpt_and_published_changes_revise_and_push_under_8192_bytes(self):
+        db = make_db(self.db_path)
+        add_text_column(db)
+        db.execute("INSERT INTO feeds VALUES(3,'third',1,0)")
+        db.execute("INSERT INTO entries VALUES(4,3,'third title',0,1,'third body')")
+        db.execute("UPDATE entries SET text=? WHERE id=2", ("a" * 2048,))
+        db.commit(); db.close()
+        _, port = self.server()
+        peer, initial = self.ws(port)
+        self.assertLess(len(json.dumps(initial, ensure_ascii=False, separators=(",", ":")).encode()), 8192)
+
+        db = sqlite3.connect(self.db_path)
+        db.execute("UPDATE entries SET text=? WHERE id=2", ("new body",))
+        db.commit(); db.close()
+        peer.settimeout(4); _, payload = read_frame(peer)
+        body_update = json.loads(payload)
+        self.assertEqual(body_update["items"], initial["items"])
+        self.assertEqual(body_update["feedCards"][0]["excerpt"], "new body")
+        self.assertNotEqual(body_update["revision"], initial["revision"])
+
+        db = sqlite3.connect(self.db_path)
+        db.execute("UPDATE entries SET published=11 WHERE id=2")
+        db.commit(); db.close()
+        peer.settimeout(4); _, payload = read_frame(peer)
+        date_update = json.loads(payload)
+        self.assertEqual(date_update["feedCards"][0]["published"], 11)
+        self.assertEqual(date_update["feedCards"][0]["excerpt"], "new body")
+        self.assertNotEqual(date_update["revision"], body_update["revision"])
+        peer.close()
+
+    def test_three_large_excerpts_fit_js_message_limit(self):
+        db = make_db(self.db_path)
+        add_text_column(db)
+        db.execute("INSERT INTO feeds VALUES(3,'third',1,0)")
+        db.execute("INSERT INTO feeds VALUES(4,'fourth',1,0)")
+        db.execute("INSERT INTO entries VALUES(4,3,'third title',0,1,?)", ("😀" * 2048,))
+        db.execute("INSERT INTO entries VALUES(5,4,'fourth title',0,2,?)", ("é" * 2048,))
+        db.execute("UPDATE entries SET text=? WHERE id=2", ("界" * 2048,))
+        db.commit(); db.close()
+        value = json.loads(self.run_summary())
+        self.assertEqual(len(value["feedCards"]), 3)
+        self.assertLess(len(json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode()), 8192)
 
     def test_feed_card_fields_change_revision_and_are_sanitized(self):
         db = make_db(self.db_path)

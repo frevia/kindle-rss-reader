@@ -83,6 +83,13 @@ def home_adapter_files(folder):
             "native-rss/home/manifest.json": ((json.dumps(manifest, ensure_ascii=False, indent=2) + "\n").encode(), False)}
 
 
+def home_runtime_files():
+    return {
+        "native-rss/home/native-rss-home.conf": ((ROOT / "device/native-rss-home.conf").read_bytes(), False),
+        "native-rss/home/native-rss-home-recover.conf": ((ROOT / "device/native-rss-home-recover.conf").read_bytes(), False),
+    }
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--home-patch", type=Path, help="已校验的可选首页差分补丁目录；不包含原固件")
@@ -119,7 +126,7 @@ def main():
     add("native-rss/bin/kindle-rss", binary, True)
     add("native-rss/bin/kindle-rss-home", home_binary, True)
     add("native-rss/home.sh", ROOT / "device/home.sh", True)
-    add("native-rss/home/native-rss-home.conf", ROOT / "device/native-rss-home.conf")
+    files.update(home_runtime_files())
     add("native-rss/home/card.js", ROOT / "home/card.js")
     add("native-rss/home/firmwares.json", ROOT / "home/firmwares.json")
     if args.home_patch:

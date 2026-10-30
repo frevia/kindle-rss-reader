@@ -2,7 +2,9 @@
 #include <cstdint>
 #include <map>
 #include <string>
+#include <tuple>
 #include <vector>
+#include <utility>
 #include <ft2build.h>
 #include FT_FREETYPE_H
 
@@ -29,6 +31,7 @@ public:
     void rule(int x, int y, int w, std::uint8_t color = 210);
     int text(int x, int baseline, const std::string& value, int size, std::uint8_t color=20);
     int measure(const std::string& value, int size);
+    std::pair<int,int> text_vertical_bounds(const std::string& value, int size);
     std::vector<Line> wrap(const std::string& value, int size, int max_width);
     std::vector<Page> paginate(const std::string& value, int size, int line_height,
                                int content_width, int content_height, int first_height = 0);
@@ -41,6 +44,8 @@ private:
     FT_Library library_ = nullptr;
     FT_Face face_ = nullptr;
     std::map<std::pair<int, std::uint32_t>, Glyph> cache_;
+    std::map<std::tuple<Icon, int, int>, std::vector<std::uint16_t>> icon_coverage_cache_;
+    std::size_t icon_coverage_entries_ = 0;
     const Glyph& glyph(std::uint32_t codepoint, int size);
 };
 std::size_t page_at(const std::vector<Page>& pages, std::size_t offset);

@@ -364,12 +364,19 @@ void Store::save_entries(std::int64_t feed_id, const ParsedFeed& parsed) {
             Statement lookup(db_,"SELECT id FROM entries WHERE feed_id=? AND guid=?");
             lookup.integer(1,feed_id);lookup.text(2,entry.guid);check(db_,sqlite3_step(lookup.get()));
             const auto id=sqlite3_column_int64(lookup.get(),0);
-            Statement old(db_,"UPDATE article_images SET ordinal=-1 WHERE entry_id=? AND ordinal>=0");old.integer(1,id);old.run();
+            // Leave retained image rows untouched: rewriting their pixel blobs can block foreground reading on flash.
+            const auto image_count=std::min<std::size_t>(20,entry.images.size());
+            std::string stale_sql="UPDATE article_images SET ordinal=-1 WHERE entry_id=? AND ordinal>=0";
+            if(image_count){stale_sql+=" AND url NOT IN (";for(std::size_t i=0;i<image_count;++i)stale_sql+=i?",?":"?";stale_sql+=")";}
+            Statement old(db_,stale_sql.c_str());old.integer(1,id);
+            for(std::size_t i=0;i<image_count;++i)old.text(static_cast<int>(i)+2,entry.images[i].url);
+            old.run();
             int ordinal=0;
             for(const auto& image:entry.images){
                 if(ordinal==20)break;
                 Statement ref(db_,"INSERT INTO article_images(entry_id,url,alt,ordinal) VALUES(?,?,?,?) "
-                                  "ON CONFLICT(entry_id,url) DO UPDATE SET alt=excluded.alt,ordinal=excluded.ordinal");
+                                  "ON CONFLICT(entry_id,url) DO UPDATE SET alt=excluded.alt,ordinal=excluded.ordinal "
+                                  "WHERE article_images.alt<>excluded.alt OR article_images.ordinal<>excluded.ordinal");
                 ref.integer(1,id);ref.text(2,image.url);ref.text(3,image.alt);ref.integer(4,ordinal++);ref.run();
             }
             Statement stale(db_,"DELETE FROM article_images WHERE entry_id=? AND ordinal=-1 AND NOT EXISTS(SELECT 1 FROM article_fulltext_images f WHERE f.entry_id=article_images.entry_id AND f.url=article_images.url)");stale.integer(1,id);stale.run();
@@ -557,6 +564,16 @@ void Store::set_position(std::int64_t id, std::int64_t offset, bool fulltext) {
     const auto value=std::max<std::int64_t>(0,offset);
     if(fulltext){Statement q(db_,"UPDATE article_fulltext SET position=? WHERE entry_id=?");q.integer(1,value);q.integer(2,id);q.run();Statement global(db_,"UPDATE entries SET in_progress=1 WHERE id=?");global.integer(1,id);global.run();}
     else {Statement q(db_, "UPDATE entries SET position=?,in_progress=1 WHERE id=?"); q.integer(1,value); q.integer(2,id); q.run();}
+}
+void Store::begin_reading(std::int64_t id, std::int64_t offset, bool fulltext) {
+    exec(db_, "BEGIN IMMEDIATE");
+    try {
+        set_read(id, true);
+        set_position(id, offset, fulltext);
+        set_setting("reader_content:" + std::to_string(id), fulltext ? "web" : "rss");
+        set_setting("last_entry", std::to_string(id));
+        exec(db_, "COMMIT");
+    } catch (...) { sqlite3_exec(db_, "ROLLBACK", nullptr, nullptr, nullptr); throw; }
 }
 void Store::finish_reading(std::int64_t id) { Statement q(db_, "UPDATE entries SET in_progress=0,position=0,read=1 WHERE id=?"); q.integer(1,id); q.run(); Statement fulltext(db_,"UPDATE article_fulltext SET position=0 WHERE entry_id=?");fulltext.integer(1,id);fulltext.run(); }
 

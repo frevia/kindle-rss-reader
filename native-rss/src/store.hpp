@@ -35,6 +35,7 @@ public:
     void set_read(std::int64_t id, bool value);
     void set_starred(std::int64_t id, bool value);
     void set_position(std::int64_t id, std::int64_t offset, bool fulltext = false);
+    void begin_reading(std::int64_t id, std::int64_t offset, bool fulltext = false); // Commit all open-state writes together.
     FulltextStatus fulltext_status(std::int64_t id) const;
     bool queue_fulltext(std::int64_t id);
     std::vector<Entry> pending_fulltext(bool retry_failed = false, std::size_t limit = 10) const;

@@ -13,14 +13,22 @@ struct FrameLayout {
 };
 void validate_kpw3_layout(const FrameLayout& layout);
 struct TouchPoint { int x=0,y=0; };
+struct TouchGesture {
+    TouchPoint start,end,minimum,maximum;
+    explicit TouchGesture(TouchPoint point):start(point),end(point),minimum(point),maximum(point){}
+    void update(TouchPoint point);
+};
 class TouchDecoder {
 public:
-    std::optional<TouchPoint> consume(std::uint16_t type,std::uint16_t code,std::int32_t value);
+    std::optional<TouchGesture> consume(std::uint16_t type,std::uint16_t code,std::int32_t value);
 private:
     int slot_=0,x_=0,y_=0;
-    bool active_=false,released_=false,have_x_=false,have_y_=false;
+    bool active_=false,released_=false,have_x_=false,have_y_=false,path_started_=false,cancelled_=false;
+    std::optional<TouchGesture> gesture_;
+    std::vector<int> active_slots_;
 };
 TouchPoint scale_touch(TouchPoint point,int xmin,int xmax,int ymin,int ymax);
+TouchGesture scale_gesture(const TouchGesture& gesture,int xmin,int xmax,int ymin,int ymax);
 std::string probe_device(); // Read-only; does not grab input or change framebuffer.
 std::optional<Rect> changed_region(const std::vector<std::uint8_t>& before,
                                   const std::vector<std::uint8_t>& after);
@@ -32,7 +40,7 @@ public:
     KindleDevice(const KindleDevice&) = delete;
     KindleDevice& operator=(const KindleDevice&) = delete;
     void present(const std::vector<std::uint8_t>& pixels);
-    std::optional<TouchPoint> touch(int timeout_ms);
+    std::optional<TouchGesture> touch(int timeout_ms);
     void restore(); // Only while the device is awake and the launcher still owns the UI.
 private:
     struct Impl;

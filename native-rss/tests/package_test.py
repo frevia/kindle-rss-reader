@@ -21,6 +21,7 @@ class PackageTests(unittest.TestCase):
             for name in public:
                 path=root.parent/name;path.parent.mkdir(parents=True,exist_ok=True);path.write_text(name)
             included=("src/main.cpp","tests/fixtures/colors.png","docs/INSTALL.md","device/INSTALL.txt","device/launch.sh",
+                      "device/native-rss-home-recover.conf",
                       "tools/reader.cmake","tools/reader-sources.json","third_party/crengine/LICENSE",
                       "home/card.js","home/firmwares.json","third_party/hbc84/LICENSE",
                       "third_party/hbc84/SOURCE.json","third_party/hbc84/opcode.json","third_party/hbc84/structure.json",
@@ -34,6 +35,7 @@ class PackageTests(unittest.TestCase):
             files=pack.source_files(root)
             self.assertEqual(set(files),set(public)|{"native-rss/"+name for name in included})
             self.assertTrue(files["native-rss/device/launch.sh"][1])
+            self.assertFalse(files["native-rss/device/native-rss-home-recover.conf"][1])
             (root/"src/link.cpp").symlink_to(root/"src/main.cpp")
             with self.assertRaises(RuntimeError):pack.source_files(root)
 
@@ -70,6 +72,23 @@ class PackageTests(unittest.TestCase):
             (adapter/"manifest.json").write_text(json.dumps(manifest))
             (adapter/"patch.rhp").write_bytes(recipe+b"tampered")
             with self.assertRaises(RuntimeError):pack.home_adapter_files(adapter)
+
+    def test_home_recovery_job_is_packaged_without_enabling_it(self):
+        files=pack.home_runtime_files()
+        name="native-rss/home/native-rss-home-recover.conf"
+        self.assertIn(name,files)
+        self.assertFalse(files[name][1])
+        config=files[name][0].decode()
+        self.assertTrue(config.startswith("# RSS Reader optional home recovery v1\n"))
+        self.assertIn("start on user_store_available",config)
+        self.assertIn("[ -f /var/local/native-rss/home/enabled ] || exit 0",config)
+        self.assertNotIn("respawn",config)
+        with tempfile.TemporaryDirectory() as folder:
+            archive=Path(folder)/"package.zip"
+            pack.write_zip(archive,files)
+            with zipfile.ZipFile(archive) as packaged:
+                self.assertEqual(packaged.read(name),files[name][0])
+                self.assertEqual(packaged.getinfo(name).external_attr>>16&0o777,0o644)
 
     def test_rejects_stale_or_changed_binary(self):
         with tempfile.TemporaryDirectory() as folder:

@@ -135,13 +135,13 @@ void device(rss::Store& store,rss::Canvas& canvas,const std::string& db,std::int
         auto last_activity=std::chrono::steady_clock::now()-std::chrono::seconds(5);
         while(!stop_device&&!app.quit){
             if(app.dirty){app.draw();hardware.present(canvas.pixels);}
-            const auto point=hardware.touch(100);
+            const auto gesture=hardware.touch(100);
             const auto now=std::chrono::steady_clock::now();
-            if(point&&now-last_activity>=std::chrono::seconds(5)){
+            if(gesture&&now-last_activity>=std::chrono::seconds(5)){
                 rss::run_bounded({"/usr/bin/lipc-set-prop","-i","com.lab126.powerd","touchScreenSaverTimeout","1"},std::chrono::seconds(2));
                 last_activity=now;
             }
-            try{if(point)app.tap(point->x,point->y);tasks.tick();}
+            try{if(gesture)app.touch(*gesture);tasks.tick();}
             catch(const std::exception& e){app.show_error(e.what());}
         }
         // The supervising launcher restores the screen after checking the power state.
@@ -160,13 +160,20 @@ void desktop(rss::Store& store,rss::Canvas& canvas,const std::string& db,std::in
     SDL_RenderSetLogicalSize(renderer,canvas.width,canvas.height);SDL_StartTextInput();
     rss::App app(store,canvas,article,status_font_path());std::vector<std::uint32_t> rgba(canvas.pixels.size());
     UiTasks tasks(store,app,db);
+    std::optional<rss::TouchGesture> gesture;
     try {
         while(!app.quit){
             SDL_Event event;
             if(SDL_WaitEventTimeout(&event,80)){
                 try {
                     if(event.type==SDL_QUIT)app.quit=true;
-                    else if(event.type==SDL_MOUSEBUTTONUP&&event.button.button==SDL_BUTTON_LEFT)app.tap(event.button.x,event.button.y);
+                    else if(event.type==SDL_MOUSEBUTTONDOWN&&event.button.button==SDL_BUTTON_LEFT)
+                        gesture.emplace(rss::TouchPoint{event.button.x,event.button.y});
+                    else if(event.type==SDL_MOUSEMOTION&&gesture)
+                        gesture->update({event.motion.x,event.motion.y});
+                    else if(event.type==SDL_MOUSEBUTTONUP&&event.button.button==SDL_BUTTON_LEFT){
+                        if(gesture){auto completed=*gesture;gesture.reset();completed.update({event.button.x,event.button.y});app.touch(completed);}
+                    }
                     else if(event.type==SDL_TEXTINPUT)app.text_input(event.text.text);
                     else if(event.type==SDL_KEYDOWN){
                         const auto key=event.key.keysym.sym;
@@ -176,7 +183,11 @@ void desktop(rss::Store& store,rss::Canvas& canvas,const std::string& db,std::in
                         else if(key==SDLK_LEFT||key==SDLK_PAGEUP)app.previous();
                         else if(key==SDLK_BACKSPACE)app.backspace();
                         else if(key==SDLK_RETURN)app.submit();
-                    }else if(event.type==SDL_WINDOWEVENT)app.dirty=true;
+                    }else if(event.type==SDL_WINDOWEVENT){
+                        if(event.window.event==SDL_WINDOWEVENT_FOCUS_LOST||event.window.event==SDL_WINDOWEVENT_LEAVE||
+                           event.window.event==SDL_WINDOWEVENT_SIZE_CHANGED)gesture.reset();
+                        app.dirty=true;
+                    }
                 }catch(const std::exception& e){app.show_error(e.what());}
             }
             try{tasks.tick();}catch(const std::exception& e){app.show_error(e.what());}

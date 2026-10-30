@@ -43,7 +43,7 @@ int main(){
     store.set_setting("reader_engine","classic");
     rss::App app(store,canvas);app.show_view(rss::View::All,feed_id);
     auto tap=[&](int x,int y){app.draw();app.tap(x,y);};
-    tap(100,400);assert(app.reading()&&app.current_id()==first_id&&!app.using_cre());
+    tap(100,300);assert(app.reading()&&app.current_id()==first_id&&!app.using_cre());
     tap(950,1380);assert(app.reader_page()>0);
     const auto old_offset=store.entry(first_id)->position;assert(old_offset>0);
     tap(536,600);assert(app.reader_tools_open());
@@ -68,13 +68,13 @@ int main(){
     assert(store.setting("reader_cre:"+std::to_string(first_id))==anchor_before);
     if(const auto dir=std::getenv("RSS_TEST_SNAPSHOTS")){app.draw();canvas.write_pgm((std::filesystem::path(dir)/"cre-reader.pgm").string());}
     app.back();app.back();app.back();assert(!app.reading());
-    tap(100,400);assert(app.current_id()==first_id&&app.using_cre()&&app.reader_page()>0);
+    tap(100,300);assert(app.current_id()==first_id&&app.using_cre()&&app.reader_page()>0);
     const auto restored=app.reader_page();
     tap(536,600);tap(178,1380);tap(690,1162);assert(!app.using_cre());
     const auto classic_page=app.reader_page();
     assert(store.entry(first_id)->position==old_offset);
     assert(store.setting("reader_cre:"+std::to_string(first_id))!="");
-    app.back();app.back();app.back();tap(100,400);assert(app.current_id()==first_id&&!app.using_cre());
+    app.back();app.back();app.back();tap(100,300);assert(app.current_id()==first_id&&!app.using_cre());
     assert(app.reader_page()==classic_page);
     assert(store.entry(first_id)->position<=old_offset); // Classic exit saves its current page start after the font change.
     tap(536,600);tap(178,1380);tap(930,1162);assert(app.using_cre()&&app.reader_page()==restored);
@@ -90,14 +90,14 @@ int main(){
     rss::Entry oversized;oversized.guid="cre-oversized";oversized.title="超限回退";oversized.published=300;
     oversized.text=std::string(512*1024+1,'x');oversized.html=oversized.text;
     rss::ParsedFeed too_large;too_large.entries={oversized};store.save_entries(feed_id,too_large);
-    app.back();app.show_view(rss::View::All,feed_id);tap(100,400);
+    app.back();app.show_view(rss::View::All,feed_id);tap(100,300);
     assert(app.current_id()!=0);
     assert(app.reading()&&!app.using_cre());
     app.back();assert(app.reading());app.back();assert(!app.reading());
     store.set_setting("reader_engine","classic");
     rss::App failed_switch(store,canvas);failed_switch.show_view(rss::View::All,feed_id);
     auto fail_tap=[&](int x,int y){failed_switch.draw();failed_switch.tap(x,y);};
-    fail_tap(100,400);failed_switch.next();const auto before_failure=failed_switch.reader_page();
+    fail_tap(100,300);failed_switch.next();const auto before_failure=failed_switch.reader_page();
     fail_tap(536,600);fail_tap(178,1380);fail_tap(930,1162);
     assert(!failed_switch.using_cre()&&failed_switch.reader_page()==before_failure);
     assert(store.setting("reader_engine")=="classic");

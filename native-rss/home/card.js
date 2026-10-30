@@ -1,5 +1,47 @@
 // Firmware adapter entry; this is the actual Hermes global object, not a `global` alias.
 function useRssCard(React, RN, props) {
+    function rssExcerptLines(text, width, size, limit) {
+        // This firmware ignores Text.lineHeight; separate rows give the paragraph real leading.
+        // shortcut: conservative widths target the supported Kindle font; recalibrate if the firmware font changes.
+        var rows = [], rest = text.trim();
+        if (rest.indexOf("书籍：《") === 0) {
+            var bookEnd = rest.indexOf("》");
+            if (bookEnd > 4) {
+                var bookName = rest.slice(3, bookEnd + 1), afterBook = rest.slice(bookEnd + 1).trim();
+                if (afterBook.indexOf(bookName) === 0) rest = afterBook;
+            }
+        }
+        while (rest && rows.length < limit) {
+            var used = 0, end = 0, wordBreak = 0;
+            while (end < rest.length) {
+                var code = rest.charCodeAt(end), count = 1, em = 1;
+                if (code >= 0xd800 && code <= 0xdbff && end + 1 < rest.length) { count = 2; em = 1.25; }
+                else if (code < 128) {
+                    var letter = rest.charAt(end);
+                    em = "MWmw@%&".indexOf(letter) >= 0 ? 1 :
+                        " ilI.,:;!'|".indexOf(letter) >= 0 ? 0.4 :
+                        (code >= 97 && code <= 122 ? 0.7 : 0.85);
+                }
+                if (used + em * size > width && end > 0) break;
+                used += em * size;
+                end += count;
+                if (rest.charAt(end - 1) === " ") wordBreak = end;
+            }
+            if (end < rest.length && wordBreak > 0 && rest.charCodeAt(end) < 128 && rest.charAt(end) !== " ") end = wordBreak;
+            // Keep closing punctuation with its preceding character, and opening punctuation with what follows.
+            if (end < rest.length) {
+                while (end > 1 && "，。！？；：、）》】」』”’…,.!?:;)]}".indexOf(rest.charAt(end)) >= 0) end--;
+                if (end > 1 && "（《【「『([{“".indexOf(rest.charAt(end - 1)) >= 0) end--;
+                if (end > 0 && rest.charCodeAt(end) >= 0xdc00 && rest.charCodeAt(end) <= 0xdfff) end--;
+                if (!end) end = rest.charCodeAt(0) >= 0xd800 && rest.charCodeAt(0) <= 0xdbff ? 2 : 1;
+            }
+            rows.push(rest.slice(0, end).trim());
+            rest = rest.slice(end).trim();
+        }
+        if (rest && rows.length) rows[rows.length - 1] += "…";
+        return rows;
+    }
+
     var root = this;
     var item = props.cardItem;
     var title = typeof item.title === "string" ? item.title : "";
@@ -9,6 +51,7 @@ function useRssCard(React, RN, props) {
     var state = React.useState(target && !trial ? root.rssHomeSnapshot || null : null);
     var snapshot = state[0];
     var update = state[1];
+    var measured = React.useState({});
     React.useEffect(function () {
         if (!target || trial) return;
         var active = true;
@@ -84,9 +127,12 @@ function useRssCard(React, RN, props) {
                         if (!feed || !validNumber(feed.id) || !validNumber(feed.unread) ||
                             typeof feed.title !== "string" || feed.title.length > 50 ||
                             typeof feed.latestTitle !== "string" || feed.latestTitle.length > 100 ||
-                            (feed.entryId !== undefined && !validNumber(feed.entryId))) return;
+                            (feed.entryId !== undefined && !validNumber(feed.entryId)) ||
+                            (feed.excerpt !== undefined && (typeof feed.excerpt !== "string" || feed.excerpt.length > 320)) ||
+                            (feed.published !== undefined && (!validNumber(feed.published) || feed.published > 8640000000000))) return;
                         for (var prior = 0; prior < feedCards.length; prior++) if (feedCards[prior].id === feed.id) return;
-                        feedCards.push({id: feed.id, title: feed.title, unread: feed.unread, latestTitle: feed.latestTitle, entryId: feed.entryId || 0});
+                        feedCards.push({id: feed.id, title: feed.title, unread: feed.unread, latestTitle: feed.latestTitle,
+                            entryId: feed.entryId || 0, excerpt: feed.excerpt || "", published: feed.published || 0});
                     }
                 }
                 var clean = {revision: data.revision, status: data.status, enabled: data.enabled !== false, unread: data.unread,
@@ -170,7 +216,7 @@ function useRssCard(React, RN, props) {
         var unit = height / 360;
         var nativeHeading = original.props.children[0];
         var nativeBody = original.props.children[1].props.children[1].props.children[0];
-        function label(value, base, size, weight, lines) {
+        function label(value, base, size, weight, lines, extraStyle, onLayout) {
             // Keep the firmware's font family and scaling instead of a separate widget theme.
             var style = Object.assign({}, base);
             style.margin = 0; style.marginLeft = 0; style.marginRight = 0;
@@ -178,10 +224,13 @@ function useRssCard(React, RN, props) {
             style.height = lines > 2 ? size * 1.35 * lines : undefined;
             style.flexShrink = 0; style.fontSize = size;
             style.lineHeight = size * 1.35; style.fontWeight = weight;
+            style.textAlign = "left";
             style.color = "#000000";
+            if (extraStyle) Object.assign(style, extraStyle);
             var textProps = {};
             textProps.style = style; textProps.numberOfLines = lines;
             textProps.ellipsizeMode = "tail";
+            if (onLayout) textProps.onLayout = onLayout;
             return create(RN.Text, textProps, value);
         }
         var headingStyle = nativeHeading.props.style;
@@ -248,27 +297,68 @@ function useRssCard(React, RN, props) {
             var cover = {}; cover.width = 225 * unit; cover.height = 337.5 * unit;
             cover.borderWidth = unit; cover.borderColor = "#777777";
             cover.backgroundColor = "#ffffff";
-            cover.paddingLeft = 18 * unit; cover.paddingRight = 18 * unit;
-            cover.paddingTop = 14 * unit; cover.paddingBottom = 14 * unit;
+            cover.paddingLeft = 14 * unit; cover.paddingRight = 14 * unit;
+            cover.paddingTop = 18 * unit; cover.paddingBottom = 18 * unit;
             var coverProps = {}; coverProps.style = cover;
-            var source = {}; source.height = 62 * unit;
-            source.justifyContent = "center"; source.borderBottomWidth = unit;
-            source.borderBottomColor = "#aaaaaa"; source.paddingBottom = 8 * unit;
+            var source = {}; source.height = 32 * unit;
+            source.justifyContent = "flex-start";
             var sourceProps = {}; sourceProps.style = source;
-            var article = {}; article.height = 219.5 * unit; article.paddingTop = 18 * unit;
+            var article = {}; article.height = 237.5 * unit; article.paddingTop = 12 * unit;
+            article.overflow = "hidden";
             var articleProps = {}; articleProps.style = article;
-            var footer = {}; footer.height = 28 * unit;
-            footer.alignItems = "flex-end"; footer.justifyContent = "flex-end";
+            var footer = {}; footer.height = 30 * unit;
+            footer.flexDirection = "row"; footer.alignItems = "flex-end"; footer.justifyContent = "space-between";
             var footerProps = {}; footerProps.style = footer;
             var unreadText = entry.unread ? (entry.unread > 99 ? "99+" : String(entry.unread)) + " 未读" : "已读完";
             if (!snapshot || snapshot.status === "unavailable") unreadText = "";
+            var articleTitle = entry.latestTitle || "暂无文章";
+            // Keep a leading column name intact instead of stranding two title characters.
+            var prefixEnd = articleTitle.indexOf("】");
+            if (articleTitle.charAt(0) === "【" && prefixEnd > 1 && prefixEnd <= 11) {
+                var remainingTitle = articleTitle.slice(prefixEnd + 1).trim();
+                if (remainingTitle) articleTitle = articleTitle.slice(0, prefixEnd + 1) + "\n" + remainingTitle;
+            }
+            var titleLine = 24 * 1.35 * unit;
+            var titleMeasurement = measured[0][entry.id];
+            var titleHeight = titleMeasurement && titleMeasurement.title === articleTitle && titleMeasurement.unit === unit ?
+                titleMeasurement.height : titleLine * 3;
+            var excerptLine = 22 * 1.5 * unit;
+            var excerptLines = Math.max(1, Math.min(6, Math.floor((article.height - article.paddingTop - titleHeight - 16 * unit) / excerptLine)));
+            var measureTitle = (function (id, value, scale) {
+                return function (event) {
+                    var layout = event && event.nativeEvent && event.nativeEvent.layout;
+                    var pixels = layout && layout.height;
+                    if (typeof pixels !== "number" || !(pixels > 0 && pixels <= 24 * 1.35 * scale * 3 + 1)) return;
+                    measured[1](function (previous) {
+                        var old = previous[id];
+                        if (old && old.title === value && old.unit === scale && Math.abs(old.height - pixels) < 0.5) return previous;
+                        var result = Object.assign({}, previous);
+                        result[id] = {title: value, unit: scale, height: pixels};
+                        return result;
+                    });
+                };
+            })(entry.id, articleTitle, unit);
+            var dateText = "";
+            if (entry.published) {
+                var date = new Date(entry.published * 1000);
+                if (!isNaN(date.getTime())) dateText = (date.getMonth() + 1) + "月" + date.getDate() + "日";
+            }
+            var excerpt = entry.excerpt || (entry.entryId ? "打开文章，继续阅读" : "打开阅读器同步文章");
+            var excerptRows = rssExcerptLines(excerpt, 195, 22, excerptLines);
+            var excerptViews = [];
+            for (var row = 0; row < excerptRows.length; row++) {
+                excerptViews.push(create(RN.View, {key: "excerpt-" + row, style: {height: excerptLine}},
+                    label(excerptRows[row], bodyStyle, 22 * unit, "normal", 1)));
+            }
             var coverView = create(RN.View, coverProps,
                 create(RN.View, sourceProps,
-                    label(entry.title || "未命名订阅", headingStyle, 18 * unit, "bold", 2)),
+                    label(entry.title || "未命名订阅", headingStyle, 21 * unit, "bold", 1)),
                 create(RN.View, articleProps,
-                    label(entry.latestTitle || "暂无文章", bodyStyle, 27 * unit, "normal", 5)),
+                    label(articleTitle, bodyStyle, 24 * unit, "bold", 3, {height: undefined, maxHeight: titleLine * 3}, measureTitle),
+                    create(RN.View, {testID: bookProps.testID + "_excerpt", style: {height: excerptLine * excerptLines, marginTop: 16 * unit}}, excerptViews)),
                 create(RN.View, footerProps,
-                    label(unreadText, bodyStyle, 17 * unit, "normal", 1)));
+                    label(dateText, bodyStyle, 18 * unit, "normal", 1),
+                    label(unreadText, bodyStyle, 18 * unit, "normal", 1)));
             books.push(create(root.rssHomeButtonBase, bookProps, coverView));
         }
         return create(RN.View, frameProps, headingView, create(RN.View, bodyProps, books));

@@ -16,6 +16,10 @@
 #endif
 
 namespace rss {
+void TouchGesture::update(TouchPoint point){
+    end=point;minimum.x=std::min(minimum.x,point.x);minimum.y=std::min(minimum.y,point.y);
+    maximum.x=std::max(maximum.x,point.x);maximum.y=std::max(maximum.y,point.y);
+}
 std::optional<Rect> changed_region(const std::vector<std::uint8_t>& before,
                                   const std::vector<std::uint8_t>& after){
     constexpr int width=1072,height=1448;
@@ -120,7 +124,7 @@ void KindleDevice::present(const std::vector<std::uint8_t>& pixels){
 void KindleDevice::restore(){
     auto& d=*impl_;d.check_layout();d.write(d.original,{0,0,1072,1448});d.refresh({0,0,1072,1448},true);d.last=d.original;
 }
-std::optional<TouchPoint> KindleDevice::touch(int timeout_ms){
+std::optional<TouchGesture> KindleDevice::touch(int timeout_ms){
     auto& d=*impl_;pollfd poller{d.input,POLLIN,0};
     const int ready=::poll(&poller,1,std::clamp(timeout_ms,0,1000));
     if(ready<0){if(errno==EINTR)return std::nullopt;device_error("等待触摸失败");}
@@ -131,8 +135,8 @@ std::optional<TouchPoint> KindleDevice::touch(int timeout_ms){
         const auto bytes=::read(d.input,&event,sizeof(event));
         if(bytes<0&&(errno==EAGAIN||errno==EINTR))return std::nullopt;
         if(bytes!=sizeof(event))throw std::runtime_error("触摸事件读取不完整");
-        if(auto p=d.decoder.consume(event.type,event.code,event.value))
-            return scale_touch(*p,d.x.minimum,d.x.maximum,d.y.minimum,d.y.maximum);
+        if(auto gesture=d.decoder.consume(event.type,event.code,event.value))
+            return scale_gesture(*gesture,d.x.minimum,d.x.maximum,d.y.minimum,d.y.maximum);
     }
     return std::nullopt;
 }
@@ -142,7 +146,7 @@ KindleDevice::KindleDevice(){throw std::runtime_error("设备运行仅在 Linux 
 KindleDevice::~KindleDevice()=default;
 void KindleDevice::present(const std::vector<std::uint8_t>&){throw std::runtime_error("没有 Kindle 屏幕");}
 void KindleDevice::restore(){}
-std::optional<TouchPoint> KindleDevice::touch(int){return std::nullopt;}
+std::optional<TouchGesture> KindleDevice::touch(int){return std::nullopt;}
 #endif
 void validate_kpw3_layout(const FrameLayout& l){
     if(l.width!=1072||l.height!=1448||l.bpp!=8||l.stride<l.width||l.stride>8192||
@@ -150,9 +154,10 @@ void validate_kpw3_layout(const FrameLayout& l){
        static_cast<std::uint64_t>(l.stride)*(l.yoffset+l.height)>l.memory_size||l.memory_size>64*1024*1024)
         throw std::runtime_error("屏幕布局不符合 KPW3 8 位竖屏要求");
 }
-std::optional<TouchPoint> TouchDecoder::consume(std::uint16_t type,std::uint16_t code,std::int32_t value){
+std::optional<TouchGesture> TouchDecoder::consume(std::uint16_t type,std::uint16_t code,std::int32_t value){
     if(type==0&&code==3){
-        active_=released_=have_x_=have_y_=false;
+        active_=released_=have_x_=have_y_=path_started_=cancelled_=false;
+        gesture_.reset();active_slots_.clear();slot_=x_=y_=0;
         throw std::runtime_error("触摸事件丢失，需要重新读取设备状态");
     }
     if(type==3){
@@ -161,12 +166,31 @@ std::optional<TouchPoint> TouchDecoder::consume(std::uint16_t type,std::uint16_t
             if(code==0x35){x_=value;have_x_=true;}
             else if(code==0x36){y_=value;have_y_=true;}
             else if(code==0x39){
-                if(value>=0){active_=true;released_=false;}
-                else{released_=active_;active_=false;}
+                if(value>=0){
+                    active_=true;released_=false;path_started_=false;gesture_.reset();
+                    cancelled_=!active_slots_.empty();
+                }else{released_=active_;active_=false;}
             }
+        }else if(code==0x39){
+            if(value>=0){
+                if(std::find(active_slots_.begin(),active_slots_.end(),slot_)==active_slots_.end())active_slots_.push_back(slot_);
+                if(active_||released_)cancelled_=true;
+            }else active_slots_.erase(std::remove(active_slots_.begin(),active_slots_.end(),slot_),active_slots_.end());
         }
     }
-    if(type==0&&code==0&&released_){released_=false;if(have_x_&&have_y_)return TouchPoint{x_,y_};}
+    if(type==0&&code==0){
+        if(released_){
+            released_=false;
+            if(gesture_)gesture_->update({x_,y_});
+            auto completed=(!cancelled_&&path_started_)?gesture_:std::nullopt;
+            active_=path_started_=cancelled_=false;gesture_.reset();
+            return completed;
+        }
+        if(active_&&have_x_&&have_y_){
+            if(!path_started_){gesture_.emplace(TouchPoint{x_,y_});path_started_=true;}
+            else gesture_->update({x_,y_});
+        }
+    }
     return std::nullopt;
 }
 TouchPoint scale_touch(TouchPoint p,int xmin,int xmax,int ymin,int ymax){
@@ -174,6 +198,13 @@ TouchPoint scale_touch(TouchPoint p,int xmin,int xmax,int ymin,int ymax){
        p.x<xmin||p.x>xmax||p.y<ymin||p.y>ymax)throw std::runtime_error("无效触摸坐标范围");
     return {static_cast<int>((static_cast<std::int64_t>(p.x-xmin)*1071+(xmax-xmin)/2)/(xmax-xmin)),
             static_cast<int>((static_cast<std::int64_t>(p.y-ymin)*1447+(ymax-ymin)/2)/(ymax-ymin))};
+}
+TouchGesture scale_gesture(const TouchGesture& gesture,int xmin,int xmax,int ymin,int ymax){
+    TouchGesture scaled(scale_touch(gesture.start,xmin,xmax,ymin,ymax));
+    scaled.end=scale_touch(gesture.end,xmin,xmax,ymin,ymax);
+    scaled.minimum=scale_touch(gesture.minimum,xmin,xmax,ymin,ymax);
+    scaled.maximum=scale_touch(gesture.maximum,xmin,xmax,ymin,ymax);
+    return scaled;
 }
 std::string probe_device(){
 #ifdef __linux__

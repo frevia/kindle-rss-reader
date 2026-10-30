@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const source = fs.readFileSync(__dirname + '/../home/card.js', 'utf8');
 function harness(title = 'Kindle Unlimited 现已升级为 Kindle+', sharedRoot) {
-    let now = 0, timerId = 0, timers = new Map(), value, mounted = false, cleanup;
+    let now = 0, timerId = 0, timers = new Map(), values = [], stateCursor = 0, mounted = false, cleanup;
     const callbacks = {}, calls = {connect: [], close: [], send: [], open: [], updates: 0};
     const root = sharedRoot || {
         setTimeout(fn, delay) { timers.set(++timerId, {fn, due: now + delay}); return timerId; },
@@ -23,12 +23,12 @@ function harness(title = 'Kindle Unlimited 现已升级为 Kindle+', sharedRoot)
     }};
     const React = {
         createElement(type, props, ...children) { return {type, props: {...props, children}}; },
-        useState(initial) { if (!mounted) value = initial; return [value, next => { value = next; calls.updates++; }]; },
+        useState(initial) { const slot = stateCursor++; if (!mounted) values[slot] = initial; return [values[slot], next => { const value = typeof next === "function" ? next(values[slot]) : next; if (value !== values[slot]) { values[slot] = value; calls.updates++; } }]; },
         useEffect(effect) { if (!mounted) { mounted = true; cleanup = effect(); } }
     };
     const props = {cardItem: {campaignId: 'cloud-id-can-change', title, cardData: [{imagePath: '/old', metadata: 1}], buttonActionsurl: '/store'}};
     const original = JSON.stringify(props);
-    function render() { return root.useRssCard(React, RN, props); }
+    function render() { stateCursor = 0; return root.useRssCard(React, RN, props); }
     function advance(ms) {
         now += ms;
         for (const [id, timer] of Array.from(timers)) if (timer.due <= now) { timers.delete(id); timer.fn(); }
@@ -65,6 +65,10 @@ h.message(snapshot('a', {feedCards: [{id: 1, title: '', unread: 0, latestTitle: 
 h.message(snapshot('a', {feedCards: [{id: 1, title: 'x'.repeat(51), unread: 1, latestTitle: ''}]}));
 h.message(snapshot('a', {feedCards: Array.from({length: 4}, (_, id) => ({id, title: '', unread: 0, latestTitle: ''}))}));
 h.message(snapshot('a', {feedCards: [{id: 1, title: '', unread: 0, latestTitle: ''}, {id: 1, title: '', unread: 0, latestTitle: ''}]}));
+for (const bad of [{excerpt: null}, {excerpt: 1}, {excerpt: 'x'.repeat(321)}, {published: '123'},
+    {published: -1}, {published: 1.5}, {published: 8640000000001}]) {
+    h.message(snapshot('a', {feedCards: [{id: 1, title: '测试', unread: 0, latestTitle: '标题', ...bad}]}));
+}
 assert.equal(h.calls.updates, 0, 'malformed feed summaries cannot replace the cached snapshot');
 h.message(snapshot('a')); view = h.render();
 assert.equal(view.cardItem.titleText, '中文文章与引号“测试”');
@@ -139,8 +143,8 @@ layout.message(snapshot('a', {items: [
     {id: 1, title: '第一篇文章标题', source: '博客甲'},
     {id: 2, title: '第二篇文章标题很长也保持在单独的一行', source: '博客乙'}
 ], feedCards: [
-    {id: 7, title: '博客甲', unread: 2, latestTitle: '第一篇文章标题', entryId: 42},
-    {id: 8, title: '博客乙', unread: 120, latestTitle: '第二篇文章标题很长也保持在单独的一行', entryId: 77},
+    {id: 7, title: '博客甲', unread: 2, latestTitle: '第一篇文章标题', entryId: 42, excerpt: '正文摘录包含中文、English 与标点。', published: 1793005260},
+    {id: 8, title: '博客乙', unread: 120, latestTitle: '第二篇文章标题很长也保持在单独的一行', entryId: 77, excerpt: '😀'.repeat(160), published: 0},
     {id: 9, title: '', unread: 0, latestTitle: ''}
 ]}));
 const layoutProps = layout.render();
@@ -172,9 +176,9 @@ assert.equal(texts.some(node => node.props.children[0] === '〉'), false, 'no fo
 assert.equal(card.props.children[1].props.style.flexDirection, 'row');
 for (const title of ['第一篇文章标题', '第二篇文章标题很长也保持在单独的一行']) {
     const node = texts.find(node => node.props.children[0] === title);
-    assert.equal(node.props.numberOfLines, 5);
+    assert.equal(node.props.numberOfLines, 3);
     assert.equal(node.props.style.flexShrink, 0, 'long titles keep their multi-line text area');
-    assert.equal(node.props.style.height, node.props.style.lineHeight * 5);
+    assert.equal(node.props.style.height, undefined, 'native title measurement leaves spare lines for the excerpt');
     assert.equal(node.props.style.fontFamily, "Kindle native body");
     assert.equal(node.props.ellipsizeMode, 'tail');
 }
@@ -193,13 +197,34 @@ for (const book of books) {
     assert.equal(cover.props.style.width / cover.props.style.height, 2 / 3, 'native portrait cover ratio');
     assert.equal(book.props.children.length, 1, 'all reading information stays inside the cover');
     const coverTexts = flatten(cover).filter(node => node?.type === 'Text');
-    assert.equal(coverTexts.length, 3, 'source, article and unread count share the card');
+    assert.ok(coverTexts.length >= 5 && coverTexts.length <= 10, 'source, title, excerpt rows, date and unread count stay inside the cover');
     assert.ok(coverTexts[1].props.children[0]);
     book.props.onPress();
 }
 assert.ok(texts.find(node => node.props.children[0] === '99+ 未读'), 'large unread counts fit the cover badge');
 assert.ok(texts.find(node => node.props.children[0] === '未命名订阅'));
 assert.ok(texts.find(node => node.props.children[0] === '暂无文章'));
+const visibleText = list => list.filter(node => node?.type === 'Text').map(node => node.props.children[0]).join('');
+assert.ok(visibleText(nodes).includes('正文摘录包含中文、English'));
+const excerptArea = list => list.find(node => node?.props?.testID === 'Card_native_button_feed_7_excerpt');
+assert.equal(layout.root.rssHomeSnapshot.feedCards[1].excerpt.length, 320, 'UTF-16 validation permits 160 supplementary codepoints');
+for (const node of texts) for (const letter of node.props.children[0]) { const cp = letter.codePointAt(0); assert.ok(cp < 0xd800 || cp > 0xdfff, 'wrapping never splits surrogate pairs'); }
+const published = new Date(1793005260 * 1000);
+assert.ok(texts.find(node => node.props.children[0] === `${published.getMonth() + 1}月${published.getDate()}日`));
+assert.ok(visibleText(nodes).includes('打开阅读器同步文章'));
+const shortTitle = texts.find(node => node.props.children[0] === '第一篇文章标题');
+const excerptBefore = excerptArea(nodes);
+shortTitle.props.onLayout({nativeEvent: {layout: {height: shortTitle.props.style.lineHeight}}});
+const measuredNodes = flatten(layout.render().rssHomeRender(originalCard));
+const excerptAfter = excerptArea(measuredNodes);
+assert.ok(excerptAfter.props.style.height > excerptBefore.props.style.height, 'short titles give their unused space to the excerpt');
+const articleArea = books[0].props.children[0].props.children[1].props.style;
+assert.ok(shortTitle.props.style.lineHeight + excerptAfter.props.style.marginTop + excerptAfter.props.style.height <= articleArea.height - articleArea.paddingTop);
+const measuredUpdates = layout.calls.updates;
+shortTitle.props.onLayout({nativeEvent: {layout: {height: shortTitle.props.style.lineHeight + 0.1}}});
+for (const height of [0, -1, NaN, Infinity, 1000]) shortTitle.props.onLayout({nativeEvent: {layout: {height}}});
+shortTitle.props.onLayout({});
+assert.equal(layout.calls.updates, measuredUpdates, 'unchanged or invalid layout events cannot trigger a redraw loop');
 const unsupported = {props: {style: [{}, {height: 'auto'}]}};
 assert.equal(layoutProps.rssHomeRender(unsupported), unsupported, 'unknown native dimensions keep the working fallback');
 action.props.onPress(999);
@@ -214,6 +239,28 @@ layout.message(snapshot('b', {feedCards: undefined}));
 const legacy = flatten(layout.render().rssHomeRender(originalCard));
 assert.equal(legacy.filter(node => node?.type === 'KindleButton' && node.props.testID.includes('_feed_')).length, 1);
 assert.ok(legacy.find(node => node?.type === 'Text' && node.props.children[0] === 'RSS 阅读器'), 'older bridge retains a working aggregate reader card');
+layout.message(snapshot('d', {feedCards: [{id: 7, title: '博客甲', unread: 1, latestTitle: '替换为一篇新的长标题', entryId: 43, excerpt: '新的摘录'}]}));
+const replaced = flatten(layout.render().rssHomeRender(originalCard));
+assert.equal(excerptArea(replaced).props.style.height, excerptBefore.props.style.height, 'a new title does not reuse a previous title measurement');
+layout.message(snapshot('e', {feedCards: [{id: 7, title: '旧后台', unread: 1, latestTitle: '已有文章', entryId: 42}]}));
+const oldBridge = flatten(layout.render().rssHomeRender(originalCard));
+assert.ok(visibleText(oldBridge).includes('打开文章，继续阅读'));
+assert.ok(oldBridge.find(node => node?.type === 'Text' && node.props.children[0] === ''), 'missing publication date stays blank');
+layout.message(snapshot('f', {feedCards: [{id: 7, title: '博客甲', unread: 1, latestTitle: '【每周一书】掌控习惯', entryId: 42}]}));
+const columnTitle = flatten(layout.render().rssHomeRender(originalCard));
+assert.ok(columnTitle.find(node => node?.type === 'Text' && node.props.children[0] === '【每周一书】\n掌控习惯'), 'column prefix wraps as a complete phrase');
+assert.ok(columnTitle.find(node => node?.type === 'KindleButton' && node.props.accessibilityLabel.includes('【每周一书】掌控习惯')), 'spoken title and entry action preserve the original article');
+layout.message(snapshot('a', {feedCards: [{id: 7, title: '博客甲', unread: 1, latestTitle: '排版测试', entryId: 42,
+    excerpt: '一二三四五六七八，九十。English words stay intact.'}]}));
+const wrapped = flatten(layout.render().rssHomeRender(originalCard));
+const wrappedRows = flatten(excerptArea(wrapped)).filter(node => node?.type === 'Text').map(node => node.props.children[0]);
+assert.ok(wrappedRows.length >= 2);
+assert.ok(wrappedRows.every(row => !/^[，。！？；：、）》】]/u.test(row)), 'closing punctuation never starts a wrapped row');
+assert.ok(wrappedRows.join('').startsWith('一二三四五六七八，九十。'), 'wrapping does not lose or duplicate characters');
+layout.message(snapshot('b', {feedCards: [{id: 7, title: '博客甲', unread: 1, latestTitle: '排版测试', entryId: 42,
+    excerpt: '书籍：《掌控习惯》 《掌控习惯》是一本书。'}]}));
+const bookExcerpt = visibleText(flatten(excerptArea(flatten(layout.render().rssHomeRender(originalCard)))));
+assert.ok(bookExcerpt.startsWith('《掌控习惯》是一本书。'), 'only the repeated opening book label is removed');
 layout.message(snapshot('c', {status: 'empty', items: [], unread: 0, feedCards: [{id: 10, title: '空订阅', unread: 0, latestTitle: ''}]}));
 const emptyShelf = flatten(layout.render().rssHomeRender(originalCard));
 assert.ok(emptyShelf.find(node => node?.type === 'Text' && node.props.children[0] === '空订阅'));
