@@ -12,6 +12,30 @@ import build_reader
 
 
 class ReaderBuildTests(unittest.TestCase):
+    def test_gitlab_source_and_integration_patch_are_pinned(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            original = 'set(path "${CMAKE_SOURCE_DIR}/${CMAKE_BINARY_DIR}")\n'
+            modified = original.replace("CMAKE_SOURCE_DIR", "PROJECT_SOURCE_DIR").replace("CMAKE_BINARY_DIR", "PROJECT_BINARY_DIR")
+            item = {"repo": "coolreader-ng/crengine-ng", "revision": "pinned", "url": "https://gitlab.com/source.tar.gz", "sha256": "archive",
+                    "cmake_sha256": hashlib.sha256(original.encode()).hexdigest(),
+                    "patched_cmake_sha256": hashlib.sha256(modified.encode()).hexdigest()}
+            tree = root / "source"
+            def extract(_archive, destination):
+                destination.mkdir(exist_ok=True)
+                (destination / "CMakeLists.txt").write_text(original)
+            with patch.object(build_reader, "sources", return_value={"cre": item}), \
+                    patch.object(build_reader, "source_path", return_value=tree), \
+                    patch.object(build_reader.arm, "download", return_value=root / "archive") as download, \
+                    patch.object(build_reader.arm, "extract", side_effect=extract):
+                build_reader.prepare_sources(("cre",))
+                download.assert_called_with("reader-cre", {"url": item["url"], "sha256": "archive"})
+                self.assertEqual((tree / "CMakeLists.txt").read_text(), modified)
+                build_reader.prepare_sources(("cre",))
+                (tree / "CMakeLists.txt").write_text("unreviewed change")
+                with self.assertRaisesRegex(RuntimeError, "outside the pinned"):
+                    build_reader.prepare_sources(("cre",))
+
     def test_reader_configuration_is_part_of_artifact_identity(self):
         inputs = build_arm.build_inputs()
         for name in ("CMakeLists.txt", "tools/reader.cmake", "tools/reader-sources.json", "tools/build_reader.py"):

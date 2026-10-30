@@ -606,6 +606,16 @@ void App::settings_screen(){
     for(const auto& line:c_.wrap("退出阅读器返回 Kindle 首页后生效。\n\n关闭后收起 RSS 区域，订阅和阅读记录会保留。",28,w-64)){
         c_.text(32,y,line.text,28,85);y+=44;
     }
+    c_.rule(32,704,w-64,205);
+    c_.text(32,768,"关于与许可",32);
+    y=824;
+    for(const auto& line:c_.wrap(
+            "RSS Reader · © 2026 frevia 及贡献者\n"
+            "本安装程序按 GNU GPLv3 发布，允许依照许可复制、修改和再分发，不提供任何担保。\n"
+            "完整条款：Kindle 磁盘 native-rss/COPYING；第三方许可见 native-rss/licenses。\n"
+            "对应源码与构建说明：\ngithub.com/frevia/kindle-rss-reader/releases",24,w-64)){
+        c_.text(32,y,line.text,24,85);y+=40;
+    }
 }
 void App::nav_screen(){
     const bool groups=screen_==Screen::Groups;const int w=c_.width,h=c_.height;

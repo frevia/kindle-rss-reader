@@ -1,8 +1,13 @@
 {
   "cre": {
-    "repo": "koreader/crengine",
-    "revision": "f335f7a97e240f505bb8a0dfb721fcb7912a7824",
-    "sha256": "ed485ef96d971667c3bf688f8d73a12c1a0684c06629dd1dad1b93ea7de78900"
+    "repo": "coolreader-ng/crengine-ng",
+    "version": "0.9.13",
+    "revision": "ef51353d6afecc924b639ed9c8c57c5b5faa6e5d",
+    "url": "https://gitlab.com/coolreader-ng/crengine-ng/-/archive/ef51353d6afecc924b639ed9c8c57c5b5faa6e5d/crengine-ng-ef51353d6afecc924b639ed9c8c57c5b5faa6e5d.tar.gz",
+    "sha256": "3327a1940978b275455cd7075008b81cfe8f301684117b6ee8ef8c39a6bb5afe",
+    "license": "GPL-2.0-or-later",
+    "cmake_sha256": "8e397ba755e7d39b7b40b3a4c6f0eef8002f2feee6beff9098a0359c0481a064",
+    "patched_cmake_sha256": "126ae5f2e0eb3a64440d30a0b8b8e0d1a2fa9bc3ab1ab711876014bbfb97ae85"
   },
   "xxhash": {
     "repo": "Cyan4973/xxHash",

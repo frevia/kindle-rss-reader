@@ -17,7 +17,7 @@ class PackageTests(unittest.TestCase):
     def test_sources_include_project_license_but_exclude_private_artifacts(self):
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder)/"native-rss";root.mkdir()
-            public=("LICENSE","README.md","CONTRIBUTING.md","SECURITY.md","THIRD_PARTY_NOTICES.md","CHANGELOG.md",".github/workflows/release.yml")
+            public=("LICENSE","COPYING","README.md","CONTRIBUTING.md","SECURITY.md","THIRD_PARTY_NOTICES.md","CHANGELOG.md",".github/workflows/release.yml")
             for name in public:
                 path=root.parent/name;path.parent.mkdir(parents=True,exist_ok=True);path.write_text(name)
             included=("src/main.cpp","tests/fixtures/colors.png","docs/INSTALL.md","device/INSTALL.txt","device/launch.sh",

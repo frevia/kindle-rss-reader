@@ -45,7 +45,7 @@ Apple Silicon macOS 上的依赖构建脚本为 `tools/build_arm.py`，依赖版
 rtk proxy python3 native-rss/tools/build_arm.py
 ```
 
-`build_arm.py` 在基础依赖之后调用 `build_reader.py` 的同一构建流程，默认链接固定版本的 CREngine；`BUILD.json` 同时记录引擎提交和包含构建脚本/CMake/依赖锁的输入指纹。
+`build_arm.py` 在基础依赖之后调用 `build_reader.py` 的同一构建流程，默认链接固定版本的 CREngine-ng；`BUILD.json` 同时记录引擎提交和包含构建脚本/CMake/依赖锁的输入指纹。
 
 产物为 `build-arm/kindle-rss`，目标 ARMv7 Cortex-A9、EABI5 soft-float、静态链接。脚本检查 ELF 类型、浮点 ABI、程序段边界及动态链接段；这些检查不证明旧内核兼容性。已在 KPW3 5.16.2.1.1 运行并验证图文渲染。设备端 `device` 运行循环与 `device/launch.sh` 会话启动器已接通；不要绕过启动器的入口检查。KUAL 入口位于 `device/kual/`，仍非完成验收的安装包。
 
@@ -59,20 +59,17 @@ rtk proxy python3 native-rss/tools/package.py
 
 需要先完成 ARM 构建。工具验证源码及二进制哈希，拒绝过期产物；缺少运行资源时按 `tools/runtime-sources.json` 下载并验证。输出 `output/kindle-rss-kpw3-dev.zip` 和 `output/kindle-rss-source-dev.zip`，不自动安装。包含 Noto Sans SC（OFL 1.1）、Mozilla 根证书（MPL 2.0）、KUAL 入口、第三方许可、安装说明和逐文件 SHA-256 清单。程序使用未修改的可变字体，设置字重为 400。
 
-当前含 CREngine 的组合二进制只作为本地开发包：上游标注 GPLv2，现有 OpenSSL 和词库含 Apache-2.0 组件，许可兼容尚未确认。安装清单明确记录 `public_release_ready=false`，`release.py` 在生成版本附件前拒绝此类包；不能把此组合产物直接按 MIT 公开分发。
+组合阅读程序选择 GPLv3 分发，原始源码保留 MIT；CREngine-ng 的固定版本及上游许可声明必须与已核对的来源记录一致。`release.py` 同时验证许可、构建输入、安装文件、项目源码和第三方对应源码，任何一项缺失或不匹配都会拒绝发布。详见[许可与源码核对](RELEASE_LICENSE_AUDIT.md)。
 
 项目自身的 MIT 许可与第三方组件汇总同时放入安装包；源码包还包含仓库首页、贡献指南、安全反馈和同一组第三方许可。源码按文件类型白名单收集，诊断 TXT、日志、数据库与 OPML 不属于打包输入。发布前仍需核对实际 ZIP 内容，不能只依赖 `.gitignore`。
 
 ## GitHub Release
 
-当前源码版本为 v0.0.3，发布说明见 [v0.0.3](RELEASE-v0.0.3.md)。CREngine 组合包尚不允许公开发布，版本附件整理和自动发布流程会拒绝 `public_release_ready` 未明确为 true 的安装包。可以更新版本号及建立不带附件的 Release 草稿，但不得据此视为已发布；解决组合许可及对应源码分发要求后，再生成正式附件、推送标签和发布。
+当前版本说明见 [v0.0.3](RELEASE-v0.0.3.md)。更新 CMake、KUAL 版本号及对应发布文档后提交，再推送 `v数字.数字.数字` 标签，触发[发布工作流](../../.github/workflows/release.yml)。安装文档始终链接最新版。
 
-若已建立同名草稿，正式推送标签前先删除该草稿（不要删除已有标签），由下面的工作流重新创建并上传验证后的附件。当前工作流使用 `gh release create`，不会复用同名草稿。
+工作流使用 Apple Silicon macOS runner、固定 Zig 哈希，运行宿主 CTest、重编译 ARM，再运行 `tools/release.py`。后者生成安装包、项目源码、第三方对应源码和 `SHA256SUMS.txt`。第三方归档按构建锁验证，项目源码必须与二进制的构建输入一致；仅修改 `public_release_ready` 布尔值无法通过检查。
 
-
-[发布工作流](../../.github/workflows/release.yml) 在推送 `v数字.数字.数字` 标签时运行，也可在标签引用上手动重跑。发布前更新 CMake 与 KUAL 版本号，以及根目录 `CHANGELOG.md`，再提交并推送标签。安装与使用文档始终指向最新版，无需随应用版本改写。工作流使用 Apple Silicon macOS runner，校验固定 Zig 下载哈希，运行宿主 CTest，重新编译 ARM，再调用 `tools/release.py` 整理附件。
-
-产物为文件名以 `-KPW3.zip`、`-source.zip` 结尾的两个压缩包，以及 `SHA256SUMS.txt`；完整文件名由标签自动生成。工作流核对安装清单、二进制、许可和文件哈希后，上传草稿并发布；任何前置步骤失败都不会发布 Release。此过程不改变仓库可见性，也不部署 Kindle。GitHub 编译产物仍需另行实机验证。
+通过检查后创建或更新同名 Release 草稿，上传四个附件；已公开的版本不会被覆盖。发布说明由 `tools/release_notes.py` 读取对应版本文档并将相对链接转换为固定提交链接。下载附件、核对校验值并完成 KPW3 安装包验证后，再将草稿公开并标为最新版。工作流不会自动部署设备或提前公开附件。
 
 已发布附件若仅修订文档，需保留原程序、非文档源码和 `BUILD.json`，在 `native-rss/DOCUMENTATION.json` 中记录应用提交与文档修订提交，并重算安装清单及附件校验值。发布说明同时标注文档更新，不能把文档修订称为重新编译。GitHub 自动生成的源码归档仍对应原版本标签，后补的文档以自定义源码包及其文档修订记录为准。
 

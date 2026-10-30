@@ -61,7 +61,8 @@ def build_inputs() -> dict[str, str]:
     paths = [*sorted((ROOT / "src").glob("*.cpp")), *sorted((ROOT / "src").glob("*.hpp")),
              *sorted((ROOT / "third_party").rglob("*.h")), ROOT / "CMakeLists.txt",
              ROOT / "tools/arm-sources.json", ROOT / "tools/reader-sources.json",
-             ROOT / "tools/build_reader.py", ROOT / "tools/reader.cmake", Path(__file__).resolve()]
+             ROOT / "tools/build_reader.py", ROOT / "tools/reader.cmake", ROOT / "third_party/crengine/SOURCE.json",
+             ROOT / "third_party/crengine/README.md", ROOT / "third_party/crengine/LICENSE", Path(__file__).resolve()]
     return {str(path.relative_to(ROOT)): sha256(path) for path in paths}
 
 
@@ -351,7 +352,8 @@ def main() -> int:
         "-DWEBP_BUILD_DWEBP=OFF", "-DWEBP_BUILD_GIF2WEBP=OFF", "-DWEBP_BUILD_IMG2WEBP=OFF",
         "-DWEBP_BUILD_VWEBP=OFF", "-DWEBP_BUILD_WEBPINFO=OFF", "-DWEBP_BUILD_WEBPMUX=OFF",
         "-DWEBP_BUILD_EXTRAS=OFF", "-DWEBP_USE_THREAD=OFF", "-DWEBP_ENABLE_SIMD=OFF"], env)
-    from build_reader import build_app, sources as reader_sources
+    from build_reader import build_app, verify_reader_license
+    reader = verify_reader_license()
     binary = BUILD / "kindle-rss"
     compiled = build_app("arm", BUILD / "app", PREFIX, toolchain)
     shutil.copy2(compiled, binary)
@@ -367,8 +369,7 @@ def main() -> int:
         "target": TARGET, "cpu": CPU, "zig": "0.15.2", "binary_sha256": sha256(binary),
         "home_bridge_sha256": sha256(home_binary),
         "inputs": inputs, "device_tested": False,
-        "reader": {"name": "crengine", "revision": reader_sources()["cre"]["revision"],
-                   "public_release_ready": False},
+        "reader": reader,
     }, indent=2) + "\n")
     return 0
 

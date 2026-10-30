@@ -41,6 +41,7 @@ def source_files(root):
         "home/*.js", "home/*.json", "third_party/hbc84/*.json",
         "device/INSTALL.txt", "device/kual/*.xml", "device/kual/*.json", "docs/*.md",
         "third_party/*/LICENSE", "third_party/*/SOURCE.json", "third_party/*/*.h", "third_party/*/*.yaml",
+        "third_party/crengine/README.md", "third_party/crengine/AUTHORS",
         "experiments/cre-reader/*.cpp", "experiments/cre-reader/*.py", "experiments/cre-reader/*.cmake",
         "experiments/cre-reader/CMakeLists.txt", "experiments/cre-reader/README.txt",
         "README.md", "CMakeLists.txt", ".gitignore",
@@ -50,7 +51,7 @@ def source_files(root):
             if path.is_symlink():
                 raise RuntimeError(f"拒绝打包符号链接：{path}")
             files["native-rss/" + str(path.relative_to(root))] = (path.read_bytes(), path.suffix == ".sh")
-    for name in ("LICENSE", "README.md", "CONTRIBUTING.md", "SECURITY.md", "THIRD_PARTY_NOTICES.md", "CHANGELOG.md", ".github/workflows/release.yml"):
+    for name in ("LICENSE", "COPYING", "README.md", "CONTRIBUTING.md", "SECURITY.md", "THIRD_PARTY_NOTICES.md", "CHANGELOG.md", ".github/workflows/release.yml"):
         path = root.parent / name
         if path.is_symlink():
             raise RuntimeError(f"拒绝打包符号链接：{path}")
@@ -102,8 +103,8 @@ def main():
     if manifest.get("home_bridge_sha256") != sha256(home_binary):
         raise RuntimeError("首页后台组件与构建清单不一致，请重新构建")
     reader = manifest.get("reader", {})
-    if reader.get("name") != "crengine" or reader.get("revision") != build_reader.sources()["cre"]["revision"]:
-        raise RuntimeError("当前安装包要求正式构建的固定版本 CREngine，请重新运行 tools/build_arm.py")
+    if reader != build_reader.verify_reader_license():
+        raise RuntimeError("当前安装包要求正式构建的固定版本 CREngine-ng，请重新运行 tools/build_arm.py")
     runtime = json.loads((ROOT / "tools/runtime-sources.json").read_text())
     for name, spec in runtime.items():
         path = VENDOR / "runtime" / name
@@ -143,6 +144,7 @@ def main():
     add("native-rss/INSTALL.txt", ROOT / "device/INSTALL.txt")
     add("native-rss/README.md", ROOT / "README.md")
     add("native-rss/LICENSE", ROOT.parent / "LICENSE")
+    add("native-rss/COPYING", ROOT.parent / "COPYING")
     add("native-rss/THIRD_PARTY_NOTICES.md", ROOT.parent / "THIRD_PARTY_NOTICES.md")
     for document in sorted((ROOT / "docs").iterdir()):
         if document.suffix != ".md":
@@ -177,8 +179,11 @@ def main():
         "libunwind.txt": VENDOR / "zig-aarch64-macos-0.15.2/lib/libunwind/LICENSE.TXT",
         "Zig.txt": VENDOR / "zig-aarch64-macos-0.15.2/LICENSE",
         "CREngine-GPL-2.0.txt": ROOT / "third_party/crengine/LICENSE",
-        "CREngine-README.txt": build_reader.source_path("cre") / "README.TXT",
-        "CREngine-qimagescale.txt": build_reader.source_path("cre") / "crengine/qimagescale/QIMAGETRANSFORM_LICENSE.txt",
+        "CREngine-README.txt": ROOT / "third_party/crengine/README.md",
+        "CREngine-AUTHORS.txt": ROOT / "third_party/crengine/AUTHORS",
+        "CREngine-qimagescale.txt": build_reader.source_path("cre") / "thirdparty/qimagescale/QIMAGETRANSFORM_LICENSE.txt",
+        "CREngine-qimagescale-header.txt": build_reader.source_path("cre") / "thirdparty/qimagescale/qimagescale.cpp",
+        "GPL-3.0.txt": ROOT.parent / "COPYING",
         "HarfBuzz.txt": build_reader.source_path("harfbuzz") / "COPYING",
         "libpng.txt": build_reader.source_path("png") / "LICENSE",
         "libunibreak.txt": build_reader.source_path("unibreak") / "LICENCE",
@@ -197,12 +202,13 @@ def main():
         b"The bundled Noto Sans SC font is unmodified and licensed under SIL OFL 1.1.\n"
         b"The unmodified Mozilla CA bundle is obtained from curl.se and is covered by MPL 2.0.\n"
         b"libavif, libaom, and libyuv are distributed under their included BSD licenses and patent notices.\n"
-        b"This local development executable includes CREngine (GPLv2), HarfBuzz, libpng, libunibreak and xxHash.\n"
+        b"The combined kindle-rss executable is distributed under GPL-3.0-only (see COPYING).\n"
+        b"It includes CREngine-ng (GPL-2.0-or-later), used under GPLv3, and its qimagescale component.\n"
         b"The MIT license applies to original RSS sources, not to the combined executable.\n"
-        b"Public redistribution is disabled pending review of the GPLv2/Apache-2.0 combination.\n", False)
+        b"The release provides project sources and a separate third-party corresponding-source archive.\n", False)
     checksums = {name: hashlib.sha256(data).hexdigest() for name, (data, _) in files.items()}
-    files["native-rss/MANIFEST.json"] = (json.dumps({"development_only": True, "device_tested": False,
-        "reader": reader, "home_adapter": {"included": bool(args.home_patch), "enabled_by_default": False}, "public_release_ready": False, "files": checksums}, indent=2).encode(), False)
+    files["native-rss/MANIFEST.json"] = (json.dumps({"development_only": False, "device_tested": False,
+        "reader": reader, "distribution_license": "GPL-3.0-only", "home_adapter": {"included": bool(args.home_patch), "enabled_by_default": False}, "public_release_ready": True, "files": checksums}, indent=2).encode(), False)
     output = ROOT / "output"
     output.mkdir(exist_ok=True)
     target = output / "kindle-rss-kpw3-dev.zip"

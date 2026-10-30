@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 from pathlib import Path
 import re
@@ -23,12 +24,34 @@ def source_path(name):
     return ROOT / "vendor/reader-sources" / (name + "-" + sources()[name]["revision"])
 
 
+def reader_identity():
+    item = sources()["cre"]
+    return {"name": "crengine-ng", "revision": item["revision"], "source_sha256": item["sha256"],
+            "license": item["license"], "distribution_license": "GPL-3.0-only"}
+
+
+def verify_reader_license():
+    """Require the reviewed provenance and unmodified upstream license notices."""
+    item = sources()["cre"]
+    provenance = json.loads((ROOT / "third_party/crengine/SOURCE.json").read_text())
+    if (any(provenance.get(key) != value for key, value in item.items()) or
+            item.get("repo") != "coolreader-ng/crengine-ng" or item.get("license") != "GPL-2.0-or-later" or
+            provenance.get("selected_binary_license") != "GPL-3.0-only"):
+        raise ValueError("阅读引擎来源与已核对的公开分发许可不一致")
+    for name, key in (("LICENSE", "license_sha256"), ("README.md", "readme_sha256")):
+        if arm.sha256(ROOT / "third_party/crengine" / name) != provenance.get(key):
+            raise ValueError("阅读引擎许可声明校验失败")
+    if arm.sha256(ROOT.parent / "COPYING") != "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986":
+        raise ValueError("缺少完整 GPLv3 分发条款")
+    return reader_identity()
+
+
 def prepare_sources(names):
     trees = {}
     for name in names:
         item = sources()[name]
         archive = arm.download("reader-" + name, {
-            "url": f"https://codeload.github.com/{item['repo']}/tar.gz/{item['revision']}",
+            "url": item.get("url") or f"https://codeload.github.com/{item['repo']}/tar.gz/{item['revision']}",
             "sha256": item["sha256"],
         })
         tree = source_path(name)
@@ -36,6 +59,19 @@ def prepare_sources(names):
         if not marker.is_file() or marker.read_text().strip() != item["sha256"]:
             arm.extract(archive, tree)
             marker.write_text(item["sha256"] + "\n")
+        if name == "cre" and "cmake_sha256" in item:
+            # Local integration patch: upstream assumes a top-level build.
+            # PROJECT_* remains correct when RSS adds the library as a subproject.
+            cmake = tree / "CMakeLists.txt"
+            text = cmake.read_text()
+            digest = hashlib.sha256(text.encode()).hexdigest()
+            if digest not in (item["cmake_sha256"], item["patched_cmake_sha256"]):
+                raise RuntimeError("CREngine-ng CMake source changed outside the pinned integration patch")
+            if digest == item["cmake_sha256"]:
+                text = text.replace("${CMAKE_SOURCE_DIR}", "${PROJECT_SOURCE_DIR}").replace("${CMAKE_BINARY_DIR}", "${PROJECT_BINARY_DIR}")
+                if hashlib.sha256(text.encode()).hexdigest() != item["patched_cmake_sha256"]:
+                    raise RuntimeError("CREngine-ng integration patch checksum mismatch")
+                cmake.write_text(text)
         trees[name] = tree
     return trees
 
@@ -107,6 +143,7 @@ def build_app(target, build, prefix, toolchain=None):
             arm.run(["cmake", "--build", str(folder), "--parallel", "6"], env=env)
             arm.run(["cmake", "--install", str(folder)], env=env)
     args = ["cmake", "-S", str(ROOT), "-B", str(build), "-DCMAKE_BUILD_TYPE=Release", "-DRSS_CRE=ON",
+            f"-DCMAKE_PREFIX_PATH={prefix}",
             f"-DRSS_CRE_SOURCE={trees['cre']}", "-DRSS_DESKTOP=" + ("ON" if target == "host" else "OFF"),
             "-DBUILD_TESTING=" + ("ON" if target == "host" else "OFF")]
     if toolchain:

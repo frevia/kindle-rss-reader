@@ -121,16 +121,24 @@ jobs:
           cd "native-rss/output/release-$RELEASE_TAG"
           shasum -a 256 --check SHA256SUMS.txt
 
-      - name: Publish release after all checks pass
+      - name: Upload verified assets to release draft
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           RELEASE_COMMIT: ${{ github.sha }}
         run: |
-          gh release create "$RELEASE_TAG" \
-            --verify-tag --target "$RELEASE_COMMIT" --draft \
-            --title "RSS Reader $RELEASE_TAG" --notes-file CHANGELOG.md \
+          python3 native-rss/tools/release_notes.py "$RELEASE_TAG" "$RELEASE_COMMIT" > "$RUNNER_TEMP/release-notes.md"
+          if gh release view "$RELEASE_TAG" --json isDraft > "$RUNNER_TEMP/release.json" 2>/dev/null; then
+            python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))["isDraft"] is True, "Refusing to overwrite a published release"' "$RUNNER_TEMP/release.json"
+            gh release edit "$RELEASE_TAG" --target "$RELEASE_COMMIT" \
+              --title "RSS Reader $RELEASE_TAG" --notes-file "$RUNNER_TEMP/release-notes.md"
+          else
+            gh release create "$RELEASE_TAG" --verify-tag --target "$RELEASE_COMMIT" --draft \
+              --title "RSS Reader $RELEASE_TAG" --notes-file "$RUNNER_TEMP/release-notes.md"
+          fi
+          gh release upload "$RELEASE_TAG" --clobber \
             "native-rss/output/release-$RELEASE_TAG/RSS-Reader-$RELEASE_TAG-KPW3.zip" \
             "native-rss/output/release-$RELEASE_TAG/RSS-Reader-$RELEASE_TAG-source.zip" \
+            "native-rss/output/release-$RELEASE_TAG/RSS-Reader-$RELEASE_TAG-third-party-sources.zip" \
             "native-rss/output/release-$RELEASE_TAG/SHA256SUMS.txt"
-          gh release edit "$RELEASE_TAG" --draft=false --latest
+          echo 'Draft ready. Verify the downloaded installation archive on KPW3 before publishing.' >> "$GITHUB_STEP_SUMMARY"

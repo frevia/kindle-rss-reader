@@ -8,7 +8,9 @@
 #ifdef RSS_CRE
 #include "lvdocview.h"
 #include "lvfntman.h"
-#include "hyphman.h"
+#include "crhyphman.h"
+#include "ldomdocument.h"
+#include "lvgraydrawbuf.h"
 #include <libxml/HTMLparser.h>
 #include <libxml/uri.h>
 #include <png.h>
@@ -61,7 +63,6 @@ struct FontEngine {
             ShutdownFontManager();
             throw std::runtime_error("新版排版无法读取正文字体");
         }
-        fontMan->RegularizeRegisteredFontsWeights();
         lString32Collection faces;
         fontMan->getFaceList(faces);
         if (!faces.length()) { ShutdownFontManager(); throw std::runtime_error("正文字体没有可用字形"); }
