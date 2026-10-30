@@ -65,7 +65,9 @@ rtk proxy python3 native-rss/tools/package.py
 
 ## GitHub Release
 
-当前开发分支的 CREngine 组合包尚不允许公开发布，版本附件整理和自动发布流程会拒绝 `public_release_ready` 未明确为 true 的安装包。本轮集成不升级版本号、不创建标签或 Release。下述为原有发布流程，解决组合许可后再恢复使用。
+当前源码版本为 v0.0.3，发布说明见 [v0.0.3](RELEASE-v0.0.3.md)。CREngine 组合包尚不允许公开发布，版本附件整理和自动发布流程会拒绝 `public_release_ready` 未明确为 true 的安装包。可以更新版本号及建立不带附件的 Release 草稿，但不得据此视为已发布；解决组合许可及对应源码分发要求后，再生成正式附件、推送标签和发布。
+
+若已建立同名草稿，正式推送标签前先删除该草稿（不要删除已有标签），由下面的工作流重新创建并上传验证后的附件。当前工作流使用 `gh release create`，不会复用同名草稿。
 
 
 [发布工作流](../../.github/workflows/release.yml) 在推送 `v数字.数字.数字` 标签时运行，也可在标签引用上手动重跑。发布前更新 CMake 与 KUAL 版本号，以及根目录 `CHANGELOG.md`，再提交并推送标签。安装与使用文档始终指向最新版，无需随应用版本改写。工作流使用 Apple Silicon macOS runner，校验固定 Zig 下载哈希，运行宿主 CTest，重新编译 ARM，再调用 `tools/release.py` 整理附件。
