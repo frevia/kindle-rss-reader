@@ -240,14 +240,14 @@ Snapshot read_snapshot(const std::string& path, const std::string& open_dir = {}
          schema_has(db, "entries", "id") && schema_has(db, "entries", "feed_id") && schema_has(db, "entries", "title") && schema_has(db, "entries", "read") && schema_has(db, "entries", "published");
     if (ok) ok = read_home_visible(db, s.enabled);
     if (ok) {
-        ok = query_one(db, "SELECT count(*) FROM entries WHERE read=0", s.unread) &&
+        ok = query_one(db, "SELECT count(*) FROM entries e JOIN feeds f ON f.id=e.feed_id WHERE f.active=1 AND e.read=0", s.unread) &&
              query_one(db, "SELECT count(*) FROM feeds WHERE active=1", s.feeds) &&
              query_one(db, "SELECT coalesce(max(synced_at),0) FROM feeds WHERE active=1", s.updated_at);
     }
     if (ok) {
         sqlite3_stmt* q = nullptr;
         const std::string sql = std::string("SELECT e.id,substr(e.title,1,192),substr(f.title,1,96) FROM entries e JOIN feeds f ON f.id=e.feed_id ") +
-            (s.unread ? "WHERE e.read=0 " : "") + "ORDER BY e.published DESC,e.id DESC LIMIT 2";
+            "WHERE f.active=1 " + (s.unread ? "AND e.read=0 " : "") + "ORDER BY e.published DESC,e.id DESC LIMIT 2";
         ok = sqlite3_prepare_v2(db, sql.c_str(), -1, &q, nullptr) == SQLITE_OK;
         if (ok) {
             int rc;

@@ -131,19 +131,21 @@ class HomeBridgeTest(unittest.TestCase):
 
     def test_summary_read_only_sorting_and_json_escaping(self):
         db = make_db(self.db_path)
+        db.execute("INSERT INTO entries VALUES(4,1,'older unread',0,5)")
+        db.commit()
         before = self.db_path.read_bytes()
         value = json.loads(self.run_summary())
         self.assertEqual((value["status"], value["unread"], value["feeds"], value["updatedAt"]), ("ready", 2, 1, 50))
-        self.assertEqual([x["id"] for x in value["items"]], [3, 2])
-        self.assertEqual(value["items"][0]["source"], "off")
-        self.assertEqual(value["items"][0]["title"], 'inactive "unread\\')
-        self.assertEqual(value["feedCards"], [{"id": 1, "title": 'F"eed\\', "unread": 1, "entryId": 2, "latestTitle": "unread-old", "excerpt": "", "published": 10}])
+        self.assertEqual([x["id"] for x in value["items"]], [2, 4])
+        self.assertEqual(value["items"][0]["source"], 'F"eed\\')
+        self.assertEqual(value["items"][0]["title"], "unread-old")
+        self.assertEqual(value["feedCards"], [{"id": 1, "title": 'F"eed\\', "unread": 2, "entryId": 2, "latestTitle": "unread-old", "excerpt": "", "published": 10}])
         self.assertEqual(self.db_path.read_bytes(), before)
         self.assertEqual(json.loads(self.run_summary())["revision"], value["revision"])
         canonical = dict(value); canonical.pop("revision")
         expected = hashlib.sha256(json.dumps(canonical, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
         self.assertEqual(value["revision"], expected)
-        self.assertEqual(db.execute("select count(*) from entries").fetchone()[0], 3)
+        self.assertEqual(db.execute("select count(*) from entries").fetchone()[0], 4)
 
     def test_home_visible_defaults_and_changes_read_only_summary_revision(self):
         db = make_db(self.db_path)
@@ -188,13 +190,13 @@ class HomeBridgeTest(unittest.TestCase):
 
     def test_unicode_codepoint_limit_invalid_utf8_and_controls(self):
         db = make_db(self.db_path)
-        db.execute("UPDATE entries SET title=? WHERE id=3", ("界" * 47 + "\n\"\\",))
+        db.execute("UPDATE entries SET title=? WHERE id=2", ("界" * 47 + "\n\"\\",))
         db.commit(); db.close()
         item = json.loads(self.run_summary())["items"][0]
         self.assertEqual(len(item["title"]), 48)
         self.assertEqual(item["title"][-1], " ")
         db = sqlite3.connect(self.db_path)
-        db.execute("UPDATE entries SET title=CAST(? AS TEXT) WHERE id=3", (sqlite3.Binary(b"bad\xff"),))
+        db.execute("UPDATE entries SET title=CAST(? AS TEXT) WHERE id=2", (sqlite3.Binary(b"bad\xff"),))
         db.commit(); db.close()
         item = json.loads(self.run_summary())["items"][0]
         self.assertEqual(item["title"], "bad\ufffd")
@@ -338,7 +340,7 @@ class HomeBridgeTest(unittest.TestCase):
         pushed = json.loads(payload)
         self.assertEqual([item["id"] for item in pushed["items"]], [item["id"] for item in initial["items"]])
         self.assertEqual([item["title"] for item in pushed["items"]], [item["title"] for item in initial["items"]])
-        self.assertEqual(pushed["items"][1]["source"], "pushed source only")
+        self.assertEqual(pushed["items"][0]["source"], "pushed source only")
         self.assertNotEqual(pushed["revision"], initial["revision"])
         self.assertEqual(pushed["feedCards"][0]["title"], "pushed source only")
         self.assertEqual(pushed["feedCards"][0]["latestTitle"], "changed newest")
@@ -391,6 +393,7 @@ class HomeBridgeTest(unittest.TestCase):
         db = make_db(self.db_path)
         db.execute("INSERT INTO feeds VALUES(3,'third',1,0)")
         db.execute("INSERT INTO entries VALUES(4,3,'old unread',0,1)")
+        db.execute("INSERT INTO entries VALUES(5,1,'second preview',0,9)")
         db.commit(); db.close()
         _, port = self.server()
         peer, original = self.ws(port)
@@ -409,7 +412,7 @@ class HomeBridgeTest(unittest.TestCase):
         p, port = self.server()
         try:
             s, value = self.ws(port)
-            self.assertEqual(value["items"][0]["id"], 3)
+            self.assertEqual(value["items"][0]["id"], 2)
             ack = json.dumps({"type": "rss-home-ack", "revision": value["revision"]}, separators=(",", ":")).encode()
             s.sendall(masked(1, ack))
             deadline = time.time() + 2
@@ -441,12 +444,58 @@ class HomeBridgeTest(unittest.TestCase):
         self.assertIn("ready=0", self.state_path.read_text())
 
     def test_single_unread_does_not_include_read_articles(self):
-        db = make_db(self.db_path)
-        db.execute("UPDATE entries SET read=1 WHERE id=3")
-        db.commit(); db.close()
+        make_db(self.db_path).close()
         value = json.loads(self.run_summary())
         self.assertEqual(value["unread"], 1)
         self.assertEqual([item["id"] for item in value["items"]], [2])
+
+    def test_unsubscribe_pushes_active_articles_only_and_preserves_starred(self):
+        db = make_db(self.db_path)
+        db.execute("ALTER TABLE entries ADD COLUMN starred INTEGER NOT NULL DEFAULT 0")
+        db.execute("UPDATE entries SET starred=1 WHERE id=2")
+        db.execute("INSERT INTO feeds VALUES(3,'remaining',1,0)")
+        db.execute("INSERT INTO entries VALUES(4,3,'remaining read article',1,5,0)")
+        db.commit(); db.close()
+        _, port = self.server()
+        peer, initial = self.ws(port)
+        self.assertEqual([card["id"] for card in initial["feedCards"]], [1, 3])
+
+        with open(self.lock_path, "w") as lockfile:
+            fcntl.flock(lockfile, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            db = sqlite3.connect(self.db_path)
+            with db:
+                db.execute("UPDATE feeds SET active=0 WHERE id=1")
+                db.execute("DELETE FROM entries WHERE feed_id=1 AND starred=0")
+            db.close()
+            peer.settimeout(2.4)
+            with self.assertRaises(socket.timeout):
+                read_frame(peer)
+            fcntl.flock(lockfile, fcntl.LOCK_UN)
+
+        peer.settimeout(4)
+        _, payload = read_frame(peer)
+        updated = json.loads(payload)
+        self.assertNotEqual(updated["revision"], initial["revision"])
+        self.assertEqual([card["id"] for card in updated["feedCards"]], [3])
+        self.assertEqual(updated["unread"], 0)
+        self.assertEqual([item["id"] for item in updated["items"]], [4])
+
+        db = sqlite3.connect(self.db_path)
+        with db:
+            db.execute("UPDATE feeds SET active=0 WHERE id=3")
+            db.execute("DELETE FROM entries WHERE feed_id=3 AND starred=0")
+        db.close()
+        _, payload = read_frame(peer)
+        empty = json.loads(payload)
+        self.assertNotEqual(empty["revision"], updated["revision"])
+        self.assertEqual((empty["status"], empty["feeds"], empty["unread"]), ("empty", 0, 0))
+        self.assertEqual(empty["items"], [])
+        self.assertEqual(empty["feedCards"], [])
+        peer.close()
+        db = sqlite3.connect(self.db_path)
+        self.assertEqual(db.execute("SELECT title,starred,read FROM entries WHERE id=2").fetchone(),
+                         ("unread-old", 1, 0))
+        db.close()
 
     def test_marking_selected_unread_read_falls_back_and_pushes(self):
         make_db(self.db_path).close()
@@ -613,7 +662,7 @@ class HomeBridgeTest(unittest.TestCase):
             s, _ = self.ws(port)
             writer = sqlite3.connect(self.db_path, timeout=1)
             writer.execute("BEGIN EXCLUSIVE")
-            writer.execute("UPDATE entries SET title='busy update' WHERE id=3")
+            writer.execute("UPDATE entries SET title='busy update' WHERE id=2")
             s.settimeout(2.4)
             with self.assertRaises(socket.timeout):
                 read_frame(s)
