@@ -23,6 +23,9 @@ int main() {
     rss::CreReader reader(store, font);
     reader.open(story, "https://fixture.invalid/article", "来源与日期", 944, 1196, 34, 24);
     assert(reader.page_count() > 3);
+    assert(reader.text_position(0)==0);
+    const auto middle_position=reader.text_position(2);
+    assert(middle_position>0&&reader.page_for_text_position(middle_position)==2);
     const auto anchor = reader.anchor(2);
     assert(reader.restore(anchor) == 2);
     reader.layout(880, 1196, 42, 24);
@@ -66,6 +69,58 @@ int main() {
     const auto safe_pixels = canvas.pixels;
     canvas.clear();expected.draw(canvas, 0, 64, 148, 1344);
     assert(canvas.pixels == safe_pixels);
+
+    rss::Entry bilingual;
+    bilingual.reading_mode = rss::ReadingMode::Bilingual;
+    bilingual.title = "A Short English Title\n简短的中文标题";
+    bilingual.html = "<p><span class='rss-original'>A short English sentence with <a href='https://fixture.invalid/'>a link</a>.</span><br class='rss-pair-break'/>"
+        "<span class='rss-translation'>这是一句中文译文，链接只保留在英文原文一侧。</span><span>无效类</span></p>"
+        "<h2>小标题</h2><p><strong>中文强调文字</strong>，后面还有一小段正文。</p>";
+    bilingual.text = rss::html_to_text(bilingual.html);
+    auto unstyled = bilingual;
+    unstyled.html = "<p><span>A short English sentence with <a>a link</a>.</span><br class='rss-pair-break'/>"
+        "<span>这是一句中文译文，链接只保留在英文原文一侧。</span><span>无效类</span></p>"
+        "<h2>小标题</h2><p><strong>中文强调文字</strong>，后面还有一小段正文。</p>";
+    unstyled.text = rss::html_to_text(unstyled.html);
+    rss::CreReader paired(store,font), plain_pair(store,font);
+    paired.open(bilingual,"https://fixture.invalid/article","metadata",944,1196,34,24);
+    assert(paired.text_position(0)==0);
+    plain_pair.open(unstyled,"https://fixture.invalid/article","metadata",944,1196,34,24);
+    canvas.clear();paired.draw(canvas,0,64,148,1344);const auto paired_pixels=canvas.pixels;
+    paired.layout(944,1196,34,16);
+    canvas.clear();paired.draw(canvas,0,64,148,1344);
+    assert(canvas.pixels!=paired_pixels); // The bilingual view still responds to the user's line spacing.
+    paired.layout(944,1196,34,24);
+    canvas.clear();plain_pair.draw(canvas,0,64,148,1344);
+    assert(canvas.pixels!=paired_pixels); // Controlled span classes change visible bilingual typography.
+    if(const auto dir=std::getenv("RSS_TEST_SNAPSHOTS")) {
+        std::filesystem::create_directories(dir);
+        canvas.clear();paired.draw(canvas,0,64,148,1344);
+        canvas.write_pgm((std::filesystem::path(dir)/"cre-reader-bilingual.pgm").string());
+    }
+    auto styled_hostile=bilingual;
+    styled_hostile.html="<p style='color:red'><span class='rss-original' style='color:black'>A short English sentence with <a href='javascript:bad()'>a link</a>.</span><br class='rss-pair-break'/>"
+        "<span class='rss-translation' onclick='bad()'>这是一句中文译文，链接只保留在英文原文一侧。</span><span class='unknown' style='display:none'>无效类</span></p>"
+        "<h2>小标题</h2><p><strong>中文强调文字</strong>，后面还有一小段正文。</p>";
+    styled_hostile.text=bilingual.text;
+    rss::CreReader filtered_pair(store,font);
+    filtered_pair.open(styled_hostile,"https://fixture.invalid/article","metadata",944,1196,34,24);
+    canvas.clear();filtered_pair.draw(canvas,0,64,148,1344);
+    assert(canvas.pixels==paired_pixels); // Only the two controlled span classes survive sanitization.
+    assert(filtered_pair.anchor(0)==paired.anchor(0));
+
+    rss::Entry translated=bilingual;
+    translated.reading_mode=rss::ReadingMode::Translated;
+    translated.title="简短的中文标题";
+    translated.html="<p>这是完整段落中文。</p><h2>小标题</h2><p>中文强调文字，后面还有一小段正文。</p>";
+    translated.text=rss::html_to_text(translated.html);
+    rss::CreReader chinese(store,font);
+    chinese.open(translated,"https://fixture.invalid/article","metadata",944,1196,34,24);
+    assert(chinese.text_position(0)==0);
+    if(const auto dir=std::getenv("RSS_TEST_SNAPSHOTS")) {
+        canvas.clear();chinese.draw(canvas,0,64,148,1344);
+        canvas.write_pgm((std::filesystem::path(dir)/"cre-reader-translated.pgm").string());
+    }
 
     rss::Feed feed;feed.url = "https://fixture.invalid/feed";
     const auto fid = store.add_feed(feed);

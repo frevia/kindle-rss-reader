@@ -11,6 +11,42 @@ int main() {
     std::string font=std::getenv("RSS_FONT")?std::getenv("RSS_FONT"):"/System/Library/Fonts/STHeiti Light.ttc";
     if(!std::filesystem::exists(font))font="/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf";
     Canvas canvas(1072,1448,font);
+    for(const auto* engine:{"classic","cre"})for(bool web:{false,true}) {
+        if(std::string(engine)=="cre"&&!CreReader::available())continue;
+        Store store(":memory:");store.set_setting("reader_engine",engine);
+        Feed feed;feed.url="https://example.invalid/feed";feed.title="阅读位置回归测试";feed.group="测试";const auto fid=store.add_feed(feed);
+        Entry source;source.guid="first-page";source.title="A quiet reader";source.author="Test Author";
+        source.url="https://example.invalid/story";source.published=1790985600;
+        for(int i=0;i<48;++i)source.html+="<p>Paragraph "+std::to_string(i)+". Good tools help us focus on reading and keep our place when switching between languages. A careful reader can return to the same passage after changing the display, even when the translated page has a different length.</p>";
+        source.text=html_to_text(source.html);ParsedFeed parsed;parsed.entries={source};store.save_entries(fid,parsed);
+        source=*store.entry(store.entries(View::All).front().id);const auto id=source.id;
+        if(web){store.queue_fulltext(id);store.save_fulltext(id,source);source=*store.fulltext_entry(id);}
+        const auto document=translation_document(source);
+        store.begin_translation(id,web,document.revision,document.blocks.size());
+        for(std::size_t i=0;i<document.blocks.size();++i)
+            store.save_translation_block(id,web,document.revision,i,i<document.title_blocks?"安静的阅读器":"好的工具帮助我们专注阅读，并在切换语言时保留阅读位置。读者切换显示方式后，仍可回到同一段落。 "+std::to_string(i));
+        store.set_translation_state(id,web,document.revision,"ready");
+        store.set_setting("reader_content:"+std::to_string(id),web?"web":"rss");
+        App app(store,canvas);app.open(id);assert(app.reading_mode()==ReadingMode::Original&&app.reader_page()==0);
+        const auto tap=[&](int x,int y){app.draw();app.tap(x,y);};
+        const auto open_translation=[&]{tap(536,600);tap(536,1380);assert(app.reader_panel()==App::ReaderPanel::Translation);};
+        open_translation();tap(530,1040);assert(app.reading_mode()==ReadingMode::Translated&&app.reader_page()==0);
+        tap(850,1040);assert(app.reading_mode()==ReadingMode::Bilingual&&app.reader_page()==0);
+        tap(170,1040);assert(app.reading_mode()==ReadingMode::Original&&app.reader_page()==0);
+        for(const auto [x,mode]:{std::pair{530,ReadingMode::Translated},std::pair{850,ReadingMode::Bilingual}}) {
+            tap(x,1040);assert(app.reading_mode()==mode&&app.reader_page()==0);
+            app.back();app.back();app.next();assert(app.reader_page()>0);app.previous();assert(app.reader_page()==0);
+            app.back();
+            App reopened_mode(store,canvas);reopened_mode.open(id);
+            assert(reopened_mode.reading_mode()==mode&&reopened_mode.reader_page()==0);
+            app.open(id);
+            open_translation();
+        }
+        tap(170,1040);assert(app.reading_mode()==ReadingMode::Original&&app.reader_page()==0);
+        app.back();app.back();app.back();
+        App reopened(store,canvas);reopened.open(id);
+        assert(reopened.reading_mode()==ReadingMode::Original&&reopened.reader_page()==0);
+    }
     for(const auto* engine:{"classic","cre"}) {
         if(std::string(engine)=="cre"&&!CreReader::available())continue;
         Store store(":memory:");store.set_setting("reader_engine",engine);
@@ -24,7 +60,24 @@ int main() {
         const auto original_page=app.reader_page();const auto original_position=store.entry(id)->position;
         const auto original_anchor=store.setting("reader_cre:"+std::to_string(id));
         const auto tap=[&](int x,int y){app.draw();app.tap(x,y);};
-        tap(536,600);tap(400,1380);tap(850,920);assert(app.reader_panel()==App::ReaderPanel::Translation);
+        const auto snapshot=[&](const std::string& name){
+            if(const auto path=std::getenv("RSS_TEST_SNAPSHOTS")) {
+                std::filesystem::create_directories(path);app.draw();
+                canvas.write_pgm((std::filesystem::path(path)/(name+"-"+engine+".pgm")).string());
+            }
+        };
+        tap(536,600);tap(536,1380);assert(app.reader_panel()==App::ReaderPanel::Translation);
+        assert(app.take_request().empty()&&app.reading_mode()==ReadingMode::Original);
+        tap(536,1380);assert(app.reader_panel()==App::ReaderPanel::None);
+        tap(536,1380);assert(app.reader_panel()==App::ReaderPanel::Translation);
+        tap(530,1040);assert(app.reading_mode()==ReadingMode::Original&&app.take_request().empty());
+        snapshot("translation-empty");
+        for(bool translating:{false,true}) {
+            app.sync_started(translating);tap(180,1296);
+            assert(app.take_request().empty()&&app.sync_state()==App::SyncState::Running);
+            snapshot(translating?"translation-other-article":"translation-waiting-sync");
+            app.sync_finished(true);
+        }
         app.draw();const auto unconfigured=canvas.pixels;
         tap(180,1296);assert(app.take_request()=="translate:rss:"+std::to_string(id));
         app.sync_finished(false,"请先在 translation.conf 中设置 RSS_QWEN_API_KEY");app.draw();
@@ -36,26 +89,39 @@ int main() {
         tap(180,1296);assert(app.take_request()=="translate:rss:"+std::to_string(id));
         tap(180,1296);assert(app.take_request()=="cancel-sync");app.sync_finished(true);
         store.begin_translation(id,false,document.revision,document.blocks.size());
-        for(std::size_t i=0;i<document.blocks.size();++i)store.save_translation_block(id,false,document.revision,i,i==0?"安静的阅读器":"第 "+std::to_string(i-1)+" 段：好的工具帮助我们专注阅读，并在切换语言时保留阅读位置。");
+        store.save_translation_block(id,false,document.revision,0,"安静的阅读器");
+        snapshot("translation-partial");
+        tap(180,1296);assert(app.take_request()=="translate:rss:"+std::to_string(id));
+        app.sync_progress(1,81,0,"已保存第 1 段");snapshot("translation-running");
+        tap(536,600);assert(app.reader_panel()==App::ReaderPanel::None&&app.sync_state()==App::SyncState::Running&&app.take_request().empty());
+        tap(536,600);tap(536,1380);
+        tap(180,1296);assert(app.take_request()=="cancel-sync");app.sync_finished(true);
+        for(std::size_t i=1;i<document.blocks.size();++i)store.save_translation_block(id,false,document.revision,i,"第 "+std::to_string(i-1)+" 段：好的工具帮助我们专注阅读，并在切换语言时保留阅读位置。");
         store.set_translation_state(id,false,document.revision,"ready");
         app.sync_started(true);app.sync_progress(81,81,0,"翻译已保存");app.sync_finished(false);
         assert(app.reading_mode()==ReadingMode::Original&&app.reader_page()==original_page);
-        tap(850,860);assert(app.reading_mode()==ReadingMode::Bilingual&&app.reader_page()>0);
+        tap(850,1040);assert(app.reading_mode()==ReadingMode::Bilingual&&app.reader_page()>0);
         assert(store.entry(id)->position==original_position&&store.setting("reader_cre:"+std::to_string(id))==original_anchor);
         if(const auto path=std::getenv("RSS_TEST_SNAPSHOTS")) {
             std::filesystem::create_directories(path);app.draw();canvas.write_pgm((std::filesystem::path(path)/(std::string("translation-panel-")+engine+".pgm")).string());
             app.back();app.back();app.draw();canvas.write_pgm((std::filesystem::path(path)/(std::string("bilingual-reading-")+engine+".pgm")).string());
-            tap(536,600);tap(400,1380);tap(850,920);
+            tap(536,600);tap(536,1380);
         }
-        tap(530,860);assert(app.reading_mode()==ReadingMode::Translated);
-        tap(170,860);assert(app.reading_mode()==ReadingMode::Original&&app.reader_page()>0);
-        tap(850,860);assert(app.reading_mode()==ReadingMode::Bilingual);
-        app.back();app.back();app.next();const auto bilingual_page=app.reader_page();
+        tap(530,1040);assert(app.reading_mode()==ReadingMode::Translated);
+        tap(170,1040);assert(app.reading_mode()==ReadingMode::Original&&app.reader_page()>0);
+        tap(850,1040);assert(app.reading_mode()==ReadingMode::Bilingual);
+        app.sync_started();
+        tap(180,1296);assert(app.reading()&&app.reader_panel()==App::ReaderPanel::None&&app.take_request().empty());
+        assert(app.sync_state()==App::SyncState::Running);app.sync_finished(true);
+        app.next();const auto bilingual_page=app.reader_page();
         app.back();assert(!app.reading());
         App reopened(store,canvas);reopened.open(id);assert(reopened.reading_mode()==ReadingMode::Bilingual&&reopened.reader_page()==bilingual_page);
         source.html+="<p>New paragraph.</p>";source.text=html_to_text(source.html);parsed.entries={source};store.save_entries(fid,parsed);
         reopened.open(id);assert(reopened.reading_mode()==ReadingMode::Original);
         assert(store.translation_status(id,false,translation_revision(*store.entry(id))).state=="stale");
+        reopened.draw();reopened.tap(536,600);reopened.draw();reopened.tap(536,1380);
+        reopened.draw();reopened.tap(530,1040);assert(reopened.reading_mode()==ReadingMode::Original&&reopened.take_request().empty());
+        reopened.draw();reopened.tap(180,1296);assert(reopened.take_request()=="translate:rss:"+std::to_string(id));
 
         for(bool web:{false,true})for(const auto mode:{ReadingMode::Translated,ReadingMode::Bilingual}) {
             auto growing=source;growing.guid=std::string(web?"web-":"rss-")+(mode==ReadingMode::Bilingual?"dual":"translated");

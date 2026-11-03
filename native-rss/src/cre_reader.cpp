@@ -109,6 +109,7 @@ struct CreReader::Impl {
     std::filesystem::path directory;
     std::unique_ptr<LVDocView> view;
     std::string content_revision;
+    bool translated_mode = false;
     int width = 0, height = 0, size = 0, gap = 0;
     Impl() {
         const auto session = std::getenv("RSS_CRE_CACHE");
@@ -208,8 +209,11 @@ void CreReader::open(const Entry& entry, const std::string& base_url, const std:
                     const bool keep = allowed.count(tag)||(entry.reading_mode!=ReadingMode::Original&&tag=="span");
                     if (keep) {
                         body += "<" + tag;
-                        if(entry.reading_mode!=ReadingMode::Original&&tag=="span"&&xml_string(xmlGetProp(node,BAD_CAST "class"))=="rss-translation")
-                            body+=" class=\"rss-translation\"";
+                        if(entry.reading_mode!=ReadingMode::Original&&(tag=="span"||tag=="br")) {
+                            const auto kind=xml_string(xmlGetProp(node,BAD_CAST "class"));
+                            if((tag=="span"&&(kind=="rss-original"||kind=="rss-translation"))||(tag=="br"&&kind=="rss-pair-break"))
+                                body+=" class=\""+kind+"\"";
+                        }
                         body+=">";
                     }
                     walk(node->children, depth + 1);
@@ -221,10 +225,15 @@ void CreReader::open(const Entry& entry, const std::string& base_url, const std:
         walk(xmlDocGetRootElement(doc.get()), 0);
     }
     auto title=escape(entry.title);
-    if(entry.reading_mode==ReadingMode::Bilingual)for(std::size_t at=0;(at=title.find('\n',at))!=std::string::npos;at+=5)title.replace(at,1,"<br/>");
-    const auto document = "<!DOCTYPE html><html lang=\"zh-CN\"><head><meta charset=\"UTF-8\"/></head><body><h1 class=\"rss-title\">" +
+    if(entry.reading_mode==ReadingMode::Bilingual) {
+        const auto newline=entry.title.find('\n');
+        if(newline!=std::string::npos)title=escape(entry.title.substr(0,newline))+"<br/><span class=\"rss-title-translation\">"+escape(entry.title.substr(newline+1))+"</span>";
+    }
+    const auto body_class=entry.reading_mode==ReadingMode::Bilingual?" class=\"rss-bilingual\"":entry.reading_mode==ReadingMode::Translated?" class=\"rss-translated\"":"";
+    const auto document = "<!DOCTYPE html><html lang=\"zh-CN\"><head><meta charset=\"UTF-8\"/></head><body"+std::string(body_class)+"><h1 class=\"rss-title\">" +
         title + "</h1><p class=\"rss-meta\">" + escape(metadata) + "</p>" + body + "</body></html>";
     next->content_revision = revision(document);
+    next->translated_mode = entry.reading_mode!=ReadingMode::Original;
     write_file(next->directory / "article.html", document);
     auto& fonts = engine(font_);
     next->view = std::make_unique<LVDocView>(8, true);
@@ -256,6 +265,21 @@ void CreReader::layout(int width, int height, int font_size, int line_gap) {
     css << base_css << "body {line-height:" << (100.0 * (font_size + line_gap) / font_size) << "%;}"
         << "h1,.rss-title {font-size:" << (100.0*std::min(48,font_size+6)/font_size) << "%;}"
         << "h2 {font-size:" << (100.0*std::min(48,font_size+3)/font_size) << "%;}";
+    if(value.translated_mode) {
+        // Scoped to translated documents so Original keeps its existing CreEngine styles byte-for-byte.
+        css << "body.rss-bilingual,body.rss-translated {text-align:left;hyphens:none;}"
+            << "body.rss-bilingual h1,body.rss-bilingual h2,body.rss-bilingual h3,body.rss-bilingual h4,body.rss-bilingual h5,body.rss-bilingual h6,body.rss-translated h1,body.rss-translated h2,body.rss-translated h3,body.rss-translated h4,body.rss-translated h5,body.rss-translated h6 {font-weight:normal;}"
+            << "body.rss-bilingual strong,body.rss-bilingual b,body.rss-translated strong,body.rss-translated b {font-weight:normal;}"
+            << "body.rss-bilingual a,body.rss-translated a {text-decoration:none;}"
+            << "body.rss-bilingual .rss-original {display:block;font-size:90%;color:#555;line-height:150%;margin:0 0 .35em 0;padding:0;border:0;}"
+            << "body.rss-bilingual .rss-translation,body.rss-translated .rss-translation {display:block;font-size:100%;font-weight:normal;color:#000;line-height:160%;margin:0 0 .9em 0;padding:0;border:0;}"
+            << "body.rss-bilingual .rss-title-translation {display:block;font-size:90%;font-weight:normal;margin-top:.25em;}";
+        css << "body.rss-bilingual br.rss-pair-break {display:none;}"
+            << "body.rss-bilingual .rss-original {line-height:" << (93.75*(font_size+line_gap)/font_size) << "%;}"
+            << "body.rss-bilingual .rss-translation {line-height:" << (100.0*(font_size+line_gap)/font_size) << "%;}"
+            << "body.rss-translated p {margin-bottom:.8em;}"
+            << "body.rss-bilingual .rss-title,body.rss-translated .rss-title {font-size:115%;}";
+    }
     value.view->Resize(width, height);
     value.view->setFontSize(font_size);
     value.view->setStyleSheet(lString8(css.str().c_str()));
@@ -295,9 +319,13 @@ std::size_t CreReader::text_position(std::size_t page) {
     if(!impl_||page>=page_count())throw std::runtime_error("正文页码无效");
     impl_->view->goToPage(static_cast<int>(page));
     const auto bookmark=impl_->view->getBookmark();
+    auto stop=bookmark.getNode();
+    // A page can start inside the title, metadata or a missing-translation marker.
+    for(auto* parent=stop;parent;parent=parent->getParentNode())
+        if(skip_position_node(parent))stop=parent;
     std::size_t position=0;
     const auto walk=[&](auto&& self,ldomNode* node)->bool {
-        if(skip_position_node(node))return node==bookmark.getNode();
+        if(skip_position_node(node))return node==stop;
         if(node->isText()) {
             const auto text=node->getText();
             const auto end=node==bookmark.getNode()?std::clamp(bookmark.getOffset(),0,text.length()):text.length();

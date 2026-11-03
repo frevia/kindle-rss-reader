@@ -73,10 +73,17 @@ void validate_qwen_config(const QwenConfig& config) {
        (scheme!="https"&&!(scheme=="http"&&(host=="127.0.0.1"||host=="[::1]"))))
         throw std::runtime_error("翻译地址须为不含账号、查询参数和片段的 HTTPS 地址（本机回环地址可用 HTTP）");
 }
-std::string qwen_request(const std::string& text) {
+std::string qwen_request(const std::string& text,const std::vector<std::string>& protected_tokens) {
     if(text.empty()||text.size()>6000)throw std::runtime_error("翻译段落为空或超过请求上限");
+    std::string terms;
+    for(const auto& token:protected_tokens) {
+        if(token.empty()||text.find(token)==std::string::npos)throw std::runtime_error("翻译保护标记不在段落中");
+        if(!terms.empty())terms+=',';
+        terms+="{\"source\":"+json_string(token)+",\"target\":"+json_string(token)+"}";
+    }
     return "{\"model\":\"qwen-mt-flash\",\"messages\":[{\"role\":\"user\",\"content\":"+json_string(text)+"}],"
-        "\"translation_options\":{\"source_lang\":\"English\",\"target_lang\":\"Chinese\"},\"stream\":false,\"max_tokens\":8192}";
+        "\"translation_options\":{\"source_lang\":\"English\",\"target_lang\":\"Chinese\""+
+        (terms.empty()?"":",\"terms\":["+terms+"]")+"},\"stream\":false,\"max_tokens\":8192}";
 }
 std::string qwen_translation(const std::string& response) {
     if(response.size()>256*1024)throw std::runtime_error("翻译响应超过大小限制");

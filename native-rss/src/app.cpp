@@ -333,7 +333,7 @@ void App::open(std::int64_t id,bool track){
                 }
             }catch(const std::exception&){}
             *entry=std::move(displayed);version=next_version;
-        }else notify(status.state=="stale"?"原文已更新，请重新翻译；当前显示原文":"译文尚未缓存，当前显示原文");
+        }else notify(status.state=="stale"?"译文需要重新生成；当前显示原文":"译文尚未缓存，当前显示原文");
       }catch(const std::exception&){notify("译文缓存无法打开，已显示原文");}
     }
     if(entry->text.empty()&&entry->images.empty())throw std::runtime_error("这篇文章尚无可阅读的正文");
@@ -545,10 +545,11 @@ void App::close_reader_tools(){reader_panel_=ReaderPanel::None;reader_tools_=fal
 void App::reader_tools(){
     const int w=c_.width,h=c_.height,y=h-reader_bar_height;
     c_.fill({0,y,w,reader_bar_height},255);c_.rule(32,y,w-64,170);
-    const std::array<std::tuple<const char*,Icon,ReaderPanel>,4> tools{{
-        {"排版",Icon::None,ReaderPanel::Type},{"正文",Icon::Download,ReaderPanel::Content},{"图片",Icon::Image,ReaderPanel::Images},{"信息",Icon::Info,ReaderPanel::Info}}};
+    const std::array<std::tuple<const char*,Icon,ReaderPanel>,5> tools{{
+        {"排版",Icon::None,ReaderPanel::Type},{"正文",Icon::Download,ReaderPanel::Content},{"翻译",Icon::Book,ReaderPanel::Translation},{"图片",Icon::Image,ReaderPanel::Images},{"信息",Icon::Info,ReaderPanel::Info}}};
     for(std::size_t i=0;i<tools.size();++i){
-        const int tw=(w-64)/4,x=32+static_cast<int>(i)*tw;
+        const int x=32+static_cast<int>(i*(w-64)/tools.size());
+        const int tw=32+static_cast<int>((i+1)*(w-64)/tools.size())-x;
         const auto label=std::get<0>(tools[i]);const auto icon=std::get<1>(tools[i]);const auto panel=std::get<2>(tools[i]);
         const int left=x+(tw-108)/2;
         if(icon==Icon::None)c_.text(left,y+60,"Aa",32);
@@ -566,7 +567,7 @@ int App::reader_panel_height()const{
     if(reader_panel_==ReaderPanel::None)return 0;
     if(reader_panel_==ReaderPanel::Type)return 640;
     if(reader_panel_==ReaderPanel::Images)return image_zoom_?764:662;
-    if(reader_panel_==ReaderPanel::Translation)return 640;
+    if(reader_panel_==ReaderPanel::Translation)return 480;
     return reader_panel_==ReaderPanel::Info?600:560;
 }
 void App::reader_panel_screen(){
@@ -575,7 +576,7 @@ void App::reader_panel_screen(){
     const int y=h-bar-height;
     c_.fill({0,y,w,height},255);c_.rule(32,y,w-64,150);
     const auto close=[this]{reader_panel_=ReaderPanel::None;image_zoom_=false;typography_anchor_.reset();};
-    const char* title=reader_panel_==ReaderPanel::Type?"排版":reader_panel_==ReaderPanel::Images?"图片":reader_panel_==ReaderPanel::Content?"正文来源":reader_panel_==ReaderPanel::Translation?"翻译与双语":"文章信息";
+    const char* title=reader_panel_==ReaderPanel::Type?"排版":reader_panel_==ReaderPanel::Images?"图片":reader_panel_==ReaderPanel::Content?"正文来源":reader_panel_==ReaderPanel::Translation?"翻译":"文章信息";
     c_.text(32,y+54,title,32);
     button({w-184,y,152,88},"收起",close,false,28,Icon::Close,true,Align::Right);
     auto adjust=[this](int& value,int next,const std::string& key){
@@ -641,7 +642,6 @@ void App::reader_panel_screen(){
     }else if(reader_panel_==ReaderPanel::Content){
         const auto state=store_.fulltext_status(current_->id);
         c_.text(32,y+130,current_->web_content?"当前：网页正文":"当前：RSS 原文",28);
-        button({w-344,y+88,312,64},"翻译 / 双语",[this]{reader_panel_=ReaderPanel::Translation;},false,28,Icon::None,true,Align::Right);
         button({32,y+166,(w-80)/2,88},"RSS 原文",[this]{set_reader_content(false);},!current_->web_content,28);
         button({w/2+8,y+166,(w-80)/2,88},"网页正文",[this]{set_reader_content(true);},current_->web_content,28,Icon::None,state.state=="ready");
         std::string message;
@@ -660,37 +660,57 @@ void App::reader_panel_screen(){
             request_="fulltext:"+std::to_string(current_->id);sync_started();
         },false,28,running?Icon::Close:Icon::Download,running||(state.state!="ready"&&!current_->url.empty()),Align::Left);
     }else if(reader_panel_==ReaderPanel::Translation){
+        c_.text(132,y+54,"英文 → 简体中文",24,85);
         const auto source=current_->web_content?store_.fulltext_entry(current_->id):store_.entry(current_->id);
         if(!source){c_.text(32,y+150,"原文已不在缓存中",28,85);return;}
         if(source->html.size()>512*1024||source->text.size()>512*1024||source->title.size()>16384) {
             c_.text(32,y+150,"文章超过翻译大小限制，仍可阅读原文",28,85);return;
         }
         const auto state=store_.translation_status(current_->id,current_->web_content,translation_revision(*source));
+        c_.text(32,y+100,"阅读模式",24,85);
+        const auto context=current_->web_content?"网页正文":"RSS 内容 · 可能只有摘要";
+        c_.text(w-32-c_.measure(context,24),y+100,context,24,85);
         const int cell=(w-96)/3;
         for(int i=0;i<3;++i) {
             const auto mode=i==0?ReadingMode::Original:i==1?ReadingMode::Translated:ReadingMode::Bilingual;
-            button({32+i*(cell+16),y+100,cell,88},i==0?"原文":i==1?"译文":"双语",[this,mode]{set_reading_mode(mode);},
+            const Rect area{32+i*(cell+16),y+126,cell,80};frame(c_,area);
+            button(area,i==0?"原文":i==1?"译文":"双语",[this,mode]{set_reading_mode(mode);},
                    current_->reading_mode==mode,28,Icon::None,i==0||state.completed>0);
         }
-        c_.text(32,y+242,current_->web_content?"翻译来源：网页正文":"翻译来源：RSS 内容（可能为摘要）",28);
-        c_.text(32,y+294,"英文 → 简体中文 · 千问翻译",26,85);
-        std::string message=state.state=="ready"?"译文已完整保存，可离线切换三种阅读模式":
-            state.state=="stale"?"原文已更新，旧译文对应先前版本；请重新翻译":
-            state.state=="failed"?"翻译未完成："+state.error:
-            state.completed?"已有 "+std::to_string(state.completed)+" / "+std::to_string(state.total)+" 段；缺少译文的段落保留原文":
-            "首次翻译需联网，文章内容将提交给千问服务；译文保存后可离线阅读。";
-        if(sync_state_==SyncState::Running)message=translating_?sync_message_:"同步正在进行，请完成后再翻译";
-        else if(translating_&&sync_state_==SyncState::Failed&&translation_request_==std::string("translate:")+(current_->web_content?"web:":"rss:")+std::to_string(current_->id))
-            message=sync_message_;
-        int baseline=y+356;
-        for(const auto& line:c_.wrap(message,26,w-64)){if(baseline>y+height-134)break;c_.text(32,baseline,line.text,26,85);baseline+=38;}
+        const auto request=std::string("translate:")+(current_->web_content?"web:":"rss:")+std::to_string(current_->id);
         const bool running=sync_state_==SyncState::Running;
-        button({32,y+height-100,w-64,88},running?(translating_?"取消翻译":"等待同步完成"):state.state=="ready"?"译文已保存":state.completed?"继续翻译剩余段落":"翻译为中文",[this,running]{
-            if(running){request_="cancel-sync";return;}
+        const bool own_task=translating_&&translation_request_==request;
+        const bool working=running&&own_task,ready=state.state=="ready";
+        const bool failed=state.state=="failed"||(own_task&&sync_state_==SyncState::Failed);
+        const auto count=std::to_string(state.completed)+" / "+std::to_string(state.total)+" 段";
+        std::string heading="尚未翻译",message="联网使用千问翻译，文章内容将发送至千问；译文保存在本机。";
+        if(working){
+            heading=sync_total_>0?"正在翻译 · "+std::to_string(sync_completed_)+" / "+std::to_string(sync_total_)+" 段":"正在准备翻译";
+            message="可收起面板继续阅读，已完成的译文会自动保存。";
+        }else if(ready){heading="翻译完成 · "+count;message="译文已保存在本机，切换阅读模式无需再次翻译。";}
+        else if(running){heading="等待其他任务完成";message=translating_?"另一篇文章正在翻译，完成后可翻译本篇。":"订阅同步正在进行，完成后可翻译本篇。";}
+        else if(failed){heading="翻译未完成";message=own_task&&sync_state_==SyncState::Failed?sync_message_:state.error;}
+        else if(state.state=="stale"){heading="译文需要更新";message="原文或翻译版本已变化，请重新翻译；新译文保存后才会替换旧缓存。";}
+        else if(state.completed){heading="已翻译 · "+count;message="继续时复用已保存译文，未完成的段落暂时显示原文。";}
+        else if(own_task&&sync_state_==SyncState::Cancelled){heading="翻译已暂停";message="可继续翻译，已完成的译文会保留。";}
+        c_.text(32,y+250,c_.ellipsize(heading,28,w-64),28);
+        const auto lines=c_.wrap(message,24,w-64);
+        for(std::size_t i=0;i<std::min<std::size_t>(3,lines.size());++i)
+            c_.text(32,y+286+static_cast<int>(i)*32,i==2&&lines.size()>3?c_.ellipsize(lines[i].text+"…",24,w-64):lines[i].text,24,85);
+        if(working&&sync_total_>0){
+            c_.fill({32,y+358,w-64,4},220);
+            c_.fill({32,y+358,static_cast<int>(static_cast<long long>(w-64)*std::clamp(sync_completed_,0,sync_total_)/sync_total_),4},30);
+        }
+        const bool enabled=working||ready||!running;
+        const auto action=working?"暂停翻译":ready?"继续阅读":running?"等待当前任务完成":state.completed?"继续翻译":failed?"重试翻译":"翻译为中文";
+        const Rect controls{32,y+height-104,w-64,80};frame(c_,controls);
+        button(controls,action,[this,working,ready,request]{
+            if(working){request_="cancel-sync";return;}
+            if(ready){close_reader_tools();return;}
             save_position();
-            translation_request_=std::string("translate:")+(current_->web_content?"web:":"rss:")+std::to_string(current_->id);
+            translation_request_=request;
             request_=translation_request_;sync_started(true);
-        },false,28,running?Icon::Close:Icon::Download,running?translating_:state.state!="ready",Align::Left);
+        },enabled&&!working,28,working?Icon::Close:Icon::None,enabled);
     }else{
         const std::string details="标题："+current_->title+"\n\n来源："+source(current_->feed_id)+"\n时间："+date(current_->published)+"\n作者："+(current_->author.empty()?"未提供":current_->author)+"\n\n原文地址：\n"+current_->url;
         const auto lines=c_.wrap(details,28,w-64);const std::size_t visible=std::max(1,(height-210)/42);

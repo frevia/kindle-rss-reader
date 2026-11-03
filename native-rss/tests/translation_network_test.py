@@ -29,19 +29,21 @@ class Provider(http.server.BaseHTTPRequestHandler):
         status = 200
         request = json.loads(data)
         text = request["messages"][0]["content"]
-        # Catch any accidental return to HTML-fragment requests with the old malformed-link failure.
+        # Old HTML-fragment requests trigger the malformed-link and dropped-link failure.
         translated = "< a href=\"https://example.invalid/lost\">漏链接</a>" if re.search(r"<\s*/?\w", text) else text
-        for source, target in (("English title", "英文标题"), ("quiet", "安静"),
-                               ("reader", "读者"), ("Offline reading matters.", "离线阅读很重要。"),
-                               ("Visit", "访问"), ("first source", "第一链接"),
-                               ("then", "然后"), ("read", "阅读"),
-                               ("second source", "第二链接"), ("Complex links", "复杂链接")):
+        for source, target in (("English title", "英文标题"), ("A quiet reader.", "A 安静读者。"),
+                               ("Offline reading matters.", "离线阅读很重要。"),
+                               ("First paragraph.", "第一段。"), ("Second paragraph.", "第二段。"),
+                               ("Third paragraph.", "第三段。"),
+                               ("Use", "使用"), ("reader.", "读者。"),
+                               ("Visit first source, then read second source.", "访问第一链接，然后阅读第二链接。"),
+                               ("Complex links", "复杂链接")):
             translated = translated.replace(source, target)
         response = {"choices": [{"message": {"role": "assistant", "content": translated}, "finish_reason": "stop"}]}
         headers = {}
         if self.path == "/slow":
             time.sleep(1.5)
-        if self.path in ("/unauthorized", "/rate", "/error") or (self.path == "/partial" and count == 2) or (self.path == "/partial-node" and count == 3):
+        if self.path in ("/unauthorized", "/rate", "/error") or (self.path == "/paragraph-failure" and count == 3):
             status = {"/unauthorized": 401, "/rate": 429}.get(self.path, 500)
             response = {"message": "do not expose test-key in provider errors"}
         elif self.path == "/redirect":
@@ -111,20 +113,31 @@ class TranslationNetworkTests(unittest.TestCase):
         self.assertNotIn("test-key", result.stdout + result.stderr)
         return result
 
-    def rows(self, sql):
+    def rows(self, sql, params=()):
         with sqlite3.connect(self.db) as conn:
-            return conn.execute(sql).fetchall()
+            return conn.execute(sql, params).fetchall()
 
     def assert_plain_requests(self, requests):
         for _, _, request in requests:
-            self.assertEqual(request["translation_options"], {"source_lang": "English", "target_lang": "Chinese"})
+            options = request["translation_options"]
+            self.assertEqual({key: options[key] for key in ("source_lang", "target_lang")},
+                             {"source_lang": "English", "target_lang": "Chinese"})
             self.assertEqual(len(request["messages"]), 1)
             content = request["messages"][0]["content"]
+            self.assertNotIn("HTML fragment:", content)
+            self.assertNotIn("English to Simplified Chinese", content)
             self.assertNotRegex(content, r"<\s*/?\w")
             self.assertNotRegex(content, r"https?://|mailto:")
-            self.assertNotIn("RSSKEEP", content)
+            self.assertNotIn("href=", content)
+            self.assertNotIn("<code", content)
+            self.assertNotIn("<pre", content)
             self.assertNotIn("print('keep code')", content)
             self.assertNotIn("keep_inline()", content)
+            tokens = re.findall(r"RSSKEEP\d+X\d+Q", content)
+            terms = options.get("terms", [])
+            self.assertCountEqual([term["source"] for term in terms], tokens)
+            self.assertTrue(all(term["source"] == term["target"] for term in terms))
+            self.assertEqual(len(tokens), len(set(tokens)))
 
     def test_request_contract_cache_and_original_preservation(self):
         self.cli("translate", "1")
@@ -141,10 +154,13 @@ class TranslationNetworkTests(unittest.TestCase):
         self.assertEqual(self.rows("SELECT state FROM article_translations"), [("ready",)])
         self.assertEqual(self.rows("SELECT html FROM article_translation_blocks WHERE ordinal=0"), [("英文标题",)])
         cached = "".join(row[0] for row in self.rows("SELECT html FROM article_translation_blocks WHERE entry_id=1 ORDER BY ordinal"))
-        self.assertIn("<strong>", cached)
-        self.assertRegex(cached, r"Use RSSKEEP[0-9]+X0Q 读者\.")
-        self.assertNotIn("keep_inline()", cached)
+        translated_cache = cached.replace("<pre>print('keep code')</pre>", "")
+        self.assertNotRegex(translated_cache, r"<\s*/?\w")
         self.assertIn("<pre>print('keep code')</pre>", cached)
+        self.assertIn("A 安静读者。", cached)
+        self.assertRegex(cached, r"使用 RSSKEEP\d+X\d+Q 读者。")
+        self.assertNotIn("keep_inline()", cached)
+        self.assertNotIn("print('keep code')", translated_cache)
         self.cli("translate", "1")
         self.assertEqual(len(Provider.seen), first)
         with sqlite3.connect(self.db) as conn:
@@ -162,29 +178,14 @@ class TranslationNetworkTests(unittest.TestCase):
         self.cli("translate", "2")
         self.assert_plain_requests(Provider.seen)
         self.assertCountEqual([request["messages"][0]["content"] for _, _, request in Provider.seen],
-                               ["Complex links", "Visit", "first source", ", then", "read", "second source"])
+                              ["Complex links", "Visit first source, then read second source."])
         cached = "".join(row[0] for row in self.rows("SELECT html FROM article_translation_blocks WHERE entry_id=2 ORDER BY ordinal"))
-        self.assertIn('<a href="https://example.invalid/first">第一链接</a>', cached)
-        self.assertIn('<a href="https://example.invalid/second">第二链接</a>', cached)
-        self.assertIn("<strong>阅读</strong>", cached)
-        self.assertNotIn("< a href", cached)
+        self.assertIn("访问第一链接，然后阅读第二链接。", cached)
+        self.assertNotRegex(cached, r"<\s*/?\w")
+        self.assertEqual(self.rows("SELECT html FROM entries WHERE id=2"), [(html,)])
         rendered = pathlib.Path(self.folder.name) / "complex.pgm"
         self.cli("--article", "2", "render", str(rendered))
         self.assertTrue(rendered.exists())
-
-    def test_partial_failure_resumes_only_missing_blocks(self):
-        self.endpoint = "/partial"
-        self.cli("translate", "1", expected=2)
-        self.assertEqual(self.rows("SELECT count(*) FROM article_translation_blocks"), [(1,)])
-        self.assertEqual(self.rows("SELECT state FROM article_translations"), [("failed",)])
-        cached = self.rows("SELECT html FROM article_translation_blocks WHERE ordinal=0")
-        self.endpoint = "/ok"
-        self.cli("translate", "1")
-        self.assertEqual(self.rows("SELECT html FROM article_translation_blocks WHERE ordinal=0"), cached)
-        for path, _, request in Provider.seen:
-            if path == "/ok":
-                self.assertNotIn("English title", request["messages"][0]["content"])
-        self.assert_plain_requests([item for item in Provider.seen if item[0] == "/ok"])
 
     def test_rejects_provider_failures_without_retry_or_key_leak(self):
         for endpoint in ("/unauthorized", "/rate", "/redirect", "/truncated", "/hostile", "/empty", "/bad-json", "/large"):
@@ -197,18 +198,43 @@ class TranslationNetworkTests(unittest.TestCase):
                 self.assertEqual(self.rows("SELECT count(*) FROM article_translation_blocks"), [(0,)])
         self.assertFalse(any(path == "/stolen" for path, _, _ in Provider.seen))
 
-    def test_failure_after_first_text_node_keeps_block_atomic(self):
-        self.endpoint = "/partial-node"
-        self.cli("translate", "1", expected=2)
+    def test_failure_after_second_paragraph_keeps_completed_blocks_and_resumes(self):
+        html = "<p>First paragraph.</p><p>Second paragraph.</p><p>Third paragraph.</p>"
+        with sqlite3.connect(self.db) as conn:
+            conn.execute("INSERT INTO entries(id,feed_id,guid,title,url,html,text) VALUES(3,1,'three','Partial paragraphs','https://example.invalid/partial',?,?)",
+                         (html, "First paragraph.\nSecond paragraph.\nThird paragraph."))
+        self.endpoint = "/paragraph-failure"
+        self.cli("translate", "3", expected=2)
         self.assertEqual(len(Provider.seen), 3)
-        self.assertEqual(self.rows("SELECT ordinal,html FROM article_translation_blocks"), [(0, "英文标题")])
-        self.assertEqual(self.rows("SELECT html,read,position FROM entries"), [(self.html, 0, 0)])
+        self.assertEqual(self.rows("SELECT ordinal,html FROM article_translation_blocks WHERE entry_id=3 ORDER BY ordinal"),
+                         [(0, "Partial paragraphs"), (1, "第一段。")])
+        self.assertEqual(self.rows("SELECT html,read,position FROM entries WHERE id=3"), [(html, 0, 0)])
+        self.endpoint = "/ok"
+        self.cli("translate", "3")
+        self.assertEqual(self.rows("SELECT state FROM article_translations WHERE entry_id=3"), [("ready",)])
+        resumed = [request["messages"][0]["content"] for path, _, request in Provider.seen if path == "/ok"]
+        self.assertEqual(resumed, ["Second paragraph.", "Third paragraph."])
+        self.assert_plain_requests([item for item in Provider.seen if item[0] == "/ok"])
+
+    def test_v2_cache_survives_failure_until_v3_is_complete(self):
+        old_revision = "rss-translation-v2:legacy"
+        with sqlite3.connect(self.db) as conn:
+            conn.execute("INSERT INTO article_translations(entry_id,web,revision,state,total) VALUES(1,0,?,'ready',2)", (old_revision,))
+            conn.executemany("INSERT INTO article_translation_blocks(entry_id,web,revision,ordinal,html) VALUES(1,0,?,?,?)",
+                             ((old_revision, 0, "legacy title"), (old_revision, 1, "legacy paragraph")))
+        self.endpoint = "/error"
+        self.cli("translate", "1", expected=2)
+        self.assertEqual(self.rows("SELECT ordinal,html FROM article_translation_blocks WHERE entry_id=1 AND revision=? ORDER BY ordinal", (old_revision,)),
+                         [(0, "legacy title"), (1, "legacy paragraph")])
         self.endpoint = "/ok"
         self.cli("translate", "1")
-        self.assertEqual(self.rows("SELECT state FROM article_translations"), [("ready",)])
-        resumed = [request["messages"][0]["content"] for path, _, request in Provider.seen if path == "/ok"]
-        self.assertIn("A", resumed)
-        self.assertNotIn("English title", resumed)
+        self.assert_plain_requests(Provider.seen)
+        self.assertTrue(any(request["messages"][0]["content"] == "English title" for _, _, request in Provider.seen))
+        self.assertTrue(any(request["messages"][0]["content"] == "A quiet reader." for _, _, request in Provider.seen))
+        revisions = self.rows("SELECT revision FROM article_translations WHERE entry_id=1 ORDER BY revision")
+        self.assertNotIn((old_revision,), revisions)
+        self.assertTrue(any(revision.startswith("rss-translation-v3:") for (revision,) in revisions))
+        self.assertEqual(self.rows("SELECT count(*) FROM article_translation_blocks WHERE entry_id=1 AND revision=?", (old_revision,)), [(0,)])
 
     def test_missing_key_sends_no_request(self):
         self.cli("translate", "1", expected=1, key=False)

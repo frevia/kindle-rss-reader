@@ -262,13 +262,13 @@ Response fetch(const std::string& url,const std::string& etag,const std::string&
     return fetch_once(url,etag,modified,cancel,"",35000);
 }
 namespace {
-std::string post_qwen(const QwenConfig& config,const std::string& input,const std::atomic<bool>& cancel) {
+std::string post_qwen(const QwenConfig& config,const std::string& input,const std::atomic<bool>& cancel,const std::vector<std::string>& protected_tokens) {
     validate_qwen_config(config);
     static const auto initialized=curl_global_init(CURL_GLOBAL_DEFAULT);
     if(initialized!=CURLE_OK)throw std::runtime_error("翻译网络初始化失败");
     std::unique_ptr<CURL,decltype(&curl_easy_cleanup)> curl(curl_easy_init(),curl_easy_cleanup);
     if(!curl)throw std::runtime_error("无法创建翻译连接");
-    const auto body=qwen_request(input);
+    const auto body=qwen_request(input,protected_tokens);
     curl_slist* raw=nullptr;
     for(const auto& header:{std::string("Content-Type: application/json"),"Authorization: Bearer "+config.api_key,std::string("Expect:")}) {
         auto next=curl_slist_append(raw,header.c_str());
@@ -321,12 +321,14 @@ void translate_article(Store& store,std::int64_t entry_id,bool web,const QwenCon
             const auto& block=document.blocks[i];
             std::string html=block.html;
             if(!block.request.empty()) {
+                std::vector<std::string> protected_tokens;
+                for(const auto& item:block.protected_markup)protected_tokens.push_back(item.first);
                 html=translate_block(block,[&](const std::string& input) {
                     while(!cancel&&std::chrono::steady_clock::now()<next_request&&std::chrono::steady_clock::now()<deadline)
                         std::this_thread::sleep_for(std::chrono::milliseconds(20));
                     if(cancel||std::chrono::steady_clock::now()>=deadline)throw std::runtime_error("本轮翻译已暂停");
                     next_request=std::chrono::steady_clock::now()+std::chrono::milliseconds(1100);
-                    return post_qwen(config,input,cancel);
+                    return post_qwen(config,input,cancel,protected_tokens);
                 });
                 // Cache the response with placeholders; restore protected source only when rendering.
                 validate_translation(block,html);
@@ -342,7 +344,7 @@ void translate_article(Store& store,std::int64_t entry_id,bool web,const QwenCon
     }
     const bool complete=p.completed==p.total&&!cancel;
     store.set_translation_state(entry_id,web,document.revision,complete?"ready":"paused");
-    p.message=complete?"翻译已保存，可在正文面板查看双语":cancel?"翻译已取消，已完成段落已保存":"本轮翻译已暂停，点击继续翻译剩余段落";
+    p.message=complete?"翻译已保存，可在翻译面板切换模式":cancel?"翻译已取消，已完成段落已保存":"本轮翻译已暂停，点击继续翻译剩余段落";
     progress(p);
 }
 void sync_fulltext(Store& store,std::int64_t entry_id,const std::atomic<bool>& cancel,

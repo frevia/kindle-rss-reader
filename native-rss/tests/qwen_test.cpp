@@ -43,9 +43,18 @@ int main(int argc,char** argv) {
         assert(plain_request.find(R"("source_lang":"English")")!=std::string::npos);
         assert(plain_request.find(R"("target_lang":"Chinese")")!=std::string::npos);
         assert(plain_request.find(raw)!=std::string::npos);
+        assert(plain_request.find("\"terms\"")==std::string::npos);
         assert(plain_request.find("HTML fragment:")==std::string::npos);
         assert(plain_request.find("English to Simplified Chinese")==std::string::npos);
     }
+    const std::string protected_token="RSSKEEP123X0Q";
+    const auto protected_request=qwen_request("Keep "+protected_token,{protected_token});
+    assert(protected_request.find(R"("source_lang":"English")")!=std::string::npos);
+    assert(protected_request.find(R"("target_lang":"Chinese")")!=std::string::npos);
+    assert(protected_request.find(R"("terms":[{"source":"RSSKEEP123X0Q","target":"RSSKEEP123X0Q"}])")!=std::string::npos);
+    assert(protected_request.find("Keep "+protected_token)!=std::string::npos);
+    assert(protected_request.find("<code")==std::string::npos&&protected_request.find("<pre")==std::string::npos&&protected_request.find("href=")==std::string::npos);
+    assert(protected_request.find("HTML fragment:")==std::string::npos);
     assert(qwen_translation(R"({"choices":[{"message":{"content":"中文\n第二行"},"finish_reason":"stop"}]})")=="中文\n第二行");
     for(const auto* response:{"not json",R"({"choices":[]})",R"({"choices":[{"message":{"content":"partial"},"finish_reason":"length"}]})",R"({"choices":[{"message":{"content":5},"finish_reason":"stop"}]})",R"({"choices":[{"message":{"content":"\u0000"},"finish_reason":"stop"}]})"})
         rejects([&]{qwen_translation(response);});

@@ -15,18 +15,24 @@ static Entry entry(std::string html) {
 template<class F> static bool throws(const F& f) { try { f(); } catch (const std::runtime_error&) { return true; } return false; }
 
 int main() {
+    auto context=entry("<p>Outside of the <a href='https://example.test/earth'>Earth's atmosphere</a>, the Moon appears <a href='https://example.test/photo'>magnificent</a>ly gray.</p>");
+    const auto context_doc=translation_document(context);
+    assert(context_doc.blocks[1].request=="Outside of the Earth's atmosphere, the Moon appears magnificently gray.");
     auto e=entry("<p>Hello <strong>world</strong> <a href='https://example.test/'>link</a>.</p><p>第二段</p>");
     auto d=translation_document(e);
     assert(d.blocks.size()==3 && !d.blocks[0].request.empty());
-    assert(d.blocks[1].request.find("<strong>")!=std::string::npos);
-    assert(d.blocks[1].request.find("href=\"https://example.test/\"")!=std::string::npos);
+    assert(d.blocks[1].request=="Hello world link.");
+    assert(d.revision.rfind("rss-translation-v3:",0)==0);
     assert(translation_units("A \xC2\xA0中\n") == 2);
-    std::vector<std::string> translations{"标题", "你好 <strong>世界</strong> <a href=\"https://example.test/\">链接</a>。", "第二段译文"};
+    std::vector<std::string> translations{"标题", "你好，世界。这里是链接。", "第二段译文"};
     auto translated=translated_entry(e,d,translations,ReadingMode::Translated);
     auto bilingual=translated_entry(e,d,translations,ReadingMode::Bilingual);
     assert(translated.title=="标题" && translated.text==html_to_text(translated.html));
-    assert(translated.html.find("你好 <strong>世界</strong>")!=std::string::npos);
-    assert(bilingual.html.find("<br/>")!=std::string::npos);
+    assert(translated.html.find("你好，世界。这里是链接。")!=std::string::npos);
+    assert(translated.html.find("href=")==std::string::npos);
+    assert(bilingual.html.find("href=\"https://example.test/\"")!=std::string::npos);
+    assert(bilingual.html.find("rss-pair-break")!=std::string::npos);
+    assert(bilingual.text.find("link.\n")!=std::string::npos);
     assert(bilingual.html.find("class=\"rss-translation\"")!=std::string::npos);
     assert(bilingual.title=="A title\n标题");
     auto original=translated_entry(e,d,{},ReadingMode::Original);
@@ -41,13 +47,14 @@ int main() {
     std::vector<std::string> sent;
     const auto rich_response=translate_block(rich_doc.blocks[1],[&](const std::string& input) {
         sent.push_back(input);
-        assert(input.find("href")==std::string::npos && input.find("RSSKEEP")==std::string::npos);
+        assert(input.find("href")==std::string::npos && input.find("Tom & Jo A < B")!=std::string::npos);
         assert(input.find("keep_me()")==std::string::npos);
-        return input=="Tom & Jo"?"汤姆与乔":input=="A < B"?"甲 < 乙 & 丙":"之后";
+        return "汤姆与乔，甲 < 乙 & 丙，执行 "+rich_doc.blocks[1].protected_markup[0].first+" 之后";
     });
-    assert((sent==std::vector<std::string>{"Tom & Jo","A < B","after"}));
+    assert(sent.size()==1 && sent[0]==rich_doc.blocks[1].request);
     const auto restored=validate_translation(rich_doc.blocks[1],rich_response);
-    assert(restored.find("<a href=\"https://example.test/?a=1&amp;b=2\">甲 &lt; 乙 &amp; 丙</a>")!=std::string::npos);
+    assert(restored.find("甲 &lt; 乙 &amp; 丙")!=std::string::npos);
+    assert(restored.find("href=")==std::string::npos);
     assert(restored.find("<code>keep_me()</code>")!=std::string::npos);
     assert(restored.find(" 之后")!=std::string::npos);
     for(const auto& invalid:{std::string("<script>bad()</script>"),std::string("<a href='https://evil.test'>中文</a>"),std::string(""),std::string("\xc0\xaf")})
@@ -93,7 +100,7 @@ int main() {
         const auto rendered=translated_entry(linked_image,image_doc,image_translations,mode);
         std::size_t count=0,at=0;while((at=rendered.html.find("<img",at))!=std::string::npos){++count;at+=4;}
         assert(count==2);
-        assert(rendered.html.find("https://example.test/photo")!=std::string::npos);
+        if(mode!=ReadingMode::Translated)assert(rendered.html.find("https://example.test/photo")!=std::string::npos);
         assert(rendered.text.find("Another photo")!=std::string::npos);
         if(mode==ReadingMode::Original)assert(rendered.html==linked_image.html);
     }
@@ -103,11 +110,12 @@ int main() {
     auto missing=std::vector<std::string>(fd.blocks.size());missing[0]="";auto mr=translated_entry(fallback,fd,missing,ReadingMode::Translated);
     assert(mr.html.find("本段未翻译")!=std::string::npos);
     assert(throws([&]{validate_translation(d.blocks[1],"<script>alert(1)</script>");}));
-    assert(throws([&]{validate_translation(d.blocks[1],"Hello");}));
+    assert(validate_translation(d.blocks[1],"你好，完整的一段译文。")=="你好，完整的一段译文。");
     assert(throws([&]{validate_translation(d.blocks[2],"</div><script>bad()</script>");}));
     assert(throws([&]{validate_translation(d.blocks[2],"<p onclick='bad()'>中文</p>");}));
     assert(throws([&]{validate_translation(d.blocks[2],"RSSKEEP123X9Q");}));
     assert(validate_translation(d.blocks[2],"RSSKEEP 是一个名称")=="RSSKEEP 是一个名称");
+    assert(validate_translation(d.blocks[2],"<5 & 3>1")=="&lt;5 &amp; 3&gt;1");
     assert(throws([&]{validate_translation(d.blocks[2],std::string("\xc0\xaf"));}));
     assert(throws([&]{auto bad=d.blocks[1];bad.protected_markup={{"RSSPfakeX0Q","<code>x</code>"}};validate_translation(bad,"RSSPfakeX0Q RSSPfakeX0Q");}));
 

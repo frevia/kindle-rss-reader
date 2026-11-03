@@ -184,14 +184,15 @@ TranslationBlock make_block(const std::string& html,std::size_t serial) {
                     const std::string markup(reinterpret_cast<const char*>(xmlBufferContent(buffer.get())),xmlBufferLength(buffer.get()));
                     const auto token="RSSKEEP"+salt+"X"+std::to_string(block.protected_markup.size())+"Q";
                     block.protected_markup.emplace_back(token,markup);
-                    auto replacement=xmlNewText(BAD_CAST token.c_str());if(!replacement)throw std::bad_alloc();
+                    const auto spaced=" "+token+" ";
+                    auto replacement=xmlNewText(BAD_CAST spaced.c_str());if(!replacement)throw std::bad_alloc();
                     xmlReplaceNode(node,replacement);xmlFreeNode(node);
                 }else self(self,node->children);
             }
             node=next;
         }
     };
-    protect(protect,fragment.root->children);block.request=dump(fragment.root->children);
+    protect(protect,fragment.root->children);block.request=html_to_text(dump(fragment.root->children));
     auto visible=block.request;
     for(const auto& item:block.protected_markup)visible.erase(visible.find(item.first),item.first.size());
     if(translation_units(html_to_text(visible))==0)block.request.clear();
@@ -219,7 +220,7 @@ std::vector<std::string> split_html(const std::string& raw) {
             else stack.emplace_back(name,piece);
         }
         i=end;
-        if(!tag&&piece.size()==1&&std::string(".!?; \n").find(piece.front())!=std::string::npos&&current.size()>4500)flush();
+        if(!tag&&piece.size()==1&&std::string(".!?;\n").find(piece.front())!=std::string::npos&&current.size()>4500)flush();
     }
     if(!current.empty())parts.push_back(current+close());
     for(const auto& part:parts)if(part.size()>max_request)throw std::runtime_error("翻译段落无法在上限内安全拆分");
@@ -276,7 +277,7 @@ std::string translation_revision(const Entry& entry) {
     if(entry.html.size()>max_input||entry.text.size()>max_input||entry.title.size()>16384)throw std::runtime_error("文章超出翻译输入大小限制");
     std::string images;
     for(const auto& image:entry.images){images+=image.url;images+='\0';}
-    return "rss-translation-v2:"+fingerprint(entry.title)+":"+fingerprint(entry.html)+":"+fingerprint(entry.text)+":"+fingerprint(entry.url)+":"+fingerprint(images);
+    return "rss-translation-v3:"+fingerprint(entry.title)+":"+fingerprint(entry.html)+":"+fingerprint(entry.text)+":"+fingerprint(entry.url)+":"+fingerprint(images);
 }
 std::size_t translation_units(std::string_view text) {
     std::size_t count=0;
@@ -303,41 +304,8 @@ TranslationDocument translation_document(const Entry& entry) {
 }
 std::string translate_block(const TranslationBlock& block,const std::function<std::string(const std::string&)>& translate) {
     if(block.request.empty())return block.html;
-    Fragment fragment(block.request);
-    const auto text=[&](const std::string& source) {
-        if(translation_units(source)==0||std::all_of(source.begin(),source.end(),[](unsigned char c){return c<128&&!std::isalpha(c);}))return source;
-        const auto first=source.find_first_not_of(" \t\r\n"),last=source.find_last_not_of(" \t\r\n");
-        const auto input=source.substr(first,last-first+1);
-        TranslationBlock plain;plain.request=escape(input);
-        const auto response=translate(input);
-        validate_translation(plain,response);
-        return source.substr(0,first)+response+source.substr(last+1);
-    };
-    const auto replace=[&](auto&& self,xmlNode* node)->void {
-        while(node) {
-            auto next=node->next;
-            if(node->type==XML_TEXT_NODE||node->type==XML_CDATA_SECTION_NODE) {
-                const std::string source=node->content?reinterpret_cast<const char*>(node->content):"";
-                std::string translated;
-                for(std::size_t at=0;at<source.size();) {
-                    auto end=source.size();std::size_t token_size=0;
-                    for(const auto& item:block.protected_markup) {
-                        const auto found=source.find(item.first,at);
-                        if(found<end){end=found;token_size=item.first.size();}
-                    }
-                    translated+=text(source.substr(at,end-at));
-                    if(token_size)translated+=source.substr(end,token_size);
-                    at=end+token_size;
-                }
-                auto replacement=xmlNewText(BAD_CAST translated.c_str());if(!replacement)throw std::bad_alloc();
-                xmlReplaceNode(node,replacement);xmlFreeNode(node);
-            }else self(self,node->children);
-            node=next;
-        }
-    };
-    // The provider translates text only; source markup never leaves local control.
-    replace(replace,fragment.root->children);
-    const auto response=dump(fragment.root->children);
+    if(std::all_of(block.request.begin(),block.request.end(),[](unsigned char c){return c<128&&!std::isalpha(c);}))return block.request;
+    const auto response=translate(block.request);
     validate_translation(block,response);
     return response;
 }
@@ -345,9 +313,8 @@ std::string validate_translation(const TranslationBlock& block,const std::string
     try {
         if(response.empty()||response.size()>64*1024)throw std::runtime_error("无效响应");
         translation_units(response);
-        if(signature(response)!=signature(block.request))throw std::runtime_error("行内结构变化");
-        Fragment fragment(response);std::size_t count=0;
-        auto safe=canonical(fragment.root->children,Entry{},true,count);
+        if(!signature(response).empty())throw std::runtime_error("翻译结果不是纯文字");
+        auto safe=escape(response);
         std::size_t cursor=0;
         while((cursor=safe.find("RSSKEEP",cursor))!=std::string::npos) {
             auto end=cursor+7;const auto digits=end;
@@ -402,7 +369,7 @@ Entry translated_entry(const Entry& source,const TranslationDocument& doc,const 
         std::string replacement=block.html;
         if(!block.request.empty()) {
             if(mode==ReadingMode::Translated)replacement=translated.empty()?block.html+"<br/>（本段未翻译）":translated;
-            else replacement=block.html+"<br/><span class=\"rss-translation\">"+(translated.empty()?"（本段未翻译）":without_images(translated))+"</span>";
+            else replacement="<span class=\"rss-original\">"+block.html+"</span><br class=\"rss-pair-break\"/><span class=\"rss-translation\">"+(translated.empty()?"（本段未翻译）":without_images(translated))+"</span>";
         }
         out.reading_anchors.push_back({source_position,display_position});
         if(mode==ReadingMode::Bilingual&&!translated.empty())out.reading_anchors.push_back({source_position,display_position+original_units+prefix});

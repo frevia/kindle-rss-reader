@@ -1,5 +1,6 @@
 #pragma once
 #include <string>
+#include <vector>
 
 namespace rss {
 struct QwenConfig {
@@ -8,6 +9,6 @@ struct QwenConfig {
 };
 QwenConfig qwen_config(const std::string& database_path);
 void validate_qwen_config(const QwenConfig& config);
-std::string qwen_request(const std::string& text);
+std::string qwen_request(const std::string& text, const std::vector<std::string>& protected_tokens = {});
 std::string qwen_translation(const std::string& response);
 }
