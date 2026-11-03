@@ -36,7 +36,7 @@ struct FeedCard { std::int64_t id = 0, unread = 0, entry_id = 0, published = 0; 
 struct Snapshot {
     std::string status = "unavailable", revision;
     std::int64_t unread = 0, feeds = 0, updated_at = 0;
-    bool enabled = true;
+    bool enabled = false;
     std::vector<Item> items;
     std::vector<FeedCard> feed_cards;
     std::string content, json;
@@ -173,7 +173,7 @@ bool read_home_visible(sqlite3* db, bool& enabled) {
     const int rc = sqlite3_step(q);
     if (rc == SQLITE_ROW) {
         const auto* value = reinterpret_cast<const char*>(sqlite3_column_text(q, 0));
-        enabled = !(value && sqlite3_column_bytes(q, 0) == 1 && value[0] == '0');
+        enabled = value && sqlite3_column_bytes(q, 0) == 1 && value[0] == '1';
     }
     const int final_rc = rc == SQLITE_ROW ? sqlite3_step(q) : rc;
     const bool ok = (rc == SQLITE_ROW || rc == SQLITE_DONE) && final_rc == SQLITE_DONE;

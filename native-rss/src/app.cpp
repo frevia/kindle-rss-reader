@@ -747,7 +747,7 @@ void App::app_menu(){
 }
 void App::settings_screen(){
     const int w=c_.width;page_header("设置");
-    const bool enabled=store_.setting("home_visible")!="0";
+    const bool enabled=store_.setting("home_visible")=="1";
     const auto toggle=[this,enabled]{store_.set_setting("home_visible",enabled?"0":"1");};
     button({32,270,w-316,112},"在 Kindle 首页显示 RSS订阅",toggle,false,32,Icon::None,true,Align::Left);
     button({w-252,282,220,88},enabled?"已开启":"已关闭",toggle,enabled,28);

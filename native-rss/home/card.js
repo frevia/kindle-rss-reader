@@ -141,7 +141,7 @@ function useRssCard(React, RN, props) {
                             entryId: feed.entryId || 0, excerpt: feed.excerpt || "", published: feed.published || 0});
                     }
                 }
-                var clean = {revision: data.revision, status: data.status, enabled: data.enabled !== false, unread: data.unread,
+                var clean = {revision: data.revision, status: data.status, enabled: data.enabled === true, unread: data.unread,
                     feeds: data.feeds, updatedAt: data.updatedAt, items: items, feedCards: feedCards};
                 armWatchdog(45000);
                 if ((!current || clean.revision !== current.revision) &&
@@ -173,7 +173,7 @@ function useRssCard(React, RN, props) {
         };
     }, [target, trial]);
     if (!target) return props;
-    if (trial || (snapshot && snapshot.enabled === false)) {
+    if (trial || !snapshot || snapshot.enabled !== true) {
         var hidden = Object.assign({}, props);
         hidden.rssHomeRender = function () { return null; };
         return hidden;

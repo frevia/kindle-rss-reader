@@ -102,11 +102,12 @@ int main(){
         auto touch=[&](int x,int y){settings.draw();settings.tap(x,y);};
         auto shot=[&](const char* name){settings.draw();if(const auto folder=std::getenv("RSS_TEST_SNAPSHOTS")){std::filesystem::create_directories(folder);canvas.write_pgm((std::filesystem::path(folder)/name).string());}};
         touch(100,1392);touch(140,1070);assert(settings.screen()==rss::App::Screen::Settings&&!settings.menu_open());
-        assert(preferences.setting("home_visible").empty());shot("settings-home-on.pgm");const auto on=canvas.pixels;
-        touch(950,326);assert(preferences.setting("home_visible")=="0");shot("settings-home-off.pgm");const auto off=canvas.pixels;assert(off!=on);
+        assert(preferences.setting("home_visible").empty());shot("settings-home-off.pgm");const auto off=canvas.pixels;
+        touch(950,326);assert(preferences.setting("home_visible")=="1");shot("settings-home-on.pgm");const auto on=canvas.pixels;assert(off!=on);
         settings.back();assert(settings.screen()==rss::App::Screen::List);settings.draw();const auto list=canvas.pixels;
-        {rss::App reopened(preferences,canvas);reopened.draw();reopened.tap(100,1392);reopened.draw();reopened.tap(140,1070);reopened.draw();assert(canvas.pixels==off);}
-        touch(100,1392);touch(140,1070);touch(200,326);assert(preferences.setting("home_visible")=="1");
+        {rss::App reopened(preferences,canvas);reopened.draw();reopened.tap(100,1392);reopened.draw();reopened.tap(140,1070);reopened.draw();assert(canvas.pixels==on);}
+        touch(100,1392);touch(140,1070);touch(200,326);assert(preferences.setting("home_visible")=="0");
+        shot("settings-home-off.pgm");assert(canvas.pixels==off);
         settings.back();settings.draw();assert(canvas.pixels==list);
         assert(preferences.entry_count(rss::View::Unread)==1&&!preferences.entries(rss::View::All).front().read);
         assert(settings.take_request().empty());

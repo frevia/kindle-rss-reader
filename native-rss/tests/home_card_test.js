@@ -40,19 +40,16 @@ function harness(title = 'Kindle Unlimited 现已升级为 Kindle+', sharedRoot,
     return {root, calls, callbacks, props, original, render, emit, advance, message, stop, timers};
 }
 function snapshot(character, changes = {}) {
-    return {type: 'rss-home-v1', revision: character.repeat(64), status: 'ready', unread: 2, feeds: 3,
+    return {type: 'rss-home-v1', revision: character.repeat(64), status: 'ready', enabled: true, unread: 2, feeds: 3,
         updatedAt: 123, items: [{id: 1, title: '中文文章与引号“测试”', source: '独立博客'}], ...changes};
 }
 const h = harness();
 assert.equal(h.root.global, undefined, 'Kindle has no global alias');
 let view = h.render();
-assert.equal(view.cardItem.title, 'RSS订阅');
+assert.equal(view.rssHomeRender(null), null, 'hide RSS until an explicit enabled setting is received');
 assert.equal(h.calls.connect[0][0], 'ws://127.0.0.1:12681/rss-home/v1');
 assert.equal(h.calls.connect[0][1], null, 'an empty protocols array would abort on this firmware');
 assert.equal(JSON.stringify(h.calls.connect[0][2]), '{}');
-assert.equal(view.cardItem.cardData[0].imagePath, '/mnt/us/native-rss/book-cover.png');
-view.rssHomeOpen();
-assert.equal(h.calls.open[0][0], 'file:///mnt/us/documents/RSS阅读器.sh');
 const firstId = h.calls.connect[0][3];
 h.message(snapshot('a'), firstId + 1); h.message('{bad');
 h.message(snapshot('g')); h.message(snapshot('a', {unread: -1}));
@@ -71,6 +68,9 @@ for (const bad of [{excerpt: null}, {excerpt: 1}, {excerpt: 'x'.repeat(321)}, {p
 }
 assert.equal(h.calls.updates, 0, 'malformed feed summaries cannot replace the cached snapshot');
 h.message(snapshot('a')); view = h.render();
+assert.equal(view.cardItem.cardData[0].imagePath, '/mnt/us/native-rss/book-cover.png');
+view.rssHomeOpen();
+assert.equal(h.calls.open[0][0], 'file:///mnt/us/documents/RSS阅读器.sh');
 assert.equal(view.cardItem.titleText, '中文文章与引号“测试”');
 assert.equal(view.cardItem.title, 'RSS订阅 · 2 条未读');
 h.message(snapshot('a')); assert.equal(h.calls.updates, 1); assert.equal(h.calls.send.length, 2);
@@ -115,8 +115,8 @@ assert.equal(visibility.render().cardItem.title, 'RSS订阅 · 2 条未读', 'sa
 assert.equal(visibility.calls.connect.length, 2, 'reconnect on remount; visibility changes keep the socket alive');
 visibility.message(snapshot('d', {enabled: false}));
 assert.equal(visibility.render().rssHomeRender(null), null);
-visibility.message(snapshot('e'));
-assert.equal(visibility.render().cardItem.title, 'RSS订阅 · 2 条未读', 'older bridge without the field defaults to enabled');
+visibility.message(snapshot('e', {enabled: undefined}));
+assert.equal(visibility.render().rssHomeRender(null), null, 'a missing visibility field defaults to disabled');
 visibility.stop();
 const cardA = harness(), cardB = harness('Kindle+', cardA.root);
 cardA.render(); cardB.render();
@@ -218,10 +218,12 @@ assert.equal(throwing.calls.connect.length, 1);
 throwing.stop(); assert.equal(throwing.timers.size, 0);
 
 const paused = harness(); paused.root.rssHomeConnectionCount = 16;
+assert.equal(paused.render().rssHomeRender(null), null, 'connection exhaustion cannot show RSS without an enabled setting');
+paused.stop();paused.root.rssHomeSnapshot = snapshot('a');
 paused.render();
 const pausedView = paused.render();
 assert.equal(paused.calls.connect.length, 0, 'an exhausted process does not allocate another client');
-assert.equal(pausedView.cardItem.titleText, '打开 RSS 阅读器查看文章');
+assert.equal(pausedView.cardItem.titleText, '中文文章与引号“测试”', 'explicitly enabled cached content survives connection exhaustion');
 class PausedButton { constructor(props) { this.props = props; } render() { return {type: 'KindleButton', props: this.props}; } }
 class PausedImage {}
 const pausedCard = pausedView.rssHomeRender({key: 'paused', props: {

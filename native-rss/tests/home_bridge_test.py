@@ -151,13 +151,13 @@ class HomeBridgeTest(unittest.TestCase):
         db = make_db(self.db_path)
         before = self.db_path.read_bytes()
         default = json.loads(self.run_summary())
-        self.assertIs(default["enabled"], True)
+        self.assertIs(default["enabled"], False)
         self.assertEqual(self.db_path.read_bytes(), before)
 
         db.execute("CREATE TABLE settings(key TEXT PRIMARY KEY,value TEXT NOT NULL)")
         db.commit(); db.close()
         no_key = json.loads(self.run_summary())
-        self.assertIs(no_key["enabled"], True)
+        self.assertIs(no_key["enabled"], False)
         self.assertEqual(default["revision"], no_key["revision"])
 
         db = sqlite3.connect(self.db_path)
@@ -165,7 +165,7 @@ class HomeBridgeTest(unittest.TestCase):
         db.commit(); db.close()
         disabled = json.loads(self.run_summary())
         self.assertIs(disabled["enabled"], False)
-        self.assertNotEqual(no_key["revision"], disabled["revision"])
+        self.assertEqual(no_key["revision"], disabled["revision"])
 
         db = sqlite3.connect(self.db_path)
         db.execute("UPDATE settings SET value='1' WHERE key='home_visible'")
