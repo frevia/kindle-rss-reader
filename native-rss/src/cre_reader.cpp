@@ -91,6 +91,7 @@ blockquote {margin:.5em 1em;padding-left:.5em;border-left:2px solid #888;}
 pre {white-space:pre-wrap;margin:.5em 0;padding:.3em;line-height:1.45;}
 pre,code {font-family:monospace;}
 .rss-plain {white-space:pre-wrap;}
+.rss-translation {display:block;margin:.25em 0 .6em .4em;padding-left:.4em;border-left:1px solid #888;color:#141414;}
 ul,ol {margin:.4em 0;padding-left:1.4em;} li {display:list-item;}
 ul {list-style-type:disc;} ol {list-style-type:decimal;}
 figure {margin:.5em 0;page-break-inside:avoid;}
@@ -139,7 +140,9 @@ CreReader::~CreReader() = default;
 void CreReader::open(const Entry& entry, const std::string& base_url, const std::string& metadata,
                      int width, int height, int font_size, int line_gap) {
     // shortcut: large documents use the original renderer; lift these limits after bounded-memory stress tests.
-    if (entry.html.size() > max_html || entry.text.size() > max_html || entry.title.size() > 16384 || metadata.size() > 16384 || base_url.size() > 8192)
+    const auto content_limit=entry.reading_mode==ReadingMode::Original?max_html:2*1024*1024;
+    const auto title_limit=entry.reading_mode==ReadingMode::Original?16384:65536;
+    if (entry.html.size() > content_limit || entry.text.size() > content_limit || entry.title.size() > static_cast<std::size_t>(title_limit) || metadata.size() > 16384 || base_url.size() > 8192)
         throw std::runtime_error("文章过大，请使用原排版");
     auto next = std::make_unique<Impl>();
     std::map<std::string, std::string> image_files;
@@ -202,18 +205,25 @@ void CreReader::open(const Entry& entry, const std::string& base_url, const std:
                     const std::string tag(reinterpret_cast<const char*>(node->name));
                     if (hidden.count(tag)) continue;
                     if (tag == "img") { body += image_markup(node); continue; }
-                    const bool keep = allowed.count(tag);
-                    if (keep) body += "<" + tag + ">";
+                    const bool keep = allowed.count(tag)||(entry.reading_mode!=ReadingMode::Original&&tag=="span");
+                    if (keep) {
+                        body += "<" + tag;
+                        if(entry.reading_mode!=ReadingMode::Original&&tag=="span"&&xml_string(xmlGetProp(node,BAD_CAST "class"))=="rss-translation")
+                            body+=" class=\"rss-translation\"";
+                        body+=">";
+                    }
                     walk(node->children, depth + 1);
                     if (keep && tag != "br" && tag != "hr") body += "</" + tag + ">";
                 }
-                if (body.size() > max_html * 6) throw std::runtime_error("文章过大，请使用原排版");
+                if (body.size() > content_limit * 6) throw std::runtime_error("文章过大，请使用原排版");
             }
         };
         walk(xmlDocGetRootElement(doc.get()), 0);
     }
+    auto title=escape(entry.title);
+    if(entry.reading_mode==ReadingMode::Bilingual)for(std::size_t at=0;(at=title.find('\n',at))!=std::string::npos;at+=5)title.replace(at,1,"<br/>");
     const auto document = "<!DOCTYPE html><html lang=\"zh-CN\"><head><meta charset=\"UTF-8\"/></head><body><h1 class=\"rss-title\">" +
-        escape(entry.title) + "</h1><p class=\"rss-meta\">" + escape(metadata) + "</p>" + body + "</body></html>";
+        title + "</h1><p class=\"rss-meta\">" + escape(metadata) + "</p>" + body + "</body></html>";
     next->content_revision = revision(document);
     write_file(next->directory / "article.html", document);
     auto& fonts = engine(font_);
@@ -273,6 +283,58 @@ std::string CreReader::anchor(std::size_t page) {
     impl_->view->goToPage(static_cast<int>(page));
     return impl_->content_revision + ":" + UnicodeToUtf8(impl_->view->getBookmark().toString()).c_str();
 }
+namespace {
+bool text_unit(lChar32 c) { return c>32&&c!=160; }
+bool skip_position_node(ldomNode* node) {
+    if(!node->isElement())return false;
+    const auto name=node->getNodeName(),kind=node->getAttributeValue("class");
+    return name==U"head"||kind==U"rss-title"||kind==U"rss-meta"||kind==U"rss-missing";
+}
+}
+std::size_t CreReader::text_position(std::size_t page) {
+    if(!impl_||page>=page_count())throw std::runtime_error("正文页码无效");
+    impl_->view->goToPage(static_cast<int>(page));
+    const auto bookmark=impl_->view->getBookmark();
+    std::size_t position=0;
+    const auto walk=[&](auto&& self,ldomNode* node)->bool {
+        if(skip_position_node(node))return node==bookmark.getNode();
+        if(node->isText()) {
+            const auto text=node->getText();
+            const auto end=node==bookmark.getNode()?std::clamp(bookmark.getOffset(),0,text.length()):text.length();
+            for(int i=0;i<end;++i)if(text_unit(text[i]))++position;
+            return node==bookmark.getNode();
+        }
+        if(node->getNodeName()==U"li")++position; // html_to_text emits one list marker.
+        for(int i=0;i<node->getChildCount();++i) {
+            if(node==bookmark.getNode()&&i>=bookmark.getOffset())return true;
+            if(self(self,node->getChildNode(static_cast<lUInt32>(i))))return true;
+        }
+        return node==bookmark.getNode();
+    };
+    walk(walk,impl_->view->getDocument()->getRootNode());return position;
+}
+std::size_t CreReader::page_for_text_position(std::size_t position) {
+    if(!impl_)throw std::runtime_error("尚未打开正文");
+    std::size_t seen=0;ldomXPointer target,last;
+    const auto walk=[&](auto&& self,ldomNode* node)->bool {
+        if(skip_position_node(node))return false;
+        if(node->isText()) {
+            const auto text=node->getText();
+            for(int i=0;i<text.length();++i)if(text_unit(text[i])) {
+                last=ldomXPointer(node,i);
+                if(seen>=position){target=last;return true;}++seen;
+            }
+            return false;
+        }
+        if(node->getNodeName()==U"li")++seen;
+        for(int i=0;i<node->getChildCount();++i)if(self(self,node->getChildNode(static_cast<lUInt32>(i))))return true;
+        return false;
+    };
+    walk(walk,impl_->view->getDocument()->getRootNode());
+    if(target.isNull())target=last;
+    if(target.isNull())return 0;
+    impl_->view->goToBookmark(target);return static_cast<std::size_t>(impl_->view->getCurPage());
+}
 void CreReader::draw(Canvas& canvas, std::size_t page, int x, int y, int clip_bottom) {
     if (!impl_ || page >= page_count() || x < 0 || y < 0 || x + impl_->width > canvas.width || y + impl_->height > canvas.height)
         throw std::runtime_error("新版排版绘制范围无效");
@@ -295,6 +357,8 @@ void CreReader::layout(int, int, int, int) { throw std::runtime_error("此构建
 std::size_t CreReader::page_count() const { return 0; }
 std::size_t CreReader::restore(const std::string&) { return 0; }
 std::string CreReader::anchor(std::size_t) { return {}; }
+std::size_t CreReader::text_position(std::size_t) { return 0; }
+std::size_t CreReader::page_for_text_position(std::size_t) { return 0; }
 void CreReader::draw(Canvas&, std::size_t, int, int, int) { throw std::runtime_error("此构建未启用新版排版"); }
 }
 #endif

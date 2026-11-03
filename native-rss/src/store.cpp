@@ -1,4 +1,5 @@
 #include "store.hpp"
+#include "translation.hpp"
 
 #include <curl/curl.h>
 
@@ -191,6 +192,12 @@ Store::Store(const std::string& path) {
                       "position INTEGER NOT NULL DEFAULT 0,automatic INTEGER NOT NULL DEFAULT 0)");
             exec(db_, "CREATE TABLE IF NOT EXISTS article_fulltext_images (entry_id INTEGER NOT NULL REFERENCES entries(id) ON DELETE CASCADE,"
                       "url TEXT NOT NULL,alt TEXT NOT NULL DEFAULT '',ordinal INTEGER NOT NULL,PRIMARY KEY(entry_id,ordinal))");
+            exec(db_, "CREATE TABLE IF NOT EXISTS article_translations (entry_id INTEGER NOT NULL REFERENCES entries(id) ON DELETE CASCADE,"
+                      "web INTEGER NOT NULL,revision TEXT NOT NULL,state TEXT NOT NULL DEFAULT 'pending',error TEXT NOT NULL DEFAULT '',"
+                      "total INTEGER NOT NULL,PRIMARY KEY(entry_id,web,revision))");
+            exec(db_, "CREATE TABLE IF NOT EXISTS article_translation_blocks (entry_id INTEGER NOT NULL,web INTEGER NOT NULL,revision TEXT NOT NULL,"
+                      "ordinal INTEGER NOT NULL,html TEXT NOT NULL,PRIMARY KEY(entry_id,web,revision,ordinal),"
+                      "FOREIGN KEY(entry_id,web,revision) REFERENCES article_translations(entry_id,web,revision) ON DELETE CASCADE)");
             exec(db_, "COMMIT");
         } catch (...) { sqlite3_exec(db_, "ROLLBACK", nullptr, nullptr, nullptr); throw; }
         exec(db_, "CREATE INDEX IF NOT EXISTS entry_order ON entries(published DESC,id DESC)");
@@ -560,22 +567,99 @@ std::optional<Entry> Store::fulltext_entry(std::int64_t id) const {
     check(db_,step);return entry;
 }
 
-void Store::set_position(std::int64_t id, std::int64_t offset, bool fulltext) {
+void Store::begin_translation(std::int64_t id,bool web,const std::string& revision,std::size_t total) {
+    const auto source=web?fulltext_entry(id):entry(id);
+    if(!source||translation_revision(*source)!=revision)throw std::runtime_error("文章已更新或删除，请重新打开后翻译");
+    if(total==0||total>2048||revision.size()>128)throw std::runtime_error("翻译段落数量无效");
+    Statement q(db_,"INSERT INTO article_translations(entry_id,web,revision,total) VALUES(?,?,?,?) "
+                    "ON CONFLICT(entry_id,web,revision) DO UPDATE SET state='pending',error=''");
+    q.integer(1,id);q.boolean(2,web);q.text(3,revision);q.integer(4,static_cast<std::int64_t>(total));q.run();
+}
+TranslationStatus Store::translation_status(std::int64_t id,bool web,const std::string& revision) const {
+    Statement q(db_,"SELECT state,error,total,(SELECT count(*) FROM article_translation_blocks b WHERE b.entry_id=t.entry_id AND b.web=t.web AND b.revision=t.revision) "
+                    "FROM article_translations t WHERE entry_id=? AND web=? AND revision=?");
+    q.integer(1,id);q.boolean(2,web);q.text(3,revision);
+    const auto result=sqlite3_step(q.get());check(db_,result);
+    if(result==SQLITE_ROW)return {column_text(q.get(),0),column_text(q.get(),1),static_cast<std::size_t>(sqlite3_column_int64(q.get(),3)),static_cast<std::size_t>(sqlite3_column_int64(q.get(),2))};
+    Statement stale(db_,"SELECT 1 FROM article_translations WHERE entry_id=? AND web=? LIMIT 1");stale.integer(1,id);stale.boolean(2,web);
+    const auto previous=sqlite3_step(stale.get());check(db_,previous);
+    return {previous==SQLITE_ROW?"stale":"","",0,0};
+}
+std::vector<std::string> Store::translation_blocks(std::int64_t id,bool web,const std::string& revision) const {
+    const auto status=translation_status(id,web,revision);
+    if(status.total>2048)throw std::runtime_error("翻译缓存段落数量无效");
+    std::vector<std::string> blocks(status.total);
+    Statement q(db_,"SELECT ordinal,html FROM article_translation_blocks WHERE entry_id=? AND web=? AND revision=? ORDER BY ordinal");
+    q.integer(1,id);q.boolean(2,web);q.text(3,revision);int step;std::size_t bytes=0;
+    while((step=sqlite3_step(q.get()))==SQLITE_ROW) {
+        const auto ordinal=sqlite3_column_int64(q.get(),0);
+        if(ordinal<0||static_cast<std::size_t>(ordinal)>=blocks.size())throw std::runtime_error("翻译缓存段落顺序无效");
+        blocks[static_cast<std::size_t>(ordinal)]=column_text(q.get(),1);bytes+=blocks[static_cast<std::size_t>(ordinal)].size();
+        if(bytes>1024*1024)throw std::runtime_error("翻译缓存超过大小限制");
+    }
+    check(db_,step);return blocks;
+}
+void Store::save_translation_block(std::int64_t id,bool web,const std::string& revision,std::size_t block,const std::string& html) {
+    if(html.size()>512*1024)throw std::runtime_error("翻译段落超过大小限制");
+    exec(db_,"BEGIN IMMEDIATE");
+    try {
+        const auto source=web?fulltext_entry(id):entry(id);
+        if(!source||translation_revision(*source)!=revision)throw std::runtime_error("文章已更新或删除，请重新打开后翻译");
+        Statement q(db_,"INSERT INTO article_translation_blocks(entry_id,web,revision,ordinal,html) "
+                        "SELECT entry_id,web,revision,?,? FROM article_translations WHERE entry_id=? AND web=? AND revision=? AND total>? "
+                        "AND coalesce((SELECT sum(length(CAST(html AS BLOB))) FROM article_translation_blocks WHERE entry_id=? AND web=? AND revision=?),0)+?<=1048576 "
+                        "ON CONFLICT(entry_id,web,revision,ordinal) DO UPDATE SET html=excluded.html");
+        q.integer(1,static_cast<std::int64_t>(block));q.text(2,html);q.integer(3,id);q.boolean(4,web);q.text(5,revision);q.integer(6,static_cast<std::int64_t>(block));
+        q.integer(7,id);q.boolean(8,web);q.text(9,revision);q.integer(10,static_cast<std::int64_t>(html.size()));q.run();
+        if(sqlite3_changes(db_)!=1)throw std::runtime_error("翻译缓存已失效或超过大小限制");
+        exec(db_,"COMMIT");
+    } catch(...) {sqlite3_exec(db_,"ROLLBACK",nullptr,nullptr,nullptr);throw;}
+}
+void Store::set_translation_state(std::int64_t id,bool web,const std::string& revision,const std::string& state,const std::string& error) {
+    if(state!="ready"&&state!="paused"&&state!="failed")throw std::runtime_error("无效的翻译状态");
+    exec(db_,"BEGIN IMMEDIATE");
+    try {
+        const auto status=translation_status(id,web,revision);
+        if(state=="ready"&&(status.total==0||status.completed!=status.total))throw std::runtime_error("文章仍有段落未翻译");
+        if(state=="ready") {
+            const auto source=web?fulltext_entry(id):entry(id);
+            if(!source||translation_revision(*source)!=revision)throw std::runtime_error("原文已更新，本轮译文保留为旧版本");
+        }
+        Statement q(db_,"UPDATE article_translations SET state=?,error=? WHERE entry_id=? AND web=? AND revision=?");
+        q.text(1,state);q.text(2,error);q.integer(3,id);q.boolean(4,web);q.text(5,revision);q.run();
+        if(state=="ready") {
+            Statement old(db_,"DELETE FROM article_translations WHERE entry_id=? AND web=? AND revision<>?");
+            old.integer(1,id);old.boolean(2,web);old.text(3,revision);old.run();
+        }
+        exec(db_,"COMMIT");
+    } catch(...) {sqlite3_exec(db_,"ROLLBACK",nullptr,nullptr,nullptr);throw;}
+}
+void Store::set_position(std::int64_t id, std::int64_t offset, bool fulltext,ReadingMode mode) {
     const auto value=std::max<std::int64_t>(0,offset);
+    if(mode!=ReadingMode::Original) {
+        set_setting(std::string(mode==ReadingMode::Bilingual?"reader_position:bilingual:":"reader_position:translated:")+(fulltext?"web:":"rss:")+std::to_string(id),std::to_string(value));
+        Statement global(db_,"UPDATE entries SET in_progress=1 WHERE id=?");global.integer(1,id);global.run();return;
+    }
     if(fulltext){Statement q(db_,"UPDATE article_fulltext SET position=? WHERE entry_id=?");q.integer(1,value);q.integer(2,id);q.run();Statement global(db_,"UPDATE entries SET in_progress=1 WHERE id=?");global.integer(1,id);global.run();}
     else {Statement q(db_, "UPDATE entries SET position=?,in_progress=1 WHERE id=?"); q.integer(1,value); q.integer(2,id); q.run();}
 }
-void Store::begin_reading(std::int64_t id, std::int64_t offset, bool fulltext) {
+void Store::begin_reading(std::int64_t id, std::int64_t offset, bool fulltext,ReadingMode mode) {
     exec(db_, "BEGIN IMMEDIATE");
     try {
         set_read(id, true);
-        set_position(id, offset, fulltext);
+        set_position(id, offset, fulltext,mode);
         set_setting("reader_content:" + std::to_string(id), fulltext ? "web" : "rss");
+        if(mode!=ReadingMode::Original)set_setting(std::string("reader_mode:")+(fulltext?"web:":"rss:")+std::to_string(id),mode==ReadingMode::Bilingual?"bilingual":"translated");
         set_setting("last_entry", std::to_string(id));
         exec(db_, "COMMIT");
     } catch (...) { sqlite3_exec(db_, "ROLLBACK", nullptr, nullptr, nullptr); throw; }
 }
-void Store::finish_reading(std::int64_t id) { Statement q(db_, "UPDATE entries SET in_progress=0,position=0,read=1 WHERE id=?"); q.integer(1,id); q.run(); Statement fulltext(db_,"UPDATE article_fulltext SET position=0 WHERE entry_id=?");fulltext.integer(1,id);fulltext.run(); }
+void Store::finish_reading(std::int64_t id) {
+    Statement q(db_, "UPDATE entries SET in_progress=0,position=0,read=1 WHERE id=?");q.integer(1,id);q.run();
+    Statement fulltext(db_,"UPDATE article_fulltext SET position=0 WHERE entry_id=?");fulltext.integer(1,id);fulltext.run();
+    for(const auto* source:{"rss:","web:"})for(const auto* mode:{"translated:","bilingual:"})
+        set_setting(std::string("reader_position:")+mode+source+std::to_string(id),"0");
+}
 
 void Store::mark_feed_read(std::int64_t feed_id) {
     Statement q(db_, feed_id ? "UPDATE entries SET read=1 WHERE feed_id=?" : "UPDATE entries SET read=1");

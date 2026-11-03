@@ -93,7 +93,7 @@ cleanup() {
     fi
     for record in $stopped; do
         old_ifs=$IFS; IFS=:; set -- $record; IFS=$old_ifs
-        case "$2" in volumd|kindle-rss-home) continue ;; esac
+        case "$2" in volumd) continue ;; esac
         if same "$1" "$2" "$3"; then "$KILL" -CONT "$1" 2>/dev/null || restore_failed=1; fi
     done
     if [ "$pillow" -eq 1 ]; then timeout 2 "$SET" com.lab126.pillow disableEnablePillow enable >/dev/null 2>&1 || restore_failed=1; fi
@@ -104,7 +104,7 @@ cleanup() {
     for record in $stopped; do
         old_ifs=$IFS; IFS=:; set -- $record; IFS=$old_ifs
         case "$2" in
-            volumd|kindle-rss-home) if same "$1" "$2" "$3"; then "$KILL" -CONT "$1" 2>/dev/null || restore_failed=1; fi ;;
+            volumd) if same "$1" "$2" "$3"; then "$KILL" -CONT "$1" 2>/dev/null || restore_failed=1; fi ;;
         esac
     done
     if [ -n "$guardian" ] && [ "$recovering" -eq 0 ]; then
@@ -147,17 +147,7 @@ for service in awesome JunoStatusBarDriver volumd; do
     if [ "$service" = awesome ]; then wm_pid=$1; wm_born=$born; fi
     records="$records $1:$comm:$born"
 done
-# The optional home publisher must not redraw the system screen while this app owns it.
-home_pids=$(pidof kindle-rss-home 2>/dev/null) || home_pids=
-if [ -n "$home_pids" ]; then
-    set -- $home_pids
-    [ "$#" -eq 1 ] || fail '首页 RSS 后台进程数量异常'
-    born=$(identity "$1" kindle-rss-home) || fail '无法确认首页 RSS 后台进程'
-    case "$born" in ''|*[!0-9]*) fail '无效首页 RSS 进程启动时间' ;; esac
-    state=$(awk '/^State:/{print $2}' "$PROC/$1/status")
-    case "$state" in R|S|I) ;; *) fail '首页 RSS 后台状态不适合接管' ;; esac
-    records="$records $1:kindle-rss-home:$born"
-fi
+# The home bridge keeps heartbeats alive; session.lock suppresses content updates.
 snapshot=$(mktemp "$STATE/frame.XXXXXX") || fail '无法保存屏幕'
 dd if="$FB" of="$snapshot" bs=1088 count=1448 2>/dev/null || fail '保存屏幕失败'
 [ "$(wc -c <"$snapshot")" -eq 1575424 ] || fail '屏幕快照不完整'

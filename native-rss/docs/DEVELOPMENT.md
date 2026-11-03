@@ -37,6 +37,18 @@ rtk proxy ctest --test-dir native-rss/build --output-on-failure
 
 本地临时数据库可使用 `kindle-rss --db /tmp/test.sqlite fulltext ID` 验证单篇下载，`sync failed` 重试失败项目。`fulltext`、`fulltext_app`、`store`、`net` 和本机 HTTP `network` 测试覆盖提取、迁移、正文切换、取消和失败路径；宿主截图与 ARM 编译不等于真机内存、触摸或耗电验收。
 
+## 文章翻译
+
+`src/translation.*` 用现有 libxml2 将正文拆成互不重叠的翻译段落，保留外层文章结构；图片和代码使用受控占位符保护。单段正文不超过 6000 UTF-8 字节。应用本地保留行内标签、链接和受控占位符，仅将解码后的文字节点发送给翻译服务；返回的纯文字须通过校验再放回原 DOM，整段仍校验结构和占位符，禁止引入脚本、事件或外部资源。`Entry.reading_mode` 区分原文、译文、双语，`web_content` 继续区分 RSS / 网页来源。双语由段落缓存拼装，生成后重新派生纯文本，供两种排版复用。
+
+`src/qwen.*` 读取数据库同目录下的 `translation.conf`，支持 `RSS_QWEN_API_KEY` 和 `RSS_QWEN_ENDPOINT`，同名环境变量优先；模型固定为 `qwen-mt-flash`。配置最多 16 KiB，使用简单键值格式，不执行 shell。每次任务重新读取，密钥不进入 SQLite、OPML、安装包或源码包。外部地址只接受 HTTPS，HTTP 仅允许字面回环地址供本机测试；带鉴权的请求不跟随重定向、不继承代理，不回显服务端错误正文。
+
+`net.cpp` 复用 UI 的单后台任务与取消信号，翻译不在绘制或数据库事务内联网。单请求超时 45 秒、响应最多 256 KiB，逐次请求间隔至少 1.1 秒，一轮预算约五分钟；未完成时暂停，只有用户重试才继续，不自动重试可能已计费的请求。所有请求使用单条 user 消息和 `translation_options` 指定 English → Chinese，不向模型发送 HTML 标签、链接属性或受保护的代码/图片占位符；按[官方文本翻译调用方式](https://help.aliyun.com/zh/model-studio/machine-translation)发送原始文字，避免模型改坏标签或漏掉链接。检查 `finish_reason`，截断结果不缓存。JSON 解码复用 SQLite 3.38+ 内置 JSON 函数，不新增 SDK 或第三方解析器。
+
+`article_translations` 与 `article_translation_blocks` 附表以文章、来源及源内容指纹区分缓存。每段单独事务提交；失败或取消保留成功段落，新版本完成前保留旧版本缓存。文章删除时级联清理，收藏随原文保留。翻译模式的阅读偏好与书签使用独立设置键；原来的 RSS / 网页原文位置不被译文覆盖。跨模式用正文 Unicode 字符位置和段落映射定位，不沿用不同文档的页码。额外保存当前文档对应的源指纹、已缓存段落数及原文段落位置；后台补全译文后据此恢复，缓存未变时仍使用精确书签。只读预览不写入恢复位置，原文更新后不套用旧段落位置。双语模式的嵌套图片只保留在原文一侧，译文模式继续保留图片。
+
+CLI 可在临时数据库执行 `translate ID` 或 `translate-web ID`。`translation`、`qwen`、`translation_app` 和本机模拟服务 `translation_network` 覆盖段落、配置、缓存、取消、失败、缓存复用、模式切换及旧数据保护；不消耗真实翻译额度。1072×1448 模拟截图通过 `RSS_TEST_SNAPSHOTS` 输出。外部 API 的真实译文质量、KPW3 内存、触摸和耗电仍需另行验证。
+
 ## ARM 构建状态
 
 Apple Silicon macOS 上的依赖构建脚本为 `tools/build_arm.py`，依赖版本与校验来源在 `tools/arm-sources.json`。需要 CMake 3.22+、Make、Perl、curl 和 Python 3.12+，以及 `vendor/zig-aarch64-macos-0.15.2/zig`。Zig 官方归档为 `https://ziglang.org/download/0.15.2/zig-aarch64-macos-0.15.2.tar.xz`，SHA-256 为 `3cc2bab367e185cdfb27501c4b30b1b0653c28d9f73df8dc91488e66ece5fa6b`。编译器目前需预先放置在该位置。

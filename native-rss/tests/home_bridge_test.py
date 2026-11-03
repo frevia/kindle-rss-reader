@@ -614,6 +614,47 @@ class HomeBridgeTest(unittest.TestCase):
         self.assertEqual((before.st_ino, before.st_mtime_ns), (after.st_ino, after.st_mtime_ns))
         peer.close()
 
+    def test_reading_keeps_existing_and_new_clients_alive_without_content_push(self):
+        make_db(self.db_path).close()
+        _, port = self.server()
+        existing, initial = self.ws(port)
+        ack = json.dumps({"type": "rss-home-ack", "revision": initial["revision"]}, separators=(",", ":")).encode()
+        existing.sendall(masked(1, ack))
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline and "ready=1" not in self.state_path.read_text():
+            time.sleep(.05)
+        self.assertIn("ready=1", self.state_path.read_text())
+        with open(self.lock_path, "w") as lockfile:
+            fcntl.flock(lockfile, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            db = sqlite3.connect(self.db_path)
+            db.execute("INSERT INTO entries VALUES(4,1,'after reading',0,1001)")
+            db.commit(); db.close()
+            newcomer, response = self.connect(port)
+            self.assertIn(b"101 Switching Protocols", response)
+            for peer in (existing, newcomer):
+                peer.settimeout(18)
+            # Exceed the frontend's 45-second watchdog while the reader holds the lock.
+            for _ in range(4):
+                for peer in (existing, newcomer):
+                    opcode, payload = read_frame(peer)
+                    self.assertEqual(opcode, 1)
+                    self.assertEqual(json.loads(payload), {"type": "rss-home-heartbeat"})
+            self.assertIn("ready=0", self.state_path.read_text())
+            before = self.state_path.stat()
+            existing.sendall(masked(1, ack))
+            existing.sendall(masked(9, b"still alive"))
+            self.assertEqual(read_frame(existing), (10, b"still alive"))
+            after = self.state_path.stat()
+            self.assertEqual((before.st_ino, before.st_mtime_ns), (after.st_ino, after.st_mtime_ns))
+            fcntl.flock(lockfile, fcntl.LOCK_UN)
+        for peer in (existing, newcomer):
+            peer.settimeout(4)
+            _, payload = read_frame(peer)
+            value = json.loads(payload)
+            self.assertEqual(value["type"], "rss-home-v1")
+            self.assertEqual(value["items"][0]["id"], 4)
+            peer.close()
+
     def test_origin_rejected_and_masked_ping(self):
         make_db(self.db_path).close()
         p, port = self.server()

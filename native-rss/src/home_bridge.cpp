@@ -350,7 +350,7 @@ std::string ws_frame(unsigned char opcode, const std::string& payload) {
 }
 
 struct Client {
-    int fd = -1; bool upgraded = false, closing = false, sent_snapshot = false;
+    int fd = -1; bool upgraded = false, closing = false, sent_snapshot = false, content_pending = false;
     std::string input, output; std::size_t sent = 0;
     std::chrono::steady_clock::time_point deadline, heartbeat;
 };
@@ -502,13 +502,15 @@ int run_server(const Options& options) {
                 if (c.sent) { c.output.erase(0, c.sent); c.sent = 0; }
                 const auto frame = ws_frame(1, current.json);
                 if (c.output.size() - c.sent + frame.size() > kMaxOut) { close_client(c); continue; }
-                c.output += frame; c.sent_snapshot = true;
+                c.output += frame; c.sent_snapshot = true; c.content_pending = true;
                 c.heartbeat = now + std::chrono::seconds(15);
             }
             next_check = now + std::chrono::seconds(2);
         }
-        if (!reading) for (auto& c : clients) {
-            if (c.fd < 0 || !c.upgraded || !c.sent_snapshot || c.closing || now < c.heartbeat) continue;
+        for (auto& c : clients) {
+            // Do not let a queued snapshot block heartbeats or redraw the reader's screen.
+            if (reading && c.content_pending) { close_client(c); continue; }
+            if (c.fd < 0 || !c.upgraded || c.closing || now < c.heartbeat) continue;
             if (c.sent) { c.output.erase(0, c.sent); c.sent = 0; }
             const auto frame = ws_frame(1, "{\"type\":\"rss-home-heartbeat\"}");
             if (c.output.size() + frame.size() > kMaxOut) { close_client(c); continue; }
@@ -517,14 +519,14 @@ int run_server(const Options& options) {
         }
         if (reading || !connected) state.ready = false;
         std::vector<pollfd> pfds; pfds.push_back({listen_fd, POLLIN, 0});
-        for (const auto& c : clients) if (c.fd >= 0) pfds.push_back({c.fd, static_cast<short>(POLLIN | ((!c.output.empty() && (!reading || !c.sent_snapshot)) ? POLLOUT : 0)), 0});
+        for (const auto& c : clients) if (c.fd >= 0) pfds.push_back({c.fd, static_cast<short>(POLLIN | (!c.output.empty() ? POLLOUT : 0)), 0});
         const int pr = poll(pfds.data(), pfds.size(), 1000);
         if (pr < 0 && errno != EINTR) break;
         if (pfds[0].revents & POLLIN) {
             for (;;) {
                 int fd = accept(listen_fd, nullptr, nullptr); if (fd < 0) break;
                 nonblock(fd); if (clients.size() >= 4) { close(fd); continue; }
-                Client c; c.fd = fd; c.deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5); clients.push_back(std::move(c));
+                Client c; c.fd = fd; c.deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5); c.heartbeat = now + std::chrono::seconds(15); clients.push_back(std::move(c));
             }
         }
         std::size_t pi = 1;
@@ -546,11 +548,11 @@ int run_server(const Options& options) {
                     }
                 }
             }
-            if (c.fd >= 0 && (events & POLLOUT || !c.output.empty()) &&
-                (!c.sent_snapshot || !session_reading(options.session_lock))) {
+            if (c.fd >= 0 && c.content_pending && session_reading(options.session_lock)) { close_client(c); continue; }
+            if (c.fd >= 0 && (events & POLLOUT || !c.output.empty())) {
                 const auto remain = c.output.size() - c.sent;
                 if (remain) { const auto sent = send(c.fd, c.output.data() + c.sent, std::min<std::size_t>(remain, 8192), MSG_NOSIGNAL); if (sent > 0) c.sent += static_cast<std::size_t>(sent); else if (sent < 0 && errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) close_client(c); }
-                if (c.fd >= 0 && c.sent == c.output.size()) { c.output.clear(); c.sent = 0; if (c.closing) close_client(c); }
+                if (c.fd >= 0 && c.sent == c.output.size()) { c.output.clear(); c.sent = 0; c.content_pending = false; if (c.closing) close_client(c); }
             }
             if (c.fd >= 0 && !c.upgraded && std::chrono::steady_clock::now() >= c.deadline) close_client(c);
         }

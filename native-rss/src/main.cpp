@@ -85,15 +85,19 @@ public:
         const auto now=std::chrono::steady_clock::now();
         if(now>=status_due_){app_.set_reader_status(rss::read_reader_status(std::time(nullptr)));status_due_=now+std::chrono::seconds(30);}
         collect();const auto request=app_.take_request();const auto folder=std::filesystem::path(db_).parent_path();
-        if(request=="sync"||request=="retry-sync"||request.rfind("fulltext:",0)==0){
+        if(request=="sync"||request=="retry-sync"||request.rfind("fulltext:",0)==0||request.rfind("translate:",0)==0){
             if(!worker_.valid()){
-                cancel_=false;app_.sync_started();const bool failed_only=request=="retry-sync";
+                const bool translating=request.rfind("translate:",0)==0;
+                cancel_=false;app_.sync_started(translating);const bool failed_only=request=="retry-sync";
                 const auto fulltext_id=request.rfind("fulltext:",0)==0?std::stoll(request.substr(9)):0;
-                worker_=std::async(std::launch::async,[this,failed_only,fulltext_id]{
+                const auto translation_id=translating?std::stoll(request.substr(14)):0;
+                const bool translation_web=translating&&request.substr(10,4)=="web:";
+                worker_=std::async(std::launch::async,[this,failed_only,fulltext_id,translation_id,translation_web]{
                     rss::Store background(db_);const auto progress=[this](const rss::SyncProgress& p){
                         std::lock_guard<std::mutex> lock(mutex_);progress_=p;
                     };
-                    if(fulltext_id)rss::sync_fulltext(background,fulltext_id,cancel_,progress);
+                    if(translation_id)rss::translate_article(background,translation_id,translation_web,rss::qwen_config(db_),cancel_,progress);
+                    else if(fulltext_id)rss::sync_fulltext(background,fulltext_id,cancel_,progress);
                     else rss::sync_feeds(background,cancel_,progress,failed_only);
                 });
             }
@@ -229,6 +233,8 @@ int main(int argc,char** argv){
                 "  add URL              添加 RSS/Atom 订阅\n"
                 "  sync [failed]        更新订阅，或重试失败项目\n"
                 "  fulltext ID          下载单篇网页正文并缓存图片\n"
+                "  translate ID         英译中并缓存 RSS 内容\n"
+                "  translate-web ID     英译中并缓存已下载的网页正文\n"
                 "  list                 列出本地文章\n"
                 "  probe                只读检查 Kindle 屏幕和输入设备\n"
                 "  device               由会话启动器启动 Kindle 原生界面；--article ID 直达正文\n"
@@ -261,6 +267,12 @@ int main(int argc,char** argv){
             if(store.fulltext_status(id).state!="pending")throw std::runtime_error("文章地址不可下载，或订阅已取消");
             std::atomic<bool> cancel{false};int failed=0;
             rss::sync_fulltext(store,id,cancel,[&](const rss::SyncProgress& p){failed=p.failed;std::cout<<p.message<<"\n";});
+            return failed?2:0;
+        }else if(command=="translate"||command=="translate-web"){
+            std::size_t used=0;const auto id=std::stoll(arg,&used);
+            if(id<=0||used!=arg.size())throw std::runtime_error("需要有效的文章编号");
+            std::atomic<bool> cancel{false};int failed=0;
+            rss::translate_article(store,id,command=="translate-web",rss::qwen_config(db),cancel,[&](const rss::SyncProgress& p){failed=p.failed;std::cout<<p.message<<"\n";});
             return failed?2:0;
         }else if(command=="list"){
             for(const auto& e:store.entries(rss::View::All))std::cout<<e.id<<"\t"<<(e.read?"已读":"未读")<<"\t"<<e.title<<"\n";

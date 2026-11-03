@@ -309,39 +309,24 @@ class LauncherTests(unittest.TestCase):
         self.assertIn("cache-rm",events)
         for pid in (900001,900002,900003):self.assertIn("-CONT "+str(pid),events)
 
-    def test_optional_home_bridge_is_paused_and_resumed(self):
-        result,events,pixel=self.run_case("home-running")
-        self.assertEqual(result.returncode,0,result.stderr)
-        self.assertEqual(pixel,b"x")
-        self.assertIn("-STOP 900004",events)
-        self.assertIn("-CONT 900004",events)
-        self.assertLess(events.index("-STOP 900004"),events.index("app-start"))
-        self.assertLess(events.index("refresh"),events.index("-CONT 900004"))
+    def test_optional_home_bridge_keeps_running_during_reading(self):
+        for mode in ("home-running", "home-stop-error", "home-identity", "home-zombie", "home-ambiguous"):
+            with self.subTest(mode=mode):
+                result,events,pixel=self.run_case(mode)
+                self.assertEqual(result.returncode,0,result.stderr)
+                self.assertEqual(pixel,b"x")
+                self.assertIn("app-start",events)
+                self.assertNotIn("-STOP 900004",events)
+                self.assertNotIn("-CONT 900004",events)
 
-    def test_optional_home_bridge_is_resumed_by_guardian_after_launcher_death(self):
+    def test_guardian_recovers_without_signalling_home_bridge(self):
         result,events,pixel=self.run_case("launcher-killed-home")
         self.assertEqual(result.returncode,-9,result.stderr)
         self.assertEqual(pixel,b"x")
-        self.assertIn("-STOP 900004",events)
-        self.assertIn("-CONT 900004",events)
-        self.assertLess(events.index("-STOP 900004"),events.index("app-start"))
-        self.assertLess(events.index("refresh"),events.index("-CONT 900004"))
-
-    def test_invalid_optional_home_process_is_rejected_before_takeover(self):
-        for mode in ("home-identity", "home-zombie", "home-ambiguous"):
-            with self.subTest(mode=mode):
-                result,events,pixel=self.run_case(mode)
-                self.assertEqual(result.returncode,1,result.stderr)
-                self.assertNotIn("app-start",events)
-                self.assertNotIn("-STOP 900004",events)
-                self.assertEqual(pixel,b"x")
-
-    def test_optional_home_stop_failure_is_recovered(self):
-        result,events,pixel=self.run_case("home-stop-error")
-        self.assertEqual(result.returncode,1,result.stderr)
-        self.assertNotIn("app-start",events)
-        self.assertIn("-STOP 900004",events)
-        self.assertIn("-CONT 900004",events)
+        self.assertNotIn("-STOP 900004",events)
+        self.assertNotIn("-CONT 900004",events)
+        for pid in (900001,900002,900003):
+            self.assertIn("-CONT "+str(pid),events)
 
 
 if __name__=="__main__":unittest.main()

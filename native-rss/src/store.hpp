@@ -34,14 +34,19 @@ public:
     std::vector<std::pair<std::int64_t,ArticleImage>> pending_images() const;
     void set_read(std::int64_t id, bool value);
     void set_starred(std::int64_t id, bool value);
-    void set_position(std::int64_t id, std::int64_t offset, bool fulltext = false);
-    void begin_reading(std::int64_t id, std::int64_t offset, bool fulltext = false); // Commit all open-state writes together.
+    void set_position(std::int64_t id, std::int64_t offset, bool fulltext = false, ReadingMode mode = ReadingMode::Original);
+    void begin_reading(std::int64_t id, std::int64_t offset, bool fulltext = false, ReadingMode mode = ReadingMode::Original); // Commit all open-state writes together.
     FulltextStatus fulltext_status(std::int64_t id) const;
     bool queue_fulltext(std::int64_t id);
     std::vector<Entry> pending_fulltext(bool retry_failed = false, std::size_t limit = 10) const;
     void save_fulltext(std::int64_t id, const Entry& content);
     void fail_fulltext(std::int64_t id, const std::string& error);
     std::optional<Entry> fulltext_entry(std::int64_t id) const;
+    void begin_translation(std::int64_t id, bool web, const std::string& revision, std::size_t total);
+    TranslationStatus translation_status(std::int64_t id, bool web, const std::string& revision) const;
+    std::vector<std::string> translation_blocks(std::int64_t id, bool web, const std::string& revision) const;
+    void save_translation_block(std::int64_t id, bool web, const std::string& revision, std::size_t block, const std::string& html);
+    void set_translation_state(std::int64_t id, bool web, const std::string& revision, const std::string& state, const std::string& error = "");
     void finish_reading(std::int64_t id);
     void mark_feed_read(std::int64_t feed_id); // 0 = all.
     void remove_feed(std::int64_t id); // Keep starred entries and their source metadata.

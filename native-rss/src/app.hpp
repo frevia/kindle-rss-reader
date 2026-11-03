@@ -12,7 +12,7 @@
 namespace rss {
 class App {
 public:
-    enum class ReaderPanel { None, Type, Images, Info, Content };
+    enum class ReaderPanel { None, Type, Images, Info, Content, Translation };
     enum class Screen { List, Subscriptions, GroupPicker, Groups, GroupEdit, Opml, Sync, Cache, Settings };
     enum class SyncState { Idle, Running, Complete, Cancelled, Failed };
     App(Store& store, Canvas& canvas, std::int64_t initial_article = 0, const std::string& status_font = {});
@@ -29,7 +29,7 @@ public:
     void reload();
     void open(std::int64_t id, bool track = true);
     void notify(const std::string& text);
-    void sync_started();
+    void sync_started(bool translating = false);
     void sync_progress(int completed, int total, int failed, const std::string& message);
     void sync_finished(bool cancelled, const std::string& error = "");
     Screen screen() const { return screen_; }
@@ -47,6 +47,7 @@ public:
     std::int64_t current_id() const { return current_ ? current_->id : 0; }
     bool using_cre() const { return static_cast<bool>(cre_); }
     bool using_fulltext() const { return current_ && current_->web_content; }
+    ReadingMode reading_mode() const { return current_ ? current_->reading_mode : ReadingMode::Original; }
     bool reader_tools_open() const { return reader_tools_; }
     ReaderPanel reader_panel() const { return reader_panel_; }
     std::size_t reader_image_page() const { return image_page_; }
@@ -77,10 +78,14 @@ private:
     ReaderPanel reader_panel_ = ReaderPanel::None;
     std::size_t info_scroll_ = 0;
     std::optional<std::int64_t> typography_anchor_;
+    std::optional<std::size_t> reading_source_anchor_;
+    std::string reading_version_;
     Screen screen_ = Screen::List, edit_origin_ = Screen::Subscriptions;
     SyncState sync_state_ = SyncState::Idle;
     int sync_completed_ = 0, sync_total_ = 0, sync_failed_ = 0;
     std::string sync_message_;
+    bool translating_ = false;
+    std::string translation_request_;
     bool brand_menu_ = false, source_list_ = false;
     struct ListContext { View view; std::int64_t feed; std::optional<std::string> group; std::string search; std::size_t page; };
     std::optional<ListContext> home_;
@@ -111,6 +116,9 @@ private:
     void save_position();
     std::string reader_key(const std::string& prefix) const;
     void set_reader_content(bool web);
+    void set_reading_mode(ReadingMode mode);
+    std::size_t reading_text_position();
+    void seek_reading_text(std::size_t position);
     void set_reader_engine(bool use_cre);
     enum class Align { Center, Left, Right };
     void button(Rect rect,const std::string& label,std::function<void()> action,bool filled=false,int size=28,Icon icon=Icon::None,bool enabled=true,Align align=Align::Center);

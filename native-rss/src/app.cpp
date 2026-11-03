@@ -1,6 +1,7 @@
 #include "app.hpp"
 #include "pinyin.hpp"
 #include "feed.hpp"
+#include "translation.hpp"
 #include <algorithm>
 #include <array>
 #include <cctype>
@@ -263,7 +264,8 @@ int App::article_heading_height(){
     return (size+10)*static_cast<int>(std::min<std::size_t>(3,c_.wrap(current_->title,size,c_.width-2*margin_).size()))+64;
 }
 std::string App::reader_key(const std::string& prefix)const{
-    return prefix+(current_->web_content?"web:":"")+std::to_string(current_->id);
+    const auto mode=current_->reading_mode==ReadingMode::Original?"":current_->reading_mode==ReadingMode::Bilingual?"bilingual:":"translated:";
+    return prefix+mode+(current_->web_content?"web:":"")+std::to_string(current_->id);
 }
 void App::paginate(){
     if(!current_)return;
@@ -306,9 +308,37 @@ void App::open(std::int64_t id,bool track){
     if(selected=="web"||(selected.empty()&&!entry->read&&!entry->in_progress)){
         if(auto web=store_.fulltext_entry(id))entry=std::move(web);
     }
+    const auto source_key=std::string(entry->web_content?"web:":"rss:")+std::to_string(id);
+    const auto mode=store_.setting("reader_mode:"+source_key);
+    std::string version;
+    std::optional<std::size_t> source_anchor;
+    bool cache_changed=false;
+    if(mode=="translated"||mode=="bilingual") {
+      try {
+        const auto document=translation_document(*entry);
+        const auto status=store_.translation_status(id,entry->web_content,document.revision);
+        if(status.completed) {
+            const auto reading_mode=mode=="bilingual"?ReadingMode::Bilingual:ReadingMode::Translated;
+            auto displayed=translated_entry(*entry,document,store_.translation_blocks(id,entry->web_content,document.revision),reading_mode);
+            try{displayed.position=std::max<std::int64_t>(0,std::stoll(store_.setting("reader_position:"+mode+":"+source_key,"0")));}
+            catch(...){displayed.position=0;}
+            const auto saved=store_.setting("reader_source_anchor:"+mode+":"+(entry->web_content?"web:":"")+std::to_string(id));
+            const auto split=saved.find('|');
+            const auto next_version=document.revision+":"+std::to_string(status.completed);
+            if(split!=std::string::npos&&saved.rfind(document.revision+":",0)!=0)displayed.position=0;
+            if(split!=std::string::npos&&saved.rfind(document.revision+":",0)==0)try {
+                const auto number=saved.substr(split+1);std::size_t used=0;const auto position=std::stoull(number,&used);
+                if(!number.empty()&&number.front()>='0'&&number.front()<='9'&&used==number.size()&&position<=512*1024) {
+                    source_anchor=static_cast<std::size_t>(position);cache_changed=saved.substr(0,split)!=next_version;
+                }
+            }catch(const std::exception&){}
+            *entry=std::move(displayed);version=next_version;
+        }else notify(status.state=="stale"?"原文已更新，请重新翻译；当前显示原文":"译文尚未缓存，当前显示原文");
+      }catch(const std::exception&){notify("译文缓存无法打开，已显示原文");}
+    }
     if(entry->text.empty()&&entry->images.empty())throw std::runtime_error("这篇文章尚无可阅读的正文");
-    cre_.reset();current_=std::move(entry);
-    const bool keep_classic_position=!current_->web_content&&store_.setting("reader_engine").empty()&&current_->position>0&&
+    cre_.reset();current_=std::move(entry);reading_version_=version;
+    const bool keep_classic_position=current_->reading_mode==ReadingMode::Original&&!current_->web_content&&store_.setting("reader_engine").empty()&&current_->position>0&&
         store_.setting("reader_cre:"+std::to_string(id)).empty();
     if(cre_requested_&&!keep_classic_position){
         try{
@@ -321,9 +351,14 @@ void App::open(std::int64_t id,bool track){
         }catch(const std::exception& e){cre_.reset();paginate();show_error(std::string("新版排版无法打开，已回到原排版：")+e.what());}
     }else paginate();
     if(cre_requested_&&keep_classic_position)notify("已保留原排版阅读位置，可在排版中切换新版");
+    if(cache_changed&&source_anchor) {
+        std::size_t display_position=0;
+        for(const auto& anchor:current_->reading_anchors){if(anchor.source>*source_anchor)break;display_position=anchor.display;if(anchor.source==*source_anchor)break;}
+        seek_reading_text(display_position);
+    }
     if(track){
         try{
-            store_.begin_reading(id,current_->position,current_->web_content);
+            store_.begin_reading(id,current_->position,current_->web_content,current_->reading_mode);
             current_->read=true;
         }catch(...){
             // Dismissing a failed open must return to the list, not a partially opened article.
@@ -331,20 +366,26 @@ void App::open(std::int64_t id,bool track){
             throw;
         }
     }
-    reader_tools_=false;reader_panel_=ReaderPanel::None;image_zoom_=false;image_page_=0;info_scroll_=0;typography_anchor_.reset();dirty=true;
+    reader_tools_=false;reader_panel_=ReaderPanel::None;image_zoom_=false;image_page_=0;info_scroll_=0;typography_anchor_.reset();reading_source_anchor_=source_anchor;dirty=true;
 }
 void App::save_position(){
     if(!current_||pages_.empty())return;
     if(cre_){
         store_.set_setting(reader_key("reader_cre:"),cre_->anchor(page_));
-        store_.set_position(current_->id,current_->position,current_->web_content);
-        return;
-    }
-    current_->position=static_cast<std::int64_t>(pages_[page_].start);
-    store_.set_position(current_->id,current_->position,current_->web_content);
-    // Consecutive image-only pages share a text offset; retain their occurrence separately.
-    store_.set_setting(reader_key("reader_image:"),
+        store_.set_position(current_->id,current_->position,current_->web_content,current_->reading_mode);
+    }else {
+        current_->position=static_cast<std::int64_t>(pages_[page_].start);
+        store_.set_position(current_->id,current_->position,current_->web_content,current_->reading_mode);
+        // Consecutive image-only pages share a text offset; retain their occurrence separately.
+        store_.set_setting(reader_key("reader_image:"),
                        std::to_string(current_->position)+":"+std::to_string(pages_[page_].image_anchor));
+    }
+    if(!reading_version_.empty()) {
+        std::size_t source_position=0;const auto display_position=reading_text_position();
+        for(const auto& anchor:current_->reading_anchors){if(anchor.display>display_position)break;source_position=anchor.source;}
+        if(reading_source_anchor_)source_position=*reading_source_anchor_;
+        store_.set_setting(reader_key("reader_source_anchor:"),reading_version_+"|"+std::to_string(source_position));
+    }
 }
 void App::set_reader_content(bool web){
     if(!current_||current_->web_content==web)return;
@@ -355,6 +396,58 @@ void App::set_reader_content(bool web){
     store_.set_setting("reader_content:"+std::to_string(id),web?"web":"rss");
     open(id);
     reader_tools_=true;reader_panel_=ReaderPanel::Content;
+}
+std::size_t App::reading_text_position() {
+    if(cre_)return cre_->text_position(page_);
+    const auto prefix=current_->title.size()+2;
+    const auto offset=pages_[page_].start>prefix?pages_[page_].start-prefix:0;
+    return translation_units(std::string_view(current_->text).substr(0,std::min(offset,current_->text.size())));
+}
+void App::seek_reading_text(std::size_t position) {
+    if(cre_)page_=cre_->page_for_text_position(position);
+    else {
+        std::size_t bytes=0;
+        // UTF-8 prefixes are inspected only at character boundaries.
+        for(std::size_t units=0;bytes<current_->text.size()&&units<position;) {
+            const auto start=bytes++;while(bytes<current_->text.size()&&(static_cast<unsigned char>(current_->text[bytes])&0xc0)==0x80)++bytes;
+            units+=translation_units(std::string_view(current_->text).substr(start,bytes-start));
+        }
+        page_=page_at(pages_,bytes+current_->title.size()+2);
+    }
+    if(!cre_)current_->position=static_cast<std::int64_t>(pages_[page_].start);
+    dirty=true;
+}
+void App::set_reading_mode(ReadingMode mode) {
+    if(!current_)return;
+    const auto id=current_->id;const bool web=current_->web_content;
+    const auto source=web?store_.fulltext_entry(id):store_.entry(id);
+    if(!source)throw std::runtime_error("原文已不在缓存中");
+    const auto document=translation_document(*source);
+    if(mode!=ReadingMode::Original&&!store_.translation_status(id,web,document.revision).completed) {
+        show_error("译文尚未保存，请先翻译当前正文");return;
+    }
+    const auto old_position=reading_text_position();
+    auto anchors=current_->reading_anchors;
+    if(anchors.empty())anchors=translated_entry(*source,document,{},ReadingMode::Original).reading_anchors;
+    std::size_t source_position=0;
+    for(const auto& anchor:anchors){if(anchor.display>old_position)break;source_position=anchor.source;}
+    if(reading_source_anchor_)source_position=*reading_source_anchor_;
+    save_position();
+    const auto key=std::string("reader_mode:")+(web?"web:":"rss:")+std::to_string(id);
+    const auto previous=store_.setting(key);
+    store_.set_setting(key,mode==ReadingMode::Original?"original":mode==ReadingMode::Bilingual?"bilingual":"translated");
+    try {
+        open(id);
+        auto target=current_->reading_anchors;
+        if(target.empty())target=translated_entry(*source,document,{},ReadingMode::Original).reading_anchors;
+        std::size_t display_position=0;
+        for(const auto& anchor:target){if(anchor.source>source_position)break;if(anchor.source==source_position){display_position=anchor.display;break;}display_position=anchor.display;}
+        seek_reading_text(display_position);
+        // Page boundaries differ by mode; repeated toggles keep the chosen source paragraph.
+        reading_source_anchor_=source_position;
+        save_position();
+    }catch(...) {store_.set_setting(key,previous);throw;}
+    reader_tools_=true;reader_panel_=ReaderPanel::Translation;
 }
 void App::set_reader_engine(bool use_cre){
     if(!current_||use_cre==static_cast<bool>(cre_))return;
@@ -372,7 +465,7 @@ void App::set_reader_engine(bool use_cre){
             store_.set_setting("reader_engine","cre");
             cre_=std::move(next);pages_=std::move(pages);page_=std::min(restored,pages_.size()-1);cre_requested_=true;
         }else{store_.set_setting("reader_engine","classic");cre_.reset();cre_requested_=false;paginate();}
-        typography_anchor_.reset();
+        typography_anchor_.reset();reading_source_anchor_.reset();
     }catch(const std::exception& e){show_error(std::string("排版切换失败，已保留当前阅读位置：")+e.what());}
 }
 void App::reader_screen(){
@@ -419,7 +512,10 @@ void App::reader_screen(){
         c_.text((w-c_.measure(footer,28))/2,h-20,footer,28,80);
         if(page_+1<pages_.size())c_.text(w-32-c_.measure(label,28),h-20,label,28,80);
         else button({w-332,h-56,300,56},label,[this]{
-            for(const auto* prefix:{"reader_cre:","reader_cre:web:","reader_image:","reader_image:web:"})
+            for(const auto* prefix:{"reader_cre:","reader_cre:web:","reader_image:","reader_image:web:",
+                "reader_cre:translated:","reader_cre:translated:web:","reader_cre:bilingual:","reader_cre:bilingual:web:",
+                "reader_image:translated:","reader_image:translated:web:","reader_image:bilingual:","reader_image:bilingual:web:",
+                "reader_source_anchor:translated:","reader_source_anchor:translated:web:","reader_source_anchor:bilingual:","reader_source_anchor:bilingual:web:"})
                 store_.set_setting(std::string(prefix)+std::to_string(current_->id),"");
             store_.finish_reading(current_->id);
             auto it=std::find_if(list_.begin(),list_.end(),[this](const Entry& e){return e.id==current_->id;});
@@ -470,6 +566,7 @@ int App::reader_panel_height()const{
     if(reader_panel_==ReaderPanel::None)return 0;
     if(reader_panel_==ReaderPanel::Type)return 640;
     if(reader_panel_==ReaderPanel::Images)return image_zoom_?764:662;
+    if(reader_panel_==ReaderPanel::Translation)return 640;
     return reader_panel_==ReaderPanel::Info?600:560;
 }
 void App::reader_panel_screen(){
@@ -478,7 +575,7 @@ void App::reader_panel_screen(){
     const int y=h-bar-height;
     c_.fill({0,y,w,height},255);c_.rule(32,y,w-64,150);
     const auto close=[this]{reader_panel_=ReaderPanel::None;image_zoom_=false;typography_anchor_.reset();};
-    const char* title=reader_panel_==ReaderPanel::Type?"排版":reader_panel_==ReaderPanel::Images?"图片":reader_panel_==ReaderPanel::Content?"正文来源":"文章信息";
+    const char* title=reader_panel_==ReaderPanel::Type?"排版":reader_panel_==ReaderPanel::Images?"图片":reader_panel_==ReaderPanel::Content?"正文来源":reader_panel_==ReaderPanel::Translation?"翻译与双语":"文章信息";
     c_.text(32,y+54,title,32);
     button({w-184,y,152,88},"收起",close,false,28,Icon::Close,true,Align::Right);
     auto adjust=[this](int& value,int next,const std::string& key){
@@ -544,6 +641,7 @@ void App::reader_panel_screen(){
     }else if(reader_panel_==ReaderPanel::Content){
         const auto state=store_.fulltext_status(current_->id);
         c_.text(32,y+130,current_->web_content?"当前：网页正文":"当前：RSS 原文",28);
+        button({w-344,y+88,312,64},"翻译 / 双语",[this]{reader_panel_=ReaderPanel::Translation;},false,28,Icon::None,true,Align::Right);
         button({32,y+166,(w-80)/2,88},"RSS 原文",[this]{set_reader_content(false);},!current_->web_content,28);
         button({w/2+8,y+166,(w-80)/2,88},"网页正文",[this]{set_reader_content(true);},current_->web_content,28,Icon::None,state.state=="ready");
         std::string message;
@@ -561,6 +659,38 @@ void App::reader_panel_screen(){
             if(store_.fulltext_status(current_->id).state!="pending"){show_error("文章地址不可下载，或订阅已取消");return;}
             request_="fulltext:"+std::to_string(current_->id);sync_started();
         },false,28,running?Icon::Close:Icon::Download,running||(state.state!="ready"&&!current_->url.empty()),Align::Left);
+    }else if(reader_panel_==ReaderPanel::Translation){
+        const auto source=current_->web_content?store_.fulltext_entry(current_->id):store_.entry(current_->id);
+        if(!source){c_.text(32,y+150,"原文已不在缓存中",28,85);return;}
+        if(source->html.size()>512*1024||source->text.size()>512*1024||source->title.size()>16384) {
+            c_.text(32,y+150,"文章超过翻译大小限制，仍可阅读原文",28,85);return;
+        }
+        const auto state=store_.translation_status(current_->id,current_->web_content,translation_revision(*source));
+        const int cell=(w-96)/3;
+        for(int i=0;i<3;++i) {
+            const auto mode=i==0?ReadingMode::Original:i==1?ReadingMode::Translated:ReadingMode::Bilingual;
+            button({32+i*(cell+16),y+100,cell,88},i==0?"原文":i==1?"译文":"双语",[this,mode]{set_reading_mode(mode);},
+                   current_->reading_mode==mode,28,Icon::None,i==0||state.completed>0);
+        }
+        c_.text(32,y+242,current_->web_content?"翻译来源：网页正文":"翻译来源：RSS 内容（可能为摘要）",28);
+        c_.text(32,y+294,"英文 → 简体中文 · 千问翻译",26,85);
+        std::string message=state.state=="ready"?"译文已完整保存，可离线切换三种阅读模式":
+            state.state=="stale"?"原文已更新，旧译文对应先前版本；请重新翻译":
+            state.state=="failed"?"翻译未完成："+state.error:
+            state.completed?"已有 "+std::to_string(state.completed)+" / "+std::to_string(state.total)+" 段；缺少译文的段落保留原文":
+            "首次翻译需联网，文章内容将提交给千问服务；译文保存后可离线阅读。";
+        if(sync_state_==SyncState::Running)message=translating_?sync_message_:"同步正在进行，请完成后再翻译";
+        else if(translating_&&sync_state_==SyncState::Failed&&translation_request_==std::string("translate:")+(current_->web_content?"web:":"rss:")+std::to_string(current_->id))
+            message=sync_message_;
+        int baseline=y+356;
+        for(const auto& line:c_.wrap(message,26,w-64)){if(baseline>y+height-134)break;c_.text(32,baseline,line.text,26,85);baseline+=38;}
+        const bool running=sync_state_==SyncState::Running;
+        button({32,y+height-100,w-64,88},running?(translating_?"取消翻译":"等待同步完成"):state.state=="ready"?"译文已保存":state.completed?"继续翻译剩余段落":"翻译为中文",[this,running]{
+            if(running){request_="cancel-sync";return;}
+            save_position();
+            translation_request_=std::string("translate:")+(current_->web_content?"web:":"rss:")+std::to_string(current_->id);
+            request_=translation_request_;sync_started(true);
+        },false,28,running?Icon::Close:Icon::Download,running?translating_:state.state!="ready",Align::Left);
     }else{
         const std::string details="标题："+current_->title+"\n\n来源："+source(current_->feed_id)+"\n时间："+date(current_->published)+"\n作者："+(current_->author.empty()?"未提供":current_->author)+"\n\n原文地址：\n"+current_->url;
         const auto lines=c_.wrap(details,28,w-64);const std::size_t visible=std::max(1,(height-210)/42);
@@ -756,26 +886,27 @@ void App::opml_screen(){
     c_.text(32,668,"写入 subscriptions.opml，保留空分组",24,85);
     if(!status_.empty())c_.text(32,820,c_.ellipsize(status_,24,w-64),24,75);
 }
-void App::sync_started(){status_.clear();sync_page_=0;sync_state_=SyncState::Running;sync_completed_=sync_failed_=0;sync_total_=static_cast<int>(feeds_.size());sync_message_="正在连接订阅源";if(screen_==Screen::Sync)dirty=true;}
-void App::sync_progress(int completed,int total,int failed,const std::string& message){sync_completed_=completed;sync_total_=total;sync_failed_=failed;sync_message_=message;if(screen_==Screen::Sync)dirty=true;}
+void App::sync_started(bool translating){translating_=translating;status_.clear();sync_page_=0;sync_state_=SyncState::Running;sync_completed_=sync_failed_=0;sync_total_=translating?0:static_cast<int>(feeds_.size());sync_message_=translating?"正在准备翻译文章":"正在连接订阅源";if(screen_==Screen::Sync||reader_panel_==ReaderPanel::Translation)dirty=true;}
+void App::sync_progress(int completed,int total,int failed,const std::string& message){sync_completed_=completed;sync_total_=total;sync_failed_=failed;sync_message_=message;if(screen_==Screen::Sync||reader_panel_==ReaderPanel::Translation)dirty=true;}
 void App::sync_finished(bool cancelled,const std::string& error){
-    feeds_=store_.feeds();group_names_=store_.groups();sync_failed_=std::max(sync_failed_,static_cast<int>(std::count_if(feeds_.begin(),feeds_.end(),[](const Feed& f){return !f.error.empty();})));sync_state_=cancelled?SyncState::Cancelled:(!error.empty()||sync_failed_)?SyncState::Failed:SyncState::Complete;
+    feeds_=store_.feeds();group_names_=store_.groups();if(!translating_)sync_failed_=std::max(sync_failed_,static_cast<int>(std::count_if(feeds_.begin(),feeds_.end(),[](const Feed& f){return !f.error.empty();})));sync_state_=cancelled?SyncState::Cancelled:(!error.empty()||sync_failed_)?SyncState::Failed:SyncState::Complete;
     if(!error.empty())sync_message_=error;
     dirty=true;
-    if(screen_!=Screen::Sync)notify(reading()?sync_message_:cancelled?"同步已取消，点击更新列表":sync_state_==SyncState::Failed?"同步有未完成项目，点击更新列表":"同步已完成，点击更新列表");
+    if(screen_!=Screen::Sync)notify(reading()||translating_?sync_message_:cancelled?"同步已取消，点击更新列表":sync_state_==SyncState::Failed?"同步有未完成项目，点击更新列表":"同步已完成，点击更新列表");
 }
 void App::sync_screen(){
     modal_backdrop(c_);
     const int w=c_.width,h=c_.height;
     const bool running=sync_state_==SyncState::Running,failed=sync_state_==SyncState::Failed;
-    const int height=failed?920:480,top=(h-height)/2,left=80,width=w-160;
-    const auto heading=running?"正在同步":failed?"部分内容未能下载":sync_state_==SyncState::Cancelled?"同步已取消":sync_state_==SyncState::Complete?"同步已完成":"同步订阅";
+    const int height=failed&&!translating_?920:480,top=(h-height)/2,left=80,width=w-160;
+    const auto heading=translating_?(running?"正在翻译文章":failed?"翻译未完成":sync_state_==SyncState::Cancelled?"翻译已取消":"文章翻译"):
+        running?"正在同步":failed?"部分内容未能下载":sync_state_==SyncState::Cancelled?"同步已取消":sync_state_==SyncState::Complete?"同步已完成":"同步订阅";
     hits_.clear();hits_.push_back({{0,0,w,h},[]{}});
     frame(c_,{48,top,w-96,height},2);
     c_.text(left,top+64,heading,36);
     button({w-308,top+20,228,88},"缓存管理",[this]{screen_=Screen::Cache;},false,26,Icon::Settings,true,Align::Right);
     c_.text(left,top+112,"进度 "+std::to_string(sync_completed_)+" / "+std::to_string(sync_total_)+"  ·  失败 "+std::to_string(sync_failed_),24,85);
-    if(failed){
+    if(failed&&!translating_){
         std::vector<Feed> sources;for(const auto& f:feeds_)if(!f.error.empty())sources.push_back(f);
         const std::size_t pages=std::max<std::size_t>(1,(sources.size()+3)/4);sync_page_=std::min(sync_page_,pages-1);nav_page_count_=pages;
         int y=top+136;
@@ -795,9 +926,9 @@ void App::sync_screen(){
         int y=top+218;
         for(const auto& line:c_.wrap(sync_message_,28,width)){if(y>top+300)break;c_.text(left,y,line.text,28,85);y+=40;}
     }
-    if(!status_.empty())c_.text(left,top+height-(failed?236:144),c_.ellipsize(status_,24,width),24,80);
+    if(!status_.empty())c_.text(left,top+height-(failed&&!translating_?236:144),c_.ellipsize(status_,24,width),24,80);
     const int actions=top+height-104;c_.rule(left,actions,width,205);
-    button({left,actions+4,400,88},running?"取消同步":failed?"重试失败项目":"重新同步",[this,running,failed]{if(running)request_="cancel-sync";else{request_=failed?"retry-sync":"sync";sync_started();}},false,28,running?Icon::Close:Icon::Sync,true,Align::Left);
+    button({left,actions+4,400,88},translating_?(running?"取消翻译":"继续翻译"):running?"取消同步":failed?"重试失败项目":"重新同步",[this,running,failed]{if(running)request_="cancel-sync";else if(translating_){request_=translation_request_;sync_started(true);}else{request_=failed?"retry-sync":"sync";sync_started();}},false,28,running?Icon::Close:Icon::Sync,!translating_||running||!translation_request_.empty(),Align::Left);
     button({w-left-280,actions+4,280,88},running?"后台运行":"关闭",[this]{back();},true,28);
 }
 void App::input_screen(){
@@ -1033,7 +1164,7 @@ void App::touch(const TouchGesture& gesture){
 void App::next(){
     if(!input_mode_.empty()||!confirmation_.empty()||(managing_&&screen_!=Screen::GroupPicker)||brand_menu_)return;
     if(current_&&reader_panel_==ReaderPanel::Images){if(image_page_+1<current_->images.size())++image_page_;}
-    else if(current_&&!reader_tools_){if(page_+1<pages_.size()){++page_;save_position();}}
+    else if(current_&&!reader_tools_){if(page_+1<pages_.size()){++page_;reading_source_anchor_.reset();save_position();}}
     else if(!current_){auto* nav=screen_==Screen::Subscriptions?&nav_page_:screen_==Screen::Groups?&groups_page_:screen_==Screen::GroupPicker?&picker_page_:screen_==Screen::Sync&&sync_state_==SyncState::Failed?&sync_page_:nullptr;
         if(nav){if(*nav+1<nav_page_count_)++*nav;}else if(screen_==Screen::List){ensure_list_page(list_page_+1);if(list_page_+1<list_starts_.size())++list_page_;}}
     dirty=true;
@@ -1041,7 +1172,7 @@ void App::next(){
 void App::previous(){
     if(!input_mode_.empty()||!confirmation_.empty()||(managing_&&screen_!=Screen::GroupPicker)||brand_menu_)return;
     if(current_&&reader_panel_==ReaderPanel::Images){if(image_page_)--image_page_;}
-    else if(current_&&!reader_tools_){if(page_){--page_;save_position();}}
+    else if(current_&&!reader_tools_){if(page_){--page_;reading_source_anchor_.reset();save_position();}}
     else if(!current_){auto* nav=screen_==Screen::Subscriptions?&nav_page_:screen_==Screen::Groups?&groups_page_:screen_==Screen::GroupPicker?&picker_page_:screen_==Screen::Sync&&sync_state_==SyncState::Failed?&sync_page_:nullptr;
         if(nav){if(*nav)--*nav;}else if(screen_==Screen::List&&list_page_)--list_page_;}
     dirty=true;

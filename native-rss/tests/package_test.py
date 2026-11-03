@@ -27,7 +27,7 @@ class PackageTests(unittest.TestCase):
                       "third_party/hbc84/SOURCE.json","third_party/hbc84/opcode.json","third_party/hbc84/structure.json",
                       "experiments/cre-reader/CMakeLists.txt","experiments/cre-reader/engine.cmake",
                       "experiments/cre-reader/build.py","experiments/cre-reader/probe.cpp","experiments/cre-reader/README.txt")
-            private=("docs/device-report.txt","docs/session.log","tests/private.sqlite","data/feeds.opml","output/app.zip","reader-deps/unibreak/linebreak.o","tools/__pycache__/package.pyc",
+            private=("docs/device-report.txt","docs/session.log","tests/private.sqlite","data/feeds.opml","data/translation.conf","translation.conf","output/app.zip","reader-deps/unibreak/linebreak.o","tools/__pycache__/package.pyc",
                      "experiments/cre-reader/device-report.txt","experiments/cre-reader/results.json",
                      "experiments/cre-reader/__pycache__/build.pyc","home/original.hbc","home/patched.hbc")
             for name in (*included,*private):

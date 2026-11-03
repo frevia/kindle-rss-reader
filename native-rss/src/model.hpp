@@ -1,9 +1,12 @@
 #pragma once
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <vector>
 
 namespace rss {
+enum class ReadingMode { Original, Translated, Bilingual };
+struct ReadingAnchor { std::size_t source = 0, display = 0; };
 struct ArticleImage {
     std::string url,alt,error;
     int width=0,height=0;
@@ -23,8 +26,14 @@ struct Entry {
     std::vector<ArticleImage> images;
     std::int64_t position = 0; // UTF-8 byte offset, independent of font size.
     bool web_content = false;
+    ReadingMode reading_mode = ReadingMode::Original;
+    std::vector<ReadingAnchor> reading_anchors;
 };
 struct FulltextStatus { std::string state, error; };
+struct TranslationStatus {
+    std::string state, error;
+    std::size_t completed = 0, total = 0;
+};
 struct ParsedFeed { std::string title; std::vector<Entry> entries; };
 enum class View { Unread, All, Starred, Today };
 }

@@ -18,6 +18,8 @@ public:
     std::size_t page_count() const;
     std::size_t restore(const std::string& anchor);
     std::string anchor(std::size_t page);
+    std::size_t text_position(std::size_t page);
+    std::size_t page_for_text_position(std::size_t position);
     void draw(Canvas& canvas, std::size_t page, int x, int y, int clip_bottom);
 private:
     struct Impl;

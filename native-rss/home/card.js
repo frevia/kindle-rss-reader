@@ -51,6 +51,9 @@ function useRssCard(React, RN, props) {
     var state = React.useState(target && !trial ? root.rssHomeSnapshot || null : null);
     var snapshot = state[0];
     var update = state[1];
+    var pausedState = React.useState(false);
+    var paused = pausedState[0];
+    var setPaused = pausedState[1];
     var measured = React.useState({});
     React.useEffect(function () {
         if (!target || trial) return;
@@ -87,6 +90,8 @@ function useRssCard(React, RN, props) {
         function connect() {
             retry = null;
             if (!active) return;
+            if (root.rssHomeConnectionCount >= 16) { setPaused(true); return; }
+            root.rssHomeConnectionCount = (root.rssHomeConnectionCount || 0) + 1;
             var next = (root.rssHomeSocketId || 700000) + 1;
             if (next > 1073741824) next = 700001;
             root.rssHomeSocketId = next;
@@ -94,6 +99,7 @@ function useRssCard(React, RN, props) {
             armWatchdog(12000);
             try {
                 // The device rejects every non-null protocols value, including [].
+                // Closed clients can still retain threads in the native firmware.
                 module.connect("ws://127.0.0.1:12681/rss-home/v1", null, {}, socket);
             } catch (error) { reconnect(); }
         }
@@ -173,7 +179,7 @@ function useRssCard(React, RN, props) {
         return hidden;
     }
     var heading = "RSS订阅";
-    var text = "正在读取本地订阅…";
+    var text = paused ? "打开 RSS 阅读器查看文章" : "正在读取本地订阅…";
     if (snapshot) {
         if (snapshot.status === "unavailable") text = "打开阅读器添加订阅并同步";
         else if (snapshot.status === "empty") text = snapshot.feeds ? "还没有本地文章，请先同步" : "打开阅读器添加订阅";
@@ -260,7 +266,7 @@ function useRssCard(React, RN, props) {
         var arrowSource = {}; arrowSource.uri = "file://KPPHome/Fill.svg";
         arrowProps.source = arrowSource;
         arrowProps.resizeMode = "contain"; arrowProps.accessible = false;
-        var unread = snapshot && (snapshot.status === "ready" || snapshot.status === "empty") ?
+        var unread = paused ? "更新已暂停" : snapshot && (snapshot.status === "ready" || snapshot.status === "empty") ?
             (snapshot.unread ? snapshot.unread + " 条未读" : "已读完") : "";
         var headingView = create(root.rssHomeButtonBase, headerProps,
             create(RN.View, nameProps,

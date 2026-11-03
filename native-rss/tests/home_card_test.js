@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const source = fs.readFileSync(__dirname + '/../home/card.js', 'utf8');
-function harness(title = 'Kindle Unlimited 现已升级为 Kindle+', sharedRoot) {
+function harness(title = 'Kindle Unlimited 现已升级为 Kindle+', sharedRoot, options = {}) {
     let now = 0, timerId = 0, timers = new Map(), values = [], stateCursor = 0, mounted = false, cleanup;
     const callbacks = {}, calls = {connect: [], close: [], send: [], open: [], updates: 0};
     const root = sharedRoot || {
@@ -15,7 +15,7 @@ function harness(title = 'Kindle Unlimited 现已升级为 Kindle+', sharedRoot)
         (callbacks[type] ||= new Set()).add(fn); return {remove() { callbacks[type].delete(fn); }};
     }}, NativeModules: {
         WebSocketModule: {
-            connect(...args) { calls.connect.push(args); },
+            connect(...args) { calls.connect.push(args); if (options.connectThrows) throw new Error('native connect failed'); },
             send(...args) { calls.send.push(args); },
             close(...args) { calls.close.push(args); emit('websocketClosed', {id: args[2]}); }
         },
@@ -80,6 +80,7 @@ h.emit('websocketFailed', {id: firstId}); assert.equal(h.calls.close.length, 1);
 assert.equal(h.render().cardItem.title, 'RSS订阅 · 已全部读完');
 h.advance(1000); assert.equal(h.calls.connect.length, 2);
 const secondId = h.calls.connect[1][3]; assert.notEqual(firstId, secondId);
+assert.equal(h.root.rssHomeConnectionCount, 2, 'each native client allocation consumes one process-wide slot');
 h.message(snapshot('c'), firstId); assert.equal(h.calls.updates, 2);
 h.message(snapshot('a')); assert.equal(h.render().cardItem.title, 'RSS订阅 · 2 条未读', 'revision equality, not numeric order, supports service restarts');
 h.message(snapshot('d', {status: 'unavailable', items: [], unread: 0}));
@@ -129,15 +130,117 @@ const silent = harness(); silent.render();
 const silentId = silent.calls.connect[0][3];
 silent.emit('websocketOpen', {id: silentId});
 silent.message(snapshot('a'));
+assert.equal(silent.root.rssHomeConnectionCount, 1, 'open and snapshots do not consume connection budget');
 const beforeHeartbeat = silent.calls.updates, beforeAck = silent.calls.send.length;
 silent.advance(30000);
 silent.message({type: 'rss-home-heartbeat'});
 assert.equal(silent.calls.updates, beforeHeartbeat);
 assert.equal(silent.calls.send.length, beforeAck);
+assert.equal(silent.root.rssHomeConnectionCount, 1, 'heartbeats do not consume connection budget');
 silent.advance(30000); assert.equal(silent.calls.connect.length, 1);
 silent.advance(15000); assert.equal(silent.calls.close.length, 1, 'silent native disconnect is caught by liveness timeout');
 silent.advance(1000); assert.equal(silent.calls.connect.length, 2);
 silent.stop(); assert.equal(silent.timers.size, 0);
+
+const exhausted = harness(); exhausted.render();
+const saved = snapshot('e'); exhausted.message(saved);
+for (let attempt = 0; attempt < 100; attempt++) {
+    const id = exhausted.calls.connect.at(-1)?.[3];
+    if (id !== undefined) {
+        exhausted.emit('websocketOpen', {id}); // Opening resets backoff, so every retry stays at one second.
+        exhausted.emit('websocketFailed', {id});
+    }
+    exhausted.advance(1000);
+}
+assert.equal(exhausted.calls.connect.length, 16, '100 reconnect requests allocate at most 16 native clients');
+assert.equal(exhausted.root.rssHomeConnectionCount, 16);
+assert.equal(exhausted.timers.size, 0, 'budget exhaustion leaves no retry or watchdog timers');
+assert.equal(exhausted.render().cardItem.title, 'RSS订阅 · 2 条未读', 'budget exhaustion keeps the cached snapshot visible');
+const exhaustedId = exhausted.calls.connect.at(-1)[3];
+exhausted.emit('websocketOpen', {id: exhaustedId});
+exhausted.emit('websocketFailed', {id: exhaustedId});
+exhausted.emit('websocketClosed', {id: exhaustedId});
+exhausted.message(snapshot('f'), exhaustedId);
+assert.equal(exhausted.calls.connect.length, 16, 'late events cannot restart exhausted connections');
+assert.equal(exhausted.render().cardItem.title, 'RSS订阅 · 2 条未读');
+exhausted.stop();
+
+const watchdogBudget = harness(); watchdogBudget.render();
+for (let i = 0; i < 100; i++) {
+    watchdogBudget.emit('websocketOpen', {id: watchdogBudget.calls.connect.at(-1)[3]});
+    watchdogBudget.advance(45000); watchdogBudget.advance(1000);
+}
+assert.equal(watchdogBudget.calls.connect.length, 16, 'silent opened connections cannot bypass the process budget');
+assert.equal(watchdogBudget.timers.size, 0);
+watchdogBudget.stop();
+const healthyBudget = harness(); healthyBudget.root.rssHomeConnectionCount = 15;
+healthyBudget.render(); healthyBudget.emit('websocketOpen', {id: healthyBudget.calls.connect[0][3]});
+for (let i = 0; i < 240; i++) {
+    healthyBudget.advance(30000); healthyBudget.message({type: 'rss-home-heartbeat'});
+}
+healthyBudget.message(snapshot('a'));
+assert.equal(healthyBudget.calls.connect.length, 1, 'the last permitted healthy connection remains usable for hours');
+assert.equal(healthyBudget.calls.close.length, 0);
+assert.equal(healthyBudget.root.rssHomeConnectionCount, 16);
+assert.equal(healthyBudget.render().cardItem.title, 'RSS订阅 · 2 条未读');
+healthyBudget.stop();
+const sharedBudget = harness(); sharedBudget.render(); sharedBudget.stop();
+let sharedAttempts = 1;
+for (let i = 0; i < 30; i++) {
+    const another = harness('Kindle+', sharedBudget.root);
+    another.render(); sharedAttempts += another.calls.connect.length; another.stop();
+}
+assert.equal(sharedAttempts, 16, 'new component instances share the native allocation budget');
+
+const remount = harness(); remount.render();
+for (let attempt = 1; attempt < 8; attempt++) {
+    const id = remount.calls.connect.at(-1)[3];
+    remount.emit('websocketOpen', {id}); remount.emit('websocketFailed', {id}); remount.advance(1000);
+}
+assert.equal(remount.root.rssHomeConnectionCount, 8);
+remount.stop(); remount.render();
+for (let attempt = 8; attempt < 16; attempt++) {
+    const id = remount.calls.connect.at(-1)[3];
+    remount.emit('websocketOpen', {id}); remount.emit('websocketFailed', {id}); remount.advance(1000);
+}
+assert.equal(remount.calls.connect.length, 16, 'remounts share the same global connection budget');
+const remountId = remount.calls.connect.at(-1)[3];
+remount.emit('websocketFailed', {id: remountId}); remount.advance(1000);
+assert.equal(remount.calls.connect.length, 16);
+assert.equal(remount.root.rssHomeConnectionCount, 16);
+assert.equal(remount.timers.size, 0);
+remount.stop();
+
+const throwing = harness('Kindle+', undefined, {connectThrows: true});
+throwing.render();
+assert.equal(throwing.root.rssHomeConnectionCount, 1, 'a synchronous native throw consumes its allocated slot');
+assert.equal(throwing.calls.connect.length, 1);
+throwing.stop(); assert.equal(throwing.timers.size, 0);
+
+const paused = harness(); paused.root.rssHomeConnectionCount = 16;
+paused.render();
+const pausedView = paused.render();
+assert.equal(paused.calls.connect.length, 0, 'an exhausted process does not allocate another client');
+assert.equal(pausedView.cardItem.titleText, '打开 RSS 阅读器查看文章');
+class PausedButton { constructor(props) { this.props = props; } render() { return {type: 'KindleButton', props: this.props}; } }
+class PausedImage {}
+const pausedCard = pausedView.rssHomeRender({key: 'paused', props: {
+    style: [{}, {height: 360}], children: [
+        {type: 'Text', props: {style: {fontSize: 32}}},
+        {props: {children: [{type: PausedImage, props: {}}, {props: {children: [
+            {type: 'Text', props: {style: {fontSize: 28}}}, {type: PausedButton, props: {testID: 'paused_button'}}
+        ]}}]}}
+    ]
+}});
+function collectText(node) {
+    if (!node || typeof node !== 'object') return [];
+    if (Array.isArray(node)) return node.flatMap(collectText);
+    return [...(node.type === 'Text' ? [node.props.children[0]] : []), ...collectText(node.props.children)];
+}
+assert.ok(collectText(pausedCard).includes('更新已暂停'), 'the unread badge reports that updates are paused');
+pausedView.rssHomeOpen();
+assert.equal(paused.calls.open[0][0], 'file:///mnt/us/documents/RSS阅读器.sh', 'paused updates preserve the reader entry');
+paused.stop();
 const layout = harness(); layout.render();
 layout.message(snapshot('a', {items: [
     {id: 1, title: '第一篇文章标题', source: '博客甲'},

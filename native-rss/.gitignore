@@ -3,6 +3,7 @@
 /output/
 /vendor/
 /data/
+translation.conf
 *.sqlite*
 *.opml
 *.log

@@ -1,5 +1,6 @@
 #pragma once
 #include "store.hpp"
+#include "qwen.hpp"
 #include <atomic>
 #include <functional>
 
@@ -12,4 +13,6 @@ void sync_feeds(Store& store, const std::atomic<bool>& cancel,
                 const std::function<void(const SyncProgress&)>& progress, bool failed_only = false);
 void sync_fulltext(Store& store, std::int64_t entry_id, const std::atomic<bool>& cancel,
                    const std::function<void(const SyncProgress&)>& progress);
+void translate_article(Store& store, std::int64_t entry_id, bool web, const QwenConfig& config,
+                       const std::atomic<bool>& cancel, const std::function<void(const SyncProgress&)>& progress);
 }

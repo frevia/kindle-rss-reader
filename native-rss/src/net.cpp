@@ -2,6 +2,7 @@
 #include "feed.hpp"
 #include "fulltext.hpp"
 #include "image.hpp"
+#include "translation.hpp"
 #include <curl/curl.h>
 #include <algorithm>
 #include <cctype>
@@ -12,13 +13,14 @@
 #include <fstream>
 #include <memory>
 #include <stdexcept>
+#include <thread>
 #include <arpa/inet.h>
 #include <sys/socket.h>
 
 namespace rss {
 namespace {
-struct Transfer { Response response; bool too_large = false; std::size_t headers = 0; };
 constexpr std::size_t max_feed = 8 * 1024 * 1024;
+struct Transfer { Response response; bool too_large = false; std::size_t headers = 0,limit=max_feed; };
 std::string origin(const std::string& url) {
     std::unique_ptr<CURLU, decltype(&curl_url_cleanup)> parsed(curl_url(), curl_url_cleanup);
     if(!parsed || url.size()>2048 || std::any_of(url.begin(),url.end(),[](unsigned char c){return c<=32||c==127;}) ||
@@ -63,9 +65,9 @@ curl_socket_t open_socket(void* context,curlsocktype,curl_sockaddr* address) {
 }
 size_t body_cb(char* data, size_t size, size_t count, void* context) {
     auto& t = *static_cast<Transfer*>(context);
-    if (size && count > max_feed / size) { t.too_large = true; return 0; }
+    if (size && count > t.limit / size) { t.too_large = true; return 0; }
     const auto n = size * count;
-    if (n > max_feed - t.response.body.size()) { t.too_large = true; return 0; }
+    if (n > t.limit - t.response.body.size()) { t.too_large = true; return 0; }
     try { t.response.body.append(data, n); } catch (...) { return 0; }
     return n;
 }
@@ -258,6 +260,90 @@ int cache_images(Store& store,const std::atomic<bool>& cancel,SyncProgress& p,
 }
 Response fetch(const std::string& url,const std::string& etag,const std::string& modified,const std::atomic<bool>& cancel){
     return fetch_once(url,etag,modified,cancel,"",35000);
+}
+namespace {
+std::string post_qwen(const QwenConfig& config,const std::string& input,const std::atomic<bool>& cancel) {
+    validate_qwen_config(config);
+    static const auto initialized=curl_global_init(CURL_GLOBAL_DEFAULT);
+    if(initialized!=CURLE_OK)throw std::runtime_error("翻译网络初始化失败");
+    std::unique_ptr<CURL,decltype(&curl_easy_cleanup)> curl(curl_easy_init(),curl_easy_cleanup);
+    if(!curl)throw std::runtime_error("无法创建翻译连接");
+    const auto body=qwen_request(input);
+    curl_slist* raw=nullptr;
+    for(const auto& header:{std::string("Content-Type: application/json"),"Authorization: Bearer "+config.api_key,std::string("Expect:")}) {
+        auto next=curl_slist_append(raw,header.c_str());
+        if(!next){curl_slist_free_all(raw);throw std::bad_alloc();}raw=next;
+    }
+    std::unique_ptr<curl_slist,decltype(&curl_slist_free_all)> headers(raw,curl_slist_free_all);
+    Transfer transfer;transfer.limit=256*1024;
+    const auto set=[&](CURLoption option,auto value){if(curl_easy_setopt(curl.get(),option,value)!=CURLE_OK)throw std::runtime_error("翻译网络配置失败");};
+    set(CURLOPT_URL,config.endpoint.c_str());set(CURLOPT_POST,1L);
+    set(CURLOPT_HTTPHEADER,headers.get());set(CURLOPT_POSTFIELDS,body.c_str());set(CURLOPT_POSTFIELDSIZE,static_cast<long>(body.size()));
+    // Authenticated requests never follow redirects or inherit a proxy from article download settings.
+    set(CURLOPT_FOLLOWLOCATION,0L);set(CURLOPT_PROXY,"");set(CURLOPT_PROTOCOLS_STR,"http,https");
+    set(CURLOPT_CONNECTTIMEOUT,10L);set(CURLOPT_TIMEOUT,45L);set(CURLOPT_NOSIGNAL,1L);
+    set(CURLOPT_SSL_VERIFYPEER,1L);set(CURLOPT_SSL_VERIFYHOST,2L);set(CURLOPT_ACCEPT_ENCODING,"");
+    if(const auto ca=std::getenv("RSS_CA_BUNDLE");ca&&*ca)set(CURLOPT_CAINFO,ca);
+    else if(std::ifstream("/mnt/us/native-rss/certs/ca-bundle.pem").good())set(CURLOPT_CAINFO,"/mnt/us/native-rss/certs/ca-bundle.pem");
+    set(CURLOPT_WRITEFUNCTION,body_cb);set(CURLOPT_WRITEDATA,&transfer);
+    set(CURLOPT_HEADERFUNCTION,header_cb);set(CURLOPT_HEADERDATA,&transfer);
+    set(CURLOPT_NOPROGRESS,0L);set(CURLOPT_XFERINFOFUNCTION,progress_cb);set(CURLOPT_XFERINFODATA,&cancel);
+    if(cancel)throw std::runtime_error("翻译已取消");
+    const auto result=curl_easy_perform(curl.get());
+    if(cancel)throw std::runtime_error("翻译已取消");
+    if(transfer.too_large)throw std::runtime_error("翻译响应超过 256 KiB 上限");
+    if(result!=CURLE_OK)throw std::runtime_error("翻译连接失败，请检查网络后手动重试");
+    long status=0;curl_easy_getinfo(curl.get(),CURLINFO_RESPONSE_CODE,&status);
+    if(status==401||status==403)throw std::runtime_error("翻译服务鉴权失败，请检查 API Key、地域和模型权限");
+    if(status==429)throw std::runtime_error("翻译请求达到服务限额，请稍后手动重试");
+    if(status>=300&&status<400)throw std::runtime_error("翻译服务返回重定向，已停止发送密钥，请检查服务地址");
+    if(status!=200)throw std::runtime_error("翻译服务返回 HTTP "+std::to_string(status)+"，请检查余额或稍后重试");
+    return qwen_translation(transfer.response.body);
+}
+}
+void translate_article(Store& store,std::int64_t entry_id,bool web,const QwenConfig& config,
+                       const std::atomic<bool>& cancel,const std::function<void(const SyncProgress&)>& progress) {
+    validate_qwen_config(config);
+    const auto source=web?store.fulltext_entry(entry_id):store.entry(entry_id);
+    if(!source)throw std::runtime_error("所选正文尚未下载或已删除");
+    const auto document=translation_document(*source);
+    store.begin_translation(entry_id,web,document.revision,document.blocks.size());
+    auto translated=store.translation_blocks(entry_id,web,document.revision);
+    SyncProgress p;p.total=static_cast<int>(document.blocks.size());
+    p.completed=static_cast<int>(store.translation_status(entry_id,web,document.revision).completed);
+    const auto deadline=std::chrono::steady_clock::now()+std::chrono::minutes(5);
+    auto next_request=std::chrono::steady_clock::now();
+    for(std::size_t i=0;i<document.blocks.size();++i) {
+        if(cancel||std::chrono::steady_clock::now()>=deadline)break;
+        if(!translated[i].empty())continue;
+        p.message="正在翻译 · "+std::to_string(p.completed)+" / "+std::to_string(p.total)+" 段";progress(p);
+        try {
+            const auto& block=document.blocks[i];
+            std::string html=block.html;
+            if(!block.request.empty()) {
+                html=translate_block(block,[&](const std::string& input) {
+                    while(!cancel&&std::chrono::steady_clock::now()<next_request&&std::chrono::steady_clock::now()<deadline)
+                        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+                    if(cancel||std::chrono::steady_clock::now()>=deadline)throw std::runtime_error("本轮翻译已暂停");
+                    next_request=std::chrono::steady_clock::now()+std::chrono::milliseconds(1100);
+                    return post_qwen(config,input,cancel);
+                });
+                // Cache the response with placeholders; restore protected source only when rendering.
+                validate_translation(block,html);
+            }
+            if(cancel)break;
+            store.save_translation_block(entry_id,web,document.revision,i,html);
+            p.completed=static_cast<int>(store.translation_status(entry_id,web,document.revision).completed);
+        }catch(const std::exception& e) {
+            if(cancel||std::chrono::steady_clock::now()>=deadline)break;
+            store.set_translation_state(entry_id,web,document.revision,"failed",e.what());
+            p.failed=1;p.message=std::string("翻译未完成：")+e.what()+"；已完成段落已保存";progress(p);return;
+        }
+    }
+    const bool complete=p.completed==p.total&&!cancel;
+    store.set_translation_state(entry_id,web,document.revision,complete?"ready":"paused");
+    p.message=complete?"翻译已保存，可在正文面板查看双语":cancel?"翻译已取消，已完成段落已保存":"本轮翻译已暂停，点击继续翻译剩余段落";
+    progress(p);
 }
 void sync_fulltext(Store& store,std::int64_t entry_id,const std::atomic<bool>& cancel,
                    const std::function<void(const SyncProgress&)>& progress){
