@@ -16,6 +16,7 @@
 #include <stdexcept>
 #include <sys/stat.h>
 #include <csignal>
+#include <unistd.h>
 #ifdef RSS_DESKTOP
 #include <SDL.h>
 #endif
@@ -79,6 +80,12 @@ public:
         // Sample before the first e-ink frame instead of refreshing an unknown status immediately after it.
         app_.set_reader_status(rss::read_reader_status(std::time(nullptr)));
         status_due_=std::chrono::steady_clock::now()+std::chrono::seconds(30);
+        if(db_=="/mnt/us/native-rss/data/rss.sqlite") {
+            const std::filesystem::path result="/mnt/us/native-rss/.update/result";
+            if(std::filesystem::is_regular_file(result)&&!std::filesystem::is_symlink(result)) {
+                app_.notify(read_file(result.string()));std::filesystem::remove(result);
+            }
+        }
     }
     ~UiTasks(){cancel_=true;if(worker_.valid())worker_.wait();}
     void tick(){
@@ -91,7 +98,32 @@ public:
             catch(const std::exception& e){auto_due_=now+std::chrono::minutes(30);std::cerr<<"RSS Reader: automatic sync deferred: "<<e.what()<<'\n';}
         }
         const auto folder=std::filesystem::path(db_).parent_path();
-        if(request=="sync"||request=="retry-sync"||request=="auto-sync"||request=="translate-selection"||request.rfind("fulltext:",0)==0||request.rfind("translate:",0)==0){
+        if(request=="check-update"||request=="download-update") {
+            if(worker_.valid()){app_.update_finished(false,"请先等待当前同步、翻译或更新任务完成");return;}
+            try {
+                const bool downloading=request=="download-update";
+                if(downloading)require_device_update();
+                cancel_=false;update_task_=downloading?UpdateTask::Download:UpdateTask::Check;
+                app_.update_started(downloading);
+                worker_=std::async(std::launch::async,[this,downloading] {
+                    if(!downloading)update_result_=rss::check_update(cancel_);
+                    else rss::prepare_update(update_result_,"/mnt/us",cancel_,[this](const std::string& message){
+                        std::lock_guard<std::mutex> lock(mutex_);progress_=rss::SyncProgress{0,0,0,message};
+                    });
+                });
+            }catch(const std::exception& e){update_task_=UpdateTask::None;app_.update_finished(false,e.what());}
+        }else if(request=="cancel-update") {
+            if(update_task_!=UpdateTask::None){cancel_=true;app_.update_progress("正在取消更新…");}
+        }else if(request=="install-update") {
+            require_device_update();
+            if(worker_.valid())throw std::runtime_error("请先等待当前任务完成");
+            if(std::filesystem::exists("/var/local/native-rss/home/enabled"))throw std::runtime_error("请先在 KUAL 停用首页 RSS");
+            rss::backup_update_database("/mnt/us");app_.install_update=true;app_.quit=true;
+        }else if(request=="sync"||request=="retry-sync"||request=="auto-sync"||request=="translate-selection"||request.rfind("fulltext:",0)==0||request.rfind("translate:",0)==0){
+            if(update_task_!=UpdateTask::None) {
+                if(const auto selection=app_.take_selection_request())app_.selection_finished(*selection,"",false,"请先等待在线升级任务完成");
+                app_.sync_finished(false,"请先等待在线升级任务完成");return;
+            }
             if(!worker_.valid()){
                 const bool selecting=request=="translate-selection",article_translation=request.rfind("translate:",0)==0;
                 const bool translating=selecting||article_translation;
@@ -132,37 +164,59 @@ public:
         collect();
     }
 private:
+    void require_device_update() const {
+        const auto guard=std::getenv("RSS_UI_GUARD");
+        if(!guard||std::string(guard)!="1"||db_!="/mnt/us/native-rss/data/rss.sqlite")
+            throw std::runtime_error("下载安装仅支持从 Kindle 设备启动器运行");
+    }
+    void progress(const rss::SyncProgress& value) {
+        if(update_task_!=UpdateTask::None)app_.update_progress(value.message);
+        else app_.sync_progress(value.completed,value.total,value.failed,value.message);
+    }
     void collect(){
         std::optional<rss::SyncProgress> progress;
         {std::lock_guard<std::mutex> lock(mutex_);progress=std::move(progress_);progress_.reset();}
-        if(progress)app_.sync_progress(progress->completed,progress->total,progress->failed,progress->message);
+        if(progress)this->progress(*progress);
         if(worker_.valid()&&worker_.wait_for(std::chrono::seconds(0))==std::future_status::ready){
             std::string failure;try{worker_.get();}catch(const std::exception& e){failure=e.what();}
             // Worker state is committed even when its status page is not visible.
             {std::lock_guard<std::mutex> lock(mutex_);progress=std::move(progress_);progress_.reset();}
-            if(progress)app_.sync_progress(progress->completed,progress->total,progress->failed,progress->message);
-            if(selection_job_){app_.selection_finished(*selection_job_,selection_result_,cancel_,failure);selection_job_.reset();selection_result_.clear();}
+            if(progress)this->progress(*progress);
+            if(update_task_!=UpdateTask::None) {
+                if(update_task_==UpdateTask::Check&&failure.empty()&&!cancel_)app_.update_checked(update_result_);
+                else app_.update_finished(cancel_,failure);
+                update_task_=UpdateTask::None;
+            }else if(selection_job_){app_.selection_finished(*selection_job_,selection_result_,cancel_,failure);selection_job_.reset();selection_result_.clear();}
             else app_.sync_finished(cancel_,failure);
         }
     }
     rss::Store& store_;rss::App& app_;std::string db_;
     std::chrono::steady_clock::time_point status_due_{},auto_due_{};
     std::optional<rss::SelectionJob> selection_job_;
+    enum class UpdateTask { None, Check, Download };
+    UpdateTask update_task_=UpdateTask::None;
+    rss::UpdateRelease update_result_;
     std::string selection_result_;
     std::atomic<bool> cancel_{false};std::future<void> worker_;std::mutex mutex_;std::optional<rss::SyncProgress> progress_;
 };
 volatile std::sig_atomic_t stop_device=0;
 void stop_device_handler(int){stop_device=1;}
-void device(rss::Store& store,rss::Canvas& canvas,const std::string& db,std::int64_t article){
+int device(rss::Store& store,rss::Canvas& canvas,const std::string& db,std::int64_t article){
     const auto guard=std::getenv("RSS_UI_GUARD");
     if(!guard||std::string(guard)!="1")throw std::runtime_error("设备模式必须由屏幕会话启动器运行");
     stop_device=0;
     const auto term=std::signal(SIGTERM,stop_device_handler),interrupt=std::signal(SIGINT,stop_device_handler),hangup=std::signal(SIGHUP,stop_device_handler);
+    bool install=false;
     try{
         rss::KindleDevice hardware;rss::App app(store,canvas,article,status_font_path());UiTasks tasks(store,app,db);
         auto last_activity=std::chrono::steady_clock::now()-std::chrono::seconds(5);
         while(!stop_device&&!app.quit){
-            if(app.dirty){app.draw();hardware.present(canvas.pixels);}
+            if(app.dirty){
+                app.draw();hardware.present(canvas.pixels);
+                if(std::filesystem::exists("/mnt/us/native-rss/.update/journal")) {
+                    rss::commit_update("/mnt/us");app.notify("在线升级完成 · "+rss::app_version());
+                }
+            }
             const auto gesture=hardware.touch(100);
             const auto now=std::chrono::steady_clock::now();
             if(gesture&&now-last_activity>=std::chrono::seconds(5)){
@@ -173,8 +227,10 @@ void device(rss::Store& store,rss::Canvas& canvas,const std::string& db,std::int
             catch(const std::exception& e){app.show_error(e.what());}
         }
         // The supervising launcher restores the screen after checking the power state.
+        install=app.install_update;
     }catch(...){std::signal(SIGTERM,term);std::signal(SIGINT,interrupt);std::signal(SIGHUP,hangup);throw;}
     std::signal(SIGTERM,term);std::signal(SIGINT,interrupt);std::signal(SIGHUP,hangup);
+    return install?42:0;
 }
 #ifdef RSS_DESKTOP
 void desktop(rss::Store& store,rss::Canvas& canvas,const std::string& db,std::int64_t article){
@@ -269,11 +325,34 @@ int main(int argc,char** argv){
                 "  translate-web ID     英译中并缓存已下载的网页正文\n"
                 "  list                 列出本地文章\n"
                 "  probe                只读检查 Kindle 屏幕和输入设备\n"
+                "  check-update         只读检查 GitHub 最新正式版本\n"
                 "  device               由会话启动器启动 Kindle 原生界面；--article ID 直达正文\n"
                 "  render FILE.pgm      渲染 1072×1448 列表；--article ID 渲染正文\n"
                 "  desktop              启动原生桌面模拟器\n";return 0;
         }
         if(command=="probe"){std::cout<<rss::probe_device();return 0;}
+        if(command=="check-update") {
+            const std::atomic<bool> cancel{false};const auto update=rss::check_update(cancel);
+            std::cout<<"当前 "<<rss::app_version()<<" · 最新 "<<update.version<<(update.available?" · 有可用更新\n":" · 已是最新版本\n");return 0;
+        }
+        if(command=="update-apply"||command=="update-recover") {
+            if(!arg.empty())throw std::runtime_error("升级命令不接受额外参数");
+            const auto guard=std::getenv("RSS_UPDATE_GUARD");
+            if(!guard||std::string(guard)!="1")throw std::runtime_error("升级命令必须由设备启动器运行");
+            if(command=="update-apply") {
+                const auto launcher=std::getenv("RSS_LAUNCHER_PID");rss::bind_to_launcher(launcher?launcher:"");
+                try{rss::apply_update("/mnt/us");return 0;}
+                catch(const std::exception& e) {
+                    rss::recover_update("/mnt/us");
+                    std::ofstream result("/mnt/us/native-rss/.update/result");result<<"在线升级未完成，已保留原版本："<<e.what();
+                    std::cerr<<"升级失败："<<e.what()<<'\n';return 1;
+                }
+            }
+            rss::recover_update("/mnt/us");::unsetenv("RSS_UPDATE_BOOT");
+            ::close(9);
+            ::execl("/bin/sh","sh","/mnt/us/native-rss/launch.sh",static_cast<char*>(nullptr));
+            throw std::runtime_error("无法重新启动阅读器，请从书库再次打开");
+        }
         if(command=="device"){
             const auto launcher=std::getenv("RSS_LAUNCHER_PID");
             rss::bind_to_launcher(launcher?launcher:"");
@@ -310,7 +389,7 @@ int main(int argc,char** argv){
             for(const auto& e:store.entries(rss::View::All))std::cout<<e.id<<"\t"<<(e.read?"已读":"未读")<<"\t"<<e.title<<"\n";
         }else if(command=="render"||command=="desktop"||command=="device"){
             rss::Canvas canvas(1072,1448,font.empty()?font_path():font);
-            if(command=="device")device(store,canvas,db,article);
+            if(command=="device")return device(store,canvas,db,article);
             else if(command=="render"){
                 if(arg.empty())throw std::runtime_error("需要输出 PGM 路径");
                 rss::App app(store,canvas,0,status_font_path());if(article)app.open(article,false);app.draw();canvas.write_pgm(arg);

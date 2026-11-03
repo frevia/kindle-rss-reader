@@ -150,6 +150,7 @@ void App::draw(){
     else if(screen_==Screen::Sync){list_screen();list_visible=true;sync_screen();}
     else if(screen_==Screen::Cache)management_screen();
     else if(screen_==Screen::Settings)settings_screen();
+        else if(screen_==Screen::Update)update_screen();
     else {list_screen();list_visible=true;if(brand_menu_)app_menu();}
     if(!reader_visible)device_status(true,list_visible);
     dirty=false;
@@ -767,17 +768,18 @@ void App::settings_screen(){
     button({32,576,w-316,112},"自动同步订阅",auto_toggle,false,32,Icon::None,true,Align::Left);
     button({w-252,588,220,88},auto_enabled?"已开启":"已关闭",auto_toggle,auto_enabled,28);
     y=744;
-    for(const auto& line:c_.wrap("开启后打开阅读器时检查更新，并在使用中每 30 分钟同步。仅 Wi-Fi 可用时运行；不会唤醒休眠中的 Kindle，也不会自动翻译。",24,w-64)){
+    for(const auto& line:c_.wrap("开启后打开阅读器时检查订阅更新，并在使用中每 30 分钟同步。仅 Wi-Fi 可用时运行；不会唤醒休眠中的 Kindle，也不会自动翻译。",24,w-64)){
         c_.text(32,y,line.text,24,85);y+=36;
     }
     c_.rule(32,920,w-64,205);
-    c_.text(32,984,"关于与许可",32);
-    y=1036;
+    button({32,940,w-64,88},"在线升级 · "+app_version(),[this]{screen_=Screen::Update;},false,30,Icon::None,true,Align::Left);
+    c_.text(32,1080,"关于与许可",32);
+    y=1132;
     for(const auto& line:c_.wrap(
             "RSS Reader · © 2026 frevia 及贡献者\n"
             "本安装程序按 GNU GPLv3 发布，允许依照许可复制、修改和再分发，不提供任何担保。\n"
             "完整条款：Kindle 磁盘 native-rss/COPYING；第三方许可见 native-rss/licenses。\n"
-            "对应源码与构建说明：\ngithub.com/frevia/kindle-rss-reader/releases",24,w-64)){
+            "源码：github.com/frevia/kindle-rss-reader/releases",24,w-64)){
         c_.text(32,y,line.text,24,85);y+=36;
     }
 }
@@ -922,7 +924,7 @@ void App::opml_screen(){
 }
 void App::sync_started(bool translating,bool automatic){translating_=translating;automatic_sync_=automatic;if(!automatic)status_.clear();sync_page_=0;sync_state_=SyncState::Running;sync_completed_=sync_failed_=0;sync_total_=translating?0:static_cast<int>(feeds_.size());sync_message_=translating?"正在准备翻译文章":"正在连接订阅源";if(screen_==Screen::Sync||reader_panel_==ReaderPanel::Translation)dirty=true;}
 void App::maybe_auto_sync(std::time_t now){
-    if(now<=0||quit||!reader_status_.wifi||screen_!=Screen::List||!error_.empty()||!confirmation_.empty()||!input_mode_.empty()||managing_||brand_menu_||selection_||sync_state_==SyncState::Running||!request_.empty()||store_.setting("auto_sync")=="0")return;
+    if(now<=0||quit||!reader_status_.wifi||screen_!=Screen::List||!error_.empty()||!confirmation_.empty()||!input_mode_.empty()||managing_||brand_menu_||selection_||sync_state_==SyncState::Running||update_state_==UpdateState::Checking||update_state_==UpdateState::Downloading||!request_.empty()||store_.setting("auto_sync")=="0")return;
     if(std::none_of(feeds_.begin(),feeds_.end(),[](const Feed& f){return f.id>0&&!f.url.empty();}))return;
     constexpr std::int64_t interval=1800;std::int64_t latest=0;
     const auto attempted=store_.setting("auto_sync_last_attempt");
@@ -1291,6 +1293,7 @@ void App::back(){
     else if(screen_==Screen::Groups||screen_==Screen::Opml)screen_=Screen::Subscriptions;
     else if(screen_==Screen::Cache)screen_=Screen::Sync;
     else if(screen_==Screen::Settings)screen_=Screen::List;
+    else if(screen_==Screen::Update)screen_=Screen::Settings;
     else if(screen_==Screen::Sync){screen_=Screen::List;if(sync_state_!=SyncState::Running){status_.clear();reload();}}
     else if(source_list_)screen_=Screen::Subscriptions;
     dirty=true;

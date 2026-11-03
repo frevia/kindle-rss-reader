@@ -7,6 +7,7 @@ import sys
 import tempfile
 import unittest
 import zipfile
+from unittest.mock import patch
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/"tools"))
 import package as pack
@@ -99,6 +100,16 @@ class PackageTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):pack.verify_build(binary,manifest,{"src/main.cpp":"changed"})
             binary.write_bytes(b"changed")
             with self.assertRaises(RuntimeError):pack.verify_build(binary,manifest,inputs)
+
+    def test_update_metadata_reads_cmake_version_and_rejects_missing_version(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder)
+            cmake=root/"CMakeLists.txt"
+            cmake.write_text("project(kindle_rss VERSION 1.2.3 LANGUAGES CXX)\n",encoding="utf-8")
+            with patch.object(pack,"ROOT",root):
+                self.assertEqual(pack.update_metadata(),{"format":1,"model":"KPW3","version":"v1.2.3"})
+                cmake.write_text("project(kindle_rss LANGUAGES CXX)\n",encoding="utf-8")
+                with self.assertRaises(RuntimeError):pack.update_metadata()
 
     def test_zip_is_repeatable_and_preserves_executable_mode(self):
         with tempfile.TemporaryDirectory() as folder:

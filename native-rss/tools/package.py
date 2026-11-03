@@ -3,6 +3,7 @@
 import argparse
 import hashlib
 import json
+import re
 from pathlib import Path
 import zipfile
 import urllib.request
@@ -15,6 +16,14 @@ def verify_build(binary, manifest, inputs):
     if manifest.get("inputs") != inputs or manifest.get("binary_sha256") != sha256(binary):
         raise RuntimeError("ARM 产物与当前源码不一致，请重新运行 tools/build_arm.py")
     verify_elf(binary)
+
+
+def update_metadata():
+    cmake = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8")
+    match = re.search(r"(?m)^\s*project\(kindle_rss VERSION ([0-9]+\.[0-9]+\.[0-9]+) LANGUAGES CXX\)\s*$", cmake)
+    if not match:
+        raise RuntimeError("无法从 CMakeLists.txt 读取项目版本")
+    return {"format": 1, "model": "KPW3", "version": "v" + match.group(1)}
 
 
 def write_zip(path, files):
@@ -206,6 +215,7 @@ def main():
         b"It includes CREngine-ng (GPL-2.0-or-later), used under GPLv3, and its qimagescale component.\n"
         b"The MIT license applies to original RSS sources, not to the combined executable.\n"
         b"The release provides project sources and a separate third-party corresponding-source archive.\n", False)
+    files["native-rss/UPDATE.json"] = ((json.dumps(update_metadata(), separators=(",", ":")) + "\n").encode("utf-8"), False)
     checksums = {name: hashlib.sha256(data).hexdigest() for name, (data, _) in files.items()}
     files["native-rss/MANIFEST.json"] = (json.dumps({"development_only": False, "device_tested": False,
         "reader": reader, "distribution_license": "GPL-3.0-only", "home_adapter": {"included": bool(args.home_patch), "enabled_by_default": False}, "public_release_ready": True, "files": checksums}, indent=2).encode(), False)

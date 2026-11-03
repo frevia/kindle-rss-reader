@@ -44,6 +44,7 @@ class ReleaseTests(unittest.TestCase):
             "native-rss/bin/kindle-rss-home": elf(),
             "native-rss/COPYING": b"GPLv3 fixture",
             "extensions/native-rss/config.xml": b"<extension><information><version>0.0.3</version></information></extension>",
+            "native-rss/UPDATE.json": b'{"format":1,"model":"KPW3","version":"v0.0.3"}\n',
         }
         self.build = {"inputs": self.inputs, "reader": self.reader,
                       "binary_sha256": hashlib.sha256(elf()).hexdigest(),
@@ -87,6 +88,21 @@ class ReleaseTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "构建输入"): release.stage_release(self.output, TAG)
         self.build["inputs"] = self.inputs; self.write_archives()
         with self.assertRaisesRegex(ValueError, "版本"): release.stage_release(self.output, "v0.0.4")
+
+    def test_invalid_update_metadata_blocks_release(self):
+        for data in (b'{"format":1,"model":"KPW2","version":"v0.0.3"}',
+                     b'{"format":true,"model":"KPW3","version":"v0.0.3"}',
+                     b'{"format":2,"model":"KPW3","version":"v0.0.3"}',
+                     b'{"format":1,"model":"KPW3","version":"v0.0.4"}', b"{"):
+            with self.subTest(data=data):
+                self.files["native-rss/UPDATE.json"] = data
+                self.write_archives()
+                with self.assertRaisesRegex(ValueError, "UPDATE.json"):
+                    release.stage_release(self.output, TAG)
+        del self.files["native-rss/UPDATE.json"]
+        self.write_archives()
+        with self.assertRaisesRegex(ValueError, "UPDATE.json"):
+            release.stage_release(self.output, TAG)
 
     def test_missing_or_unverified_dependency_sources_block_release(self):
         with patch.object(release.source_bundle, "verify_bundle", side_effect=ValueError("bad sources")):

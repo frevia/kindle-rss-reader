@@ -11,6 +11,8 @@ SET=/usr/bin/lipc-set-prop
 REFRESH=/mnt/us/libkh/bin/fbink
 KILL=kill
 PASSCODE=/var/local/system/userpasswdenabled
+UPDATE=/mnt/us/native-rss/.update
+LAUNCH=/mnt/us/native-rss/launch.sh
 
 fail() { printf '%s\n' "Kindle RSS: $*" >&2; exit 1; }
 article=
@@ -24,7 +26,7 @@ fi
 for tool in timeout flock stat pidof awk dd mktemp mkfifo; do
     command -v "$tool" >/dev/null 2>&1 || fail "缺少工具 $tool"
 done
-for tool in "$APP" "$GET" "$SET" "$REFRESH"; do
+for tool in "$GET" "$SET" "$REFRESH"; do
     [ -x "$tool" ] || fail "缺少程序 $tool"
 done
 [ ! -L "$STATE" ] || fail '状态目录不能是符号链接'
@@ -43,6 +45,14 @@ if [ -e "$STATE/session.log" ]; then
 fi
 exec >"$STATE/session.log" 2>&1 || fail '无法创建运行日志'
 printf 'session_start '; date -u
+# Recovery runs under the same session lock, before opening the database or taking the screen.
+if [ -e "$UPDATE/journal" ] && [ "${RSS_UPDATE_BOOT:-0}" != 1 ]; then
+    [ -x "$UPDATE/runner" ] && [ ! -L "$UPDATE/runner" ] || fail '升级恢复程序缺失，请通过 USB 恢复'
+    RSS_UPDATE_GUARD=1 exec "$UPDATE/runner" update-recover
+    fail '无法运行升级恢复程序'
+fi
+[ -x "$APP" ] || fail "缺少程序 $APP"
+install_update=0
 snapshot=
 CRE_CACHE=
 stopped=
@@ -116,6 +126,9 @@ cleanup() {
     [ -z "$snapshot" ] || rm -f "$snapshot"
     if [ "$restore_failed" -ne 0 ]; then printf '%s\n' 'Kindle RSS: 系统界面恢复不完整，请查看日志' >&2; result=1; fi
     printf 'session_end exit=%s restore_failed=%s\n' "$result" "$restore_failed"
+    if [ "$recovering" -eq 0 ] && [ "$restore_failed" -eq 0 ] && [ "$install_update" -eq 2 ]; then
+        RSS_UPDATE_BOOT=1 exec /bin/sh "$LAUNCH" 8>&- 9>&-
+    fi
     exit "$result"
 }
 interrupted() {
@@ -199,4 +212,20 @@ while "$KILL" -0 "$child" 2>/dev/null; do
 done
 wait "$child"; result=$?
 child=
+if [ "$result" -eq 42 ]; then
+    [ -x "$UPDATE/runner" ] && [ ! -L "$UPDATE/runner" ] || fail '升级安装程序缺失'
+    # The old shell keeps its open script inode; replacements use rename, never in-place writes.
+    # Keep volumd paused and the guardian alive until every installation write has finished.
+    launching=1
+    RSS_UPDATE_GUARD=1 RSS_LAUNCHER_PID=$owner "$UPDATE/runner" update-apply 9>&- &
+    child=$!
+    launching=0
+    while "$KILL" -0 "$child" 2>/dev/null; do
+        "$KILL" -0 "$guardian" 2>/dev/null || fail '升级期间恢复监护进程已退出'
+        sleep 1
+    done
+    wait "$child"; result=$?
+    child=
+    if [ "$result" -eq 0 ]; then install_update=2; fi
+fi
 exit "$result"

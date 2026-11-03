@@ -5,6 +5,7 @@
 #include "cre_reader.hpp"
 #include "device.hpp"
 #include "selection.hpp"
+#include "update.hpp"
 #include <functional>
 #include <map>
 #include <memory>
@@ -14,7 +15,8 @@ namespace rss {
 class App {
 public:
     enum class ReaderPanel { None, Type, Images, Info, Content, Translation, Selection };
-    enum class Screen { List, Subscriptions, GroupPicker, Groups, GroupEdit, Opml, Sync, Cache, Settings };
+    enum class Screen { List, Subscriptions, GroupPicker, Groups, GroupEdit, Opml, Sync, Cache, Settings, Update };
+    enum class UpdateState { Idle, Checking, Available, Current, Downloading, Ready, Failed };
     enum class SyncState { Idle, Running, Complete, Cancelled, Failed };
     App(Store& store, Canvas& canvas, std::int64_t initial_article = 0, const std::string& status_font = {});
     void draw();
@@ -37,6 +39,11 @@ public:
     const ReaderSelection* selected_text() const { return selection_ ? &*selection_ : nullptr; }
     void sync_progress(int completed, int total, int failed, const std::string& message);
     void sync_finished(bool cancelled, const std::string& error = "");
+    void update_started(bool downloading);
+    void update_checked(const UpdateRelease& release);
+    void update_progress(const std::string& message);
+    void update_finished(bool cancelled, const std::string& error = "");
+    UpdateState update_state() const { return update_state_; }
     Screen screen() const { return screen_; }
     SyncState sync_state() const { return sync_state_; }
     bool menu_open() const { return brand_menu_; }
@@ -46,7 +53,7 @@ public:
     void show_view(View view, std::int64_t feed = 0);
     void show_group(const std::string& group);
     std::string take_request();
-    bool dirty = true, quit = false;
+    bool dirty = true, quit = false, install_update = false;
     bool reading() const { return current_.has_value(); }
     std::size_t reader_page() const { return page_; }
     std::int64_t current_id() const { return current_ ? current_->id : 0; }
@@ -91,6 +98,10 @@ private:
     std::string sync_message_;
     bool translating_ = false;
     bool automatic_sync_ = false, auto_refresh_pending_ = false;
+    UpdateState update_state_ = UpdateState::Idle;
+    UpdateRelease update_release_;
+    std::string update_message_;
+    std::size_t update_notes_page_ = 0;
     std::optional<ReaderSelection> selection_;
     struct SelectionDrag { TouchPoint anchor; bool first; };
     std::optional<SelectionDrag> selection_drag_;
@@ -149,6 +160,7 @@ private:
     void sync_screen();
     void app_menu();
     void settings_screen();
+    void update_screen();
     void open_subscriptions();
     void restore_home();
     void open_group_picker(PickerPurpose purpose);

@@ -63,6 +63,22 @@ elif name=="set":
     log("set "+" ".join(args))
     if mode=="pillow-error" and args[-1]=="disable":sys.exit(1)
 elif name=="refresh":log("refresh")
+elif name=="runner":
+    assert os.environ["RSS_UPDATE_GUARD"]=="1"
+    with (root/"state/session.lock").open("a") as lock:
+        try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        except BlockingIOError:pass
+        else:raise AssertionError("updater lost the session lock")
+    events=(root/"events").read_text() if (root/"events").exists() else ""
+    if args==["update-apply"]:
+        assert "app-start" in events and "-CONT 900003" not in events
+        assert pathlib.Path((root/"cache-path").read_text()).exists()
+        log("update-apply")
+        if mode=="update-failed":sys.exit(1)
+    elif args==["update-recover"]:
+        assert "app-start" not in events and "-STOP 900003" not in events
+        log("update-recover")
+    else:raise AssertionError(args)
 elif name=="kill":
     sig,pid=args[0],int(args[1])
     if pid>=900000:
@@ -89,6 +105,7 @@ elif name=="app":
         (root/"started").touch()
         with (root/"fb").open("r+b") as f:f.write(b"!")
         log("app-start")
+        if mode in ("update-install","update-failed"):sys.exit(42)
         if mode in ("launcher-killed", "launcher-killed-home"):
             owner=int(os.environ["RSS_LAUNCHER_PID"])
             while os.getppid()==owner:time.sleep(.02)
@@ -118,7 +135,7 @@ class LauncherTests(unittest.TestCase):
                 (root/"protected").write_text("untouched")
                 (root/"state/session.log").unlink()
                 (root/"state/session.log").symlink_to(root/"protected")
-            for name in ("stat","chmod","flock","timeout","pidof","get","set","refresh","kill","app","mktemp","rm"):
+            for name in ("stat","chmod","flock","timeout","pidof","get","set","refresh","kill","app","mktemp","rm","runner"):
                 tool=root/"bin"/name;tool.write_text("#!"+sys.executable+"\n"+FAKE);tool.chmod(0o755)
             for pid,name in ((900001,"awesome"),(900002,"JunoStatusBarDr"),(900003,"volumd")):
                 p=root/"proc"/str(pid);p.mkdir(parents=True)
@@ -135,8 +152,14 @@ class LauncherTests(unittest.TestCase):
                     (p/"status").write_text("State:\t"+state+" (sleeping)\n")
             (root/"fb").write_bytes(b"x"*1575424)
             if mode=="passcode":(root/"passcode").touch()
+            (root/"update").mkdir()
+            (root/"update/runner").write_bytes((root/"bin/runner").read_bytes());(root/"update/runner").chmod(0o755)
+            if mode=="update-recover":
+                (root/"update/journal").write_text("interrupted update")
+                (root/"bin/app").unlink()  # Recovery must work even if the new program cannot execute.
+            (root/"restart.sh").write_text('echo restart >> "$FIXTURE/events"\n')
             values={"STATE":root/"state","APP":root/"bin/app","DB":root/"rss.sqlite","FB":root/"fb",
-                    "PROC":root/"proc","GET":root/"bin/get","SET":root/"bin/set","REFRESH":root/"bin/refresh","KILL":root/"bin/kill","PASSCODE":root/"passcode"}
+                    "PROC":root/"proc","GET":root/"bin/get","SET":root/"bin/set","REFRESH":root/"bin/refresh","KILL":root/"bin/kill","PASSCODE":root/"passcode","UPDATE":root/"update","LAUNCH":root/"restart.sh"}
             script=SOURCE.read_text().splitlines()
             (root/"cache").mkdir()
             source="\n".join(script)+"\n"
@@ -176,7 +199,8 @@ class LauncherTests(unittest.TestCase):
             if mode not in ("passcode","log-symlink","state-nonroot","state-unsafe","state-symlink","state-chmod-error") and not (mode=="state-2770" and result.returncode!=0):
                 self.assertEqual((root/"state/session.previous.log").read_text(),"previous session fixture\n")
                 log=(root/"state/session.log").read_text()
-                self.assertIn("session_start",log);self.assertIn("session_end",log)
+                self.assertIn("session_start",log)
+                if mode!="update-recover":self.assertIn("session_end",log)
                 if mode=="cache-cleanup-error":self.assertIn("系统界面恢复不完整",log)
             if mode=="log-symlink":self.assertEqual((root/"protected").read_text(),"untouched")
             if (root/"cache-path").exists():
@@ -198,6 +222,23 @@ class LauncherTests(unittest.TestCase):
         result,events,pixel=self.run_case("article")
         self.assertEqual(result.returncode,0,result.stderr)
         self.assertIn("article-start 42",events)
+        self.assertEqual(pixel,b"x")
+
+    def test_update_waits_for_reader_exit_and_keeps_usb_paused_until_installed(self):
+        for mode,code in (("update-install",0),("update-failed",1)):
+            with self.subTest(mode=mode):
+                result,events,pixel=self.run_case(mode)
+                self.assertEqual(result.returncode,code,result.stderr)
+                self.assertEqual(pixel,b"x")
+                self.assertLess(events.index("app-start"),events.index("update-apply"))
+                self.assertLess(events.index("update-apply"),events.index("cache-rm"))
+                self.assertLess(events.index("update-apply"),events.index("-CONT 900003"))
+                self.assertEqual("restart" in events,mode=="update-install")
+
+    def test_interrupted_update_is_recovered_before_opening_device_or_database(self):
+        result,events,pixel=self.run_case("update-recover")
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertEqual(events,["update-recover"])
         self.assertEqual(pixel,b"x")
 
     def test_invalid_article_arguments_rejected_before_device_access(self):

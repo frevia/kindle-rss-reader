@@ -12,7 +12,7 @@
 
 ## 本机构建
 
-需要 CMake、pkg-config、C++17 编译器及 libxml2、sqlite3、libcurl（支持 CURLOPT_PROTOCOLS_STR）、freetype2、HarfBuzz、libpng、libwebp、libavif 1.1.0+（启用 libyuv）、sdl2 开发库。
+需要 CMake、pkg-config、C++17 编译器及 libxml2、sqlite3、libcurl（支持 CURLOPT_PROTOCOLS_STR）、OpenSSL、zlib、freetype2、HarfBuzz、libpng、libwebp、libavif 1.1.0+（启用 libyuv）、sdl2 开发库。
 
 先确认这些库能通过 `pkg-config` 查到；非系统前缀安装时，将对应的 `lib/pkgconfig` 加入 `PKG_CONFIG_PATH`。例如 libavif 安装在自选前缀后，使用 `PKG_CONFIG_PATH=/absolute/prefix/lib/pkgconfig`。不要将 ARM 的依赖目录用于宿主构建。缺少 `libavif` 时 CMake 会停止；已有旧构建目录成功不代表新环境能直接构建。
 
@@ -80,6 +80,18 @@ rtk proxy python3 native-rss/tools/package.py
 项目自身的 MIT 许可与第三方组件汇总同时放入安装包；源码包还包含仓库首页、贡献指南、安全反馈和同一组第三方许可。源码按文件类型白名单收集，诊断 TXT、日志、数据库与 OPML 不属于打包输入。发布前仍需核对实际 ZIP 内容，不能只依赖 `.gitignore`。
 
 ## GitHub Release
+
+### 在线升级协议（源码开发版）
+
+`src/update.cpp` 使用已有 libcurl、SQLite JSON、OpenSSL SHA256 与 zlib，手动查询固定公开仓库的 `/releases/latest`，仅接受数值更大的 `vMAJOR.MINOR.PATCH` 正式版本。按文件名选择 KPW3 ZIP 与 `SHA256SUMS.txt`；不发送 GitHub 令牌，初始资产地址必须属于本仓库对应标签。每次跳转重新校验 HTTPS 与 GitHub 域名，禁止降级 HTTP 或跳出 GitHub 服务。API、校验文本、ZIP 分别限制为 2 MiB、64 KiB、128 MiB；解压后最多 256 MiB / 1024 文件。联网走 UI 单后台任务和取消信号，不与订阅同步或翻译并行。
+
+`package.py` 将 `native-rss/UPDATE.json`（`format: 1`、`model: KPW3`、CMake 对应 `version: vX.Y.Z`）纳入逐文件 MANIFEST。`release.py` 校验元数据与标签一致，现有四个发布附件及工作流无需改名。升级器仅解压本打包器生成的普通 DEFLATE ZIP 条目，拒绝 ZIP64、加密、数据描述符、额外字段、重复或越界路径、个人数据路径及目标符号链接，并核对逐文件哈希与实际文件集合。未来更改归档特性或协议时需要先升级客户端，不应将不兼容的包公开为最新版。
+
+下载暂存于 `native-rss/.update`；安装前通过 SQLite backup API 保存一致性数据库副本。阅读器以专用退出码 42 交接到旧程序副本 `runner`：启动器等待数据库关闭，在恢复监护与暂停 volumd 的保护下执行 `update-apply`。安装先完整备份现有文件并持久化 journal，再逐文件以 rename 替换；不原地覆盖运行中的文件，不整目录替换 data/documents/extensions。新的启动器恢复系统界面后重启，程序首次成功显示设备画面才提交 journal。安装出错立即回退，安装中断或新程序启动失败则在下次启动、打开数据库之前通过旧 runner 恢复。此机制不提供数据库迁移功能，也不证明硬件掉电时文件系统仍完整；外部备份和真机验收仍必要。
+
+`kindle-rss check-update` 可只读检查真实 GitHub；`update-apply` / `update-recover` 是启动器内部命令，要求启动器保护环境，前者绑定 Linux 父进程生命周期。`update`、`update_archive`、`update_network`、`update_app` 与 `launcher` 覆盖版本、真实 ZIP、临时目录安装回退、SQLite、模拟 GitHub TLS 下载与跳转、取消和 1072×1448 界面状态。网络测试使用临时自签证书和本机代理，不接触真实 Release 附件；`RSS_TEST_SNAPSHOTS` 可输出升级界面 PGM。测试不安装或操作 Kindle。
+
+### 发布步骤
 
 当前版本说明见 [v0.0.3](RELEASE-v0.0.3.md)。更新 CMake、KUAL 版本号及对应发布文档后提交，再推送 `v数字.数字.数字` 标签，触发[发布工作流](../../.github/workflows/release.yml)。安装文档始终链接最新版。
 
