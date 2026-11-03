@@ -347,6 +347,26 @@ void translate_article(Store& store,std::int64_t entry_id,bool web,const QwenCon
     p.message=complete?"翻译已保存，可在翻译面板切换模式":cancel?"翻译已取消，已完成段落已保存":"本轮翻译已暂停，点击继续翻译剩余段落";
     progress(p);
 }
+std::string translate_selection(Store& store,const SelectionJob& job,const QwenConfig& config,const std::atomic<bool>& cancel) {
+    const auto display_entry=[&]() {
+        const auto source=job.web?store.fulltext_entry(job.entry_id):store.entry(job.entry_id);
+        if(!source)throw std::runtime_error("选中文章已删除或正文不可用，请重新选择");
+        if(job.mode==ReadingMode::Original)return *source;
+        const auto document=translation_document(*source);
+        const auto blocks=store.translation_blocks(job.entry_id,job.web,document.revision);
+        return translated_entry(*source,document,blocks,job.mode);
+    };
+    if(cancel)throw std::runtime_error("翻译已取消");
+    if(translation_revision(display_entry())!=job.revision)throw std::runtime_error("正文已更新，请重新打开文章后选择文字");
+    if(const auto cached=store.selection(job);cached&&!cached->translation.empty())return cached->translation;
+    const auto translated=post_qwen(config,job.range.text,cancel,{});
+    TranslationBlock plain;
+    (void)validate_translation(plain,translated);
+    if(cancel)throw std::runtime_error("翻译已取消");
+    if(translation_revision(display_entry())!=job.revision)throw std::runtime_error("正文已更新，请重新打开文章后选择文字");
+    store.save_selection_translation(job,translated);
+    return translated;
+}
 void sync_fulltext(Store& store,std::int64_t entry_id,const std::atomic<bool>& cancel,
                    const std::function<void(const SyncProgress&)>& progress){
     if(store.fulltext_status(entry_id).state!="pending")throw std::runtime_error("文章未加入下载队列，或网页正文已保存");

@@ -13,19 +13,26 @@ struct FrameLayout {
 };
 void validate_kpw3_layout(const FrameLayout& layout);
 struct TouchPoint { int x=0,y=0; };
+enum class TouchPhase { Complete, LongPress, Move, Cancel };
 struct TouchGesture {
     TouchPoint start,end,minimum,maximum;
+    TouchPhase phase=TouchPhase::Complete;
+    std::uint64_t duration_ms=0,hold_ms=0;
     explicit TouchGesture(TouchPoint point):start(point),end(point),minimum(point),maximum(point){}
     void update(TouchPoint point);
 };
 class TouchDecoder {
 public:
-    std::optional<TouchGesture> consume(std::uint16_t type,std::uint16_t code,std::int32_t value);
+    std::optional<TouchGesture> consume(std::uint16_t type,std::uint16_t code,std::int32_t value,std::uint64_t now_ms=0);
+    std::optional<TouchGesture> poll(std::uint64_t now_ms);
 private:
     int slot_=0,x_=0,y_=0;
     bool active_=false,released_=false,have_x_=false,have_y_=false,path_started_=false,cancelled_=false;
     std::optional<TouchGesture> gesture_;
     std::vector<int> active_slots_;
+    std::uint64_t start_ms_=0,hold_ms_=0,last_ms_=0;
+    TouchPoint reported_{};
+    bool have_time_=false,left_bounds_=false,long_sent_=false,cancel_sent_=false;
 };
 TouchPoint scale_touch(TouchPoint point,int xmin,int xmax,int ymin,int ymax);
 TouchGesture scale_gesture(const TouchGesture& gesture,int xmin,int xmax,int ymin,int ymax);

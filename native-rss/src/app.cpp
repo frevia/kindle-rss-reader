@@ -91,7 +91,7 @@ void App::reload(){
     feeds_=store_.feeds();group_names_=store_.groups();list_=store_.entries(view_,feed_,search_,midnight(),group_);
     list_starts_={0};list_complete_=false;
     ensure_list_page(list_page_);
-    list_page_=std::min(list_page_,list_starts_.size()-1);dirty=true;
+    list_page_=std::min(list_page_,list_starts_.size()-1);auto_refresh_pending_=false;dirty=true;
 }
 void App::show_view(View v,std::int64_t feed){
     view_=v;feed_=feed;group_.reset();search_.clear();list_page_=0;screen_=Screen::List;source_list_=false;reload();
@@ -132,6 +132,7 @@ void App::page_header(const std::string& title){
     back_button();c_.rule(32,76,c_.width-64,150);c_.text(32,154,title,48);
 }
 void App::draw(){
+    if(auto_refresh_pending_&&!reading()&&screen_==Screen::List&&input_mode_.empty()&&confirmation_.empty()&&error_.empty()&&!managing_&&!brand_menu_&&!source_list_)reload();
     hits_.clear();c_.clear();bool reader_visible=false,list_visible=false;
     if(!error_.empty()){
         page_header("操作未完成");int y=250;
@@ -143,7 +144,7 @@ void App::draw(){
     else if(screen_==Screen::GroupPicker){if(picker_purpose_==PickerPurpose::Read){list_screen();list_visible=true;}group_picker_screen();}
     else if(managing_)management_screen();
     else if(screen_==Screen::GroupEdit)group_edit_screen();
-    else if(current_){reader_visible=true;reader_screen();if(reader_tools_)reader_tools();if(reader_panel_!=ReaderPanel::None)reader_panel_screen();}
+    else if(current_){reader_visible=true;reader_screen();if(reader_tools_)reader_tools();if(reader_panel_!=ReaderPanel::None)reader_panel_screen();else if(selection_)selection_tools();}
     else if(screen_==Screen::Subscriptions||screen_==Screen::Groups)nav_screen();
     else if(screen_==Screen::Opml)opml_screen();
     else if(screen_==Screen::Sync){list_screen();list_visible=true;sync_screen();}
@@ -337,7 +338,7 @@ void App::open(std::int64_t id,bool track){
       }catch(const std::exception&){notify("译文缓存无法打开，已显示原文");}
     }
     if(entry->text.empty()&&entry->images.empty())throw std::runtime_error("这篇文章尚无可阅读的正文");
-    cre_.reset();current_=std::move(entry);reading_version_=version;
+    clear_selection();cre_.reset();current_=std::move(entry);reading_version_=version;load_selection_marks();
     const bool keep_classic_position=current_->reading_mode==ReadingMode::Original&&!current_->web_content&&store_.setting("reader_engine").empty()&&current_->position>0&&
         store_.setting("reader_cre:"+std::to_string(id)).empty();
     if(cre_requested_&&!keep_classic_position){
@@ -523,8 +524,10 @@ void App::reader_screen(){
             else{cre_.reset();current_.reset();pages_.clear();notify("本次列表已读完");}
         },false,28,Icon::Next,true,Align::Right);
     }
+    draw_selection_marks(cover_top);
     const int content_bottom=reader_panel_==ReaderPanel::None?(reader_tools_?h-reader_bar_height:h-56):cover_top;
     hits_.push_back({{0,reader_content_top,w,content_bottom-reader_content_top},[this,w]{
+        if(selection_){clear_selection();return;}
         if(reader_panel_!=ReaderPanel::None){close_reader_tools();return;}
         const int x=last_tap_x_;
         if(reader_tools_){close_reader_tools();return;}
@@ -541,7 +544,7 @@ void App::reader_screen(){
         }
     }
 }
-void App::close_reader_tools(){reader_panel_=ReaderPanel::None;reader_tools_=false;image_zoom_=false;typography_anchor_.reset();}
+void App::close_reader_tools(){clear_selection();reader_panel_=ReaderPanel::None;reader_tools_=false;image_zoom_=false;typography_anchor_.reset();}
 void App::reader_tools(){
     const int w=c_.width,h=c_.height,y=h-reader_bar_height;
     c_.fill({0,y,w,reader_bar_height},255);c_.rule(32,y,w-64,170);
@@ -557,6 +560,7 @@ void App::reader_tools(){
         c_.text(left+48,y+60,label,28);
         if(reader_panel_==panel)c_.fill({x,y+reader_bar_height-4,tw,4},30);
         hits_.push_back({{x,y,tw,reader_bar_height},[this,panel]{
+            clear_selection();reader_tools_=true;
             typography_anchor_.reset();
             if(reader_panel_==panel){reader_panel_=ReaderPanel::None;image_zoom_=false;}
             else{reader_panel_=panel;image_zoom_=false;info_scroll_=0;}
@@ -568,6 +572,7 @@ int App::reader_panel_height()const{
     if(reader_panel_==ReaderPanel::Type)return 640;
     if(reader_panel_==ReaderPanel::Images)return image_zoom_?764:662;
     if(reader_panel_==ReaderPanel::Translation)return 480;
+    if(reader_panel_==ReaderPanel::Selection)return 520;
     return reader_panel_==ReaderPanel::Info?600:560;
 }
 void App::reader_panel_screen(){
@@ -575,8 +580,8 @@ void App::reader_panel_screen(){
     const int height=reader_panel_height();
     const int y=h-bar-height;
     c_.fill({0,y,w,height},255);c_.rule(32,y,w-64,150);
-    const auto close=[this]{reader_panel_=ReaderPanel::None;image_zoom_=false;typography_anchor_.reset();};
-    const char* title=reader_panel_==ReaderPanel::Type?"排版":reader_panel_==ReaderPanel::Images?"图片":reader_panel_==ReaderPanel::Content?"正文来源":reader_panel_==ReaderPanel::Translation?"翻译":"文章信息";
+    const auto close=[this]{clear_selection();reader_panel_=ReaderPanel::None;image_zoom_=false;typography_anchor_.reset();};
+    const char* title=reader_panel_==ReaderPanel::Type?"排版":reader_panel_==ReaderPanel::Images?"图片":reader_panel_==ReaderPanel::Content?"正文来源":reader_panel_==ReaderPanel::Translation?"翻译":reader_panel_==ReaderPanel::Selection?"选区翻译":"文章信息";
     c_.text(32,y+54,title,32);
     button({w-184,y,152,88},"收起",close,false,28,Icon::Close,true,Align::Right);
     auto adjust=[this](int& value,int next,const std::string& key){
@@ -586,7 +591,8 @@ void App::reader_panel_screen(){
         current_->position=*typography_anchor_;
         value=next;store_.set_setting(key,std::to_string(value));paginate();
     };
-    if(reader_panel_==ReaderPanel::Type){
+    if(reader_panel_==ReaderPanel::Selection){selection_panel(y,height);}
+    else if(reader_panel_==ReaderPanel::Type){
         const int start=w-496,cell=144,gap=16;
         const auto choice=[this](Rect r,const std::string& label,std::function<void()> action,bool selected){
             frame(c_,r,selected?3:1);button(r,label,std::move(action),selected,28);
@@ -751,20 +757,28 @@ void App::settings_screen(){
     const auto toggle=[this,enabled]{store_.set_setting("home_visible",enabled?"0":"1");};
     button({32,270,w-316,112},"在 Kindle 首页显示 RSS订阅",toggle,false,32,Icon::None,true,Align::Left);
     button({w-252,282,220,88},enabled?"已开启":"已关闭",toggle,enabled,28);
-    c_.rule(32,398,w-64,205);
-    int y=468;
-    for(const auto& line:c_.wrap("退出阅读器返回 Kindle 首页后生效。\n\n关闭后收起 RSS 区域，订阅和阅读记录会保留。",28,w-64)){
-        c_.text(32,y,line.text,28,85);y+=44;
+    int y=444;
+    for(const auto& line:c_.wrap("退出阅读器返回 Kindle 首页后生效。关闭后收起 RSS 区域，订阅和阅读记录会保留。",24,w-64)){
+        c_.text(32,y,line.text,24,85);y+=36;
     }
-    c_.rule(32,704,w-64,205);
-    c_.text(32,768,"关于与许可",32);
-    y=824;
+    c_.rule(32,536,w-64,205);
+    const bool auto_enabled=store_.setting("auto_sync")!="0";
+    const auto auto_toggle=[this,auto_enabled]{store_.set_setting("auto_sync",auto_enabled?"0":"1");};
+    button({32,576,w-316,112},"自动同步订阅",auto_toggle,false,32,Icon::None,true,Align::Left);
+    button({w-252,588,220,88},auto_enabled?"已开启":"已关闭",auto_toggle,auto_enabled,28);
+    y=744;
+    for(const auto& line:c_.wrap("开启后打开阅读器时检查更新，并在使用中每 30 分钟同步。仅 Wi-Fi 可用时运行；不会唤醒休眠中的 Kindle，也不会自动翻译。",24,w-64)){
+        c_.text(32,y,line.text,24,85);y+=36;
+    }
+    c_.rule(32,920,w-64,205);
+    c_.text(32,984,"关于与许可",32);
+    y=1036;
     for(const auto& line:c_.wrap(
             "RSS Reader · © 2026 frevia 及贡献者\n"
             "本安装程序按 GNU GPLv3 发布，允许依照许可复制、修改和再分发，不提供任何担保。\n"
             "完整条款：Kindle 磁盘 native-rss/COPYING；第三方许可见 native-rss/licenses。\n"
             "对应源码与构建说明：\ngithub.com/frevia/kindle-rss-reader/releases",24,w-64)){
-        c_.text(32,y,line.text,24,85);y+=40;
+        c_.text(32,y,line.text,24,85);y+=36;
     }
 }
 void App::nav_screen(){
@@ -906,11 +920,26 @@ void App::opml_screen(){
     c_.text(32,668,"写入 subscriptions.opml，保留空分组",24,85);
     if(!status_.empty())c_.text(32,820,c_.ellipsize(status_,24,w-64),24,75);
 }
-void App::sync_started(bool translating){translating_=translating;status_.clear();sync_page_=0;sync_state_=SyncState::Running;sync_completed_=sync_failed_=0;sync_total_=translating?0:static_cast<int>(feeds_.size());sync_message_=translating?"正在准备翻译文章":"正在连接订阅源";if(screen_==Screen::Sync||reader_panel_==ReaderPanel::Translation)dirty=true;}
+void App::sync_started(bool translating,bool automatic){translating_=translating;automatic_sync_=automatic;if(!automatic)status_.clear();sync_page_=0;sync_state_=SyncState::Running;sync_completed_=sync_failed_=0;sync_total_=translating?0:static_cast<int>(feeds_.size());sync_message_=translating?"正在准备翻译文章":"正在连接订阅源";if(screen_==Screen::Sync||reader_panel_==ReaderPanel::Translation)dirty=true;}
+void App::maybe_auto_sync(std::time_t now){
+    if(now<=0||quit||!reader_status_.wifi||screen_!=Screen::List||!error_.empty()||!confirmation_.empty()||!input_mode_.empty()||managing_||brand_menu_||selection_||sync_state_==SyncState::Running||!request_.empty()||store_.setting("auto_sync")=="0")return;
+    if(std::none_of(feeds_.begin(),feeds_.end(),[](const Feed& f){return f.id>0&&!f.url.empty();}))return;
+    constexpr std::int64_t interval=1800;std::int64_t latest=0;
+    const auto attempted=store_.setting("auto_sync_last_attempt");
+    if(!attempted.empty()&&std::all_of(attempted.begin(),attempted.end(),[](unsigned char c){return c>='0'&&c<='9';})){
+        try{const auto value=std::stoll(attempted);if(value>0&&value<=now)latest=value;}catch(...){}
+    }
+    for(const auto& feed:feeds_)if(feed.id>0&&!feed.url.empty()&&feed.synced_at>0&&feed.synced_at<=now)latest=std::max(latest,feed.synced_at);
+    if(latest>0&&static_cast<std::int64_t>(now)-latest<interval)return;
+    store_.set_setting("auto_sync_last_attempt",std::to_string(static_cast<std::int64_t>(now)));
+    request_="auto-sync";sync_started(false,true);
+}
 void App::sync_progress(int completed,int total,int failed,const std::string& message){sync_completed_=completed;sync_total_=total;sync_failed_=failed;sync_message_=message;if(screen_==Screen::Sync||reader_panel_==ReaderPanel::Translation)dirty=true;}
 void App::sync_finished(bool cancelled,const std::string& error){
+    const bool automatic=automatic_sync_;automatic_sync_=false;
     feeds_=store_.feeds();group_names_=store_.groups();if(!translating_)sync_failed_=std::max(sync_failed_,static_cast<int>(std::count_if(feeds_.begin(),feeds_.end(),[](const Feed& f){return !f.error.empty();})));sync_state_=cancelled?SyncState::Cancelled:(!error.empty()||sync_failed_)?SyncState::Failed:SyncState::Complete;
     if(!error.empty())sync_message_=error;
+    if(automatic){auto_refresh_pending_=true;if(!reading()||screen_==Screen::Sync||reader_panel_!=ReaderPanel::None||selection_)dirty=true;return;}
     dirty=true;
     if(screen_!=Screen::Sync)notify(reading()||translating_?sync_message_:cancelled?"同步已取消，点击更新列表":sync_state_==SyncState::Failed?"同步有未完成项目，点击更新列表":"同步已完成，点击更新列表");
 }
@@ -1166,10 +1195,52 @@ void App::tap(int x,int y){
     }
 }
 void App::touch(const TouchGesture& gesture){
+    if(gesture.phase==TouchPhase::Cancel){if(selection_){clear_selection();dirty=true;}return;}
     const auto& low=gesture.minimum;const auto& high=gesture.maximum;
     const auto inside=[&](TouchPoint p){return p.x>=low.x&&p.x<=high.x&&p.y>=low.y&&p.y<=high.y;};
     if(low.x<0||low.y<0||high.x>=c_.width||high.y>=c_.height||
        low.x>high.x||low.y>high.y||!inside(gesture.start)||!inside(gesture.end))return;
+    const bool selectable=current_&&!reader_tools_&&reader_panel_==ReaderPanel::None&&error_.empty()&&confirmation_.empty()&&input_mode_.empty()&&!managing_&&!brand_menu_;
+    const bool moved=high.x-low.x>24||high.y-low.y>24;
+    const auto adjust_handle=[&](SelectionDrag drag){
+        select_text(drag.first?gesture.end:drag.anchor,drag.first?drag.anchor:gesture.end,true);
+        if(gesture.phase==TouchPhase::Complete)selection_drag_.reset();else selection_drag_=drag;
+    };
+    if(gesture.phase==TouchPhase::LongPress)selection_drag_.reset();
+    if(selectable&&selection_&&!selection_->rects.empty()){
+        const auto& first=selection_->rects.front();const auto& last=selection_->rects.back();
+        const TouchPoint a{margin_+first.x+2,reader_content_top+first.y+first.h/2},b{margin_+last.x+last.w-2,reader_content_top+last.y+last.h/2};
+        const auto near_handle=[&](int x,int y){return std::abs(gesture.start.x-x)<=40&&gesture.start.y>=y-12&&gesture.start.y<=y+44;};
+        const int first_x=margin_+first.x,first_y=reader_content_top+first.y+first.h;
+        const int last_x=margin_+last.x+last.w,last_y=reader_content_top+last.y+last.h;
+        const bool first_hit=near_handle(first_x,first_y),last_hit=near_handle(last_x,last_y);
+        if(moved){
+            if(selection_drag_){adjust_handle(*selection_drag_);return;}
+            if(first_hit||last_hit){
+                const auto distance=[&](int x,int y){const int dx=gesture.start.x-x,dy=gesture.start.y-y-8;return dx*dx+dy*dy;};
+                const bool first_end=first_hit&&(!last_hit||distance(first_x,first_y)<=distance(last_x,last_y));
+                adjust_handle({first_end?b:a,first_end});return;
+            }
+        }else if((gesture.phase==TouchPhase::LongPress||(gesture.phase==TouchPhase::Complete&&gesture.hold_ms>=600))&&(first_hit||last_hit))return;
+    }
+    if(selectable&&gesture.phase==TouchPhase::LongPress){
+        clear_selection();
+        if(gesture.start.y>=reader_content_top&&gesture.start.y<c_.height-72)select_text(gesture.start,gesture.start);
+        return;
+    }
+    if(selectable&&(gesture.phase==TouchPhase::Move||gesture.hold_ms>=600)){
+        if(gesture.start.y>=reader_content_top&&gesture.start.y<c_.height-72){
+            if(gesture.phase==TouchPhase::Complete)clear_selection();
+            if(!selection_)select_text(gesture.start,gesture.start);
+            if(selection_)select_text(gesture.start,moved?gesture.end:gesture.start,moved);
+        }
+        return;
+    }
+    if(gesture.phase!=TouchPhase::Complete)return;
+    if(selectable&&selection_&&moved&&!selection_->rects.empty()){
+        const auto& first=selection_->rects.front();
+        select_text({margin_+first.x+2,reader_content_top+first.y+first.h/2},gesture.end,true);return;
+    }
     // A small amount of finger jitter remains a tap. Other drags must never activate the release target.
     if(high.x-low.x<=24&&high.y-low.y<=24){tap(gesture.end.x,gesture.end.y);return;}
     if(!current_||reader_tools_||reader_panel_!=ReaderPanel::None||!error_.empty()||
@@ -1184,7 +1255,7 @@ void App::touch(const TouchGesture& gesture){
 void App::next(){
     if(!input_mode_.empty()||!confirmation_.empty()||(managing_&&screen_!=Screen::GroupPicker)||brand_menu_)return;
     if(current_&&reader_panel_==ReaderPanel::Images){if(image_page_+1<current_->images.size())++image_page_;}
-    else if(current_&&!reader_tools_){if(page_+1<pages_.size()){++page_;reading_source_anchor_.reset();save_position();}}
+    else if(current_&&!reader_tools_){clear_selection();if(page_+1<pages_.size()){++page_;reading_source_anchor_.reset();save_position();}}
     else if(!current_){auto* nav=screen_==Screen::Subscriptions?&nav_page_:screen_==Screen::Groups?&groups_page_:screen_==Screen::GroupPicker?&picker_page_:screen_==Screen::Sync&&sync_state_==SyncState::Failed?&sync_page_:nullptr;
         if(nav){if(*nav+1<nav_page_count_)++*nav;}else if(screen_==Screen::List){ensure_list_page(list_page_+1);if(list_page_+1<list_starts_.size())++list_page_;}}
     dirty=true;
@@ -1192,7 +1263,7 @@ void App::next(){
 void App::previous(){
     if(!input_mode_.empty()||!confirmation_.empty()||(managing_&&screen_!=Screen::GroupPicker)||brand_menu_)return;
     if(current_&&reader_panel_==ReaderPanel::Images){if(image_page_)--image_page_;}
-    else if(current_&&!reader_tools_){if(page_){--page_;reading_source_anchor_.reset();save_position();}}
+    else if(current_&&!reader_tools_){clear_selection();if(page_){--page_;reading_source_anchor_.reset();save_position();}}
     else if(!current_){auto* nav=screen_==Screen::Subscriptions?&nav_page_:screen_==Screen::Groups?&groups_page_:screen_==Screen::GroupPicker?&picker_page_:screen_==Screen::Sync&&sync_state_==SyncState::Failed?&sync_page_:nullptr;
         if(nav){if(*nav)--*nav;}else if(screen_==Screen::List&&list_page_)--list_page_;}
     dirty=true;
@@ -1205,6 +1276,7 @@ void App::back(){
     else if(screen_==Screen::GroupPicker)restore_input();
     else if(managing_){managing_.reset();screen_=edit_origin_;}
     else if(screen_==Screen::GroupEdit)screen_=Screen::Groups;
+    else if(selection_){clear_selection();}
     else if(current_&&reader_panel_!=ReaderPanel::None){reader_panel_=ReaderPanel::None;image_zoom_=false;typography_anchor_.reset();}
     else if(current_&&reader_tools_)close_reader_tools();
     else if(current_){

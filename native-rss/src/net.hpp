@@ -15,4 +15,6 @@ void sync_fulltext(Store& store, std::int64_t entry_id, const std::atomic<bool>&
                    const std::function<void(const SyncProgress&)>& progress);
 void translate_article(Store& store, std::int64_t entry_id, bool web, const QwenConfig& config,
                        const std::atomic<bool>& cancel, const std::function<void(const SyncProgress&)>& progress);
+std::string translate_selection(Store& store, const SelectionJob& job, const QwenConfig& config,
+                                const std::atomic<bool>& cancel);
 }

@@ -4,6 +4,7 @@
 #include "status.hpp"
 #include "cre_reader.hpp"
 #include "device.hpp"
+#include "selection.hpp"
 #include <functional>
 #include <map>
 #include <memory>
@@ -12,7 +13,7 @@
 namespace rss {
 class App {
 public:
-    enum class ReaderPanel { None, Type, Images, Info, Content, Translation };
+    enum class ReaderPanel { None, Type, Images, Info, Content, Translation, Selection };
     enum class Screen { List, Subscriptions, GroupPicker, Groups, GroupEdit, Opml, Sync, Cache, Settings };
     enum class SyncState { Idle, Running, Complete, Cancelled, Failed };
     App(Store& store, Canvas& canvas, std::int64_t initial_article = 0, const std::string& status_font = {});
@@ -29,7 +30,11 @@ public:
     void reload();
     void open(std::int64_t id, bool track = true);
     void notify(const std::string& text);
-    void sync_started(bool translating = false);
+    void sync_started(bool translating = false, bool automatic = false);
+    void maybe_auto_sync(std::time_t now);
+    std::optional<SelectionJob> take_selection_request();
+    void selection_finished(const SelectionJob& job, const std::string& translated, bool cancelled, const std::string& error = {});
+    const ReaderSelection* selected_text() const { return selection_ ? &*selection_ : nullptr; }
     void sync_progress(int completed, int total, int failed, const std::string& message);
     void sync_finished(bool cancelled, const std::string& error = "");
     Screen screen() const { return screen_; }
@@ -85,6 +90,15 @@ private:
     int sync_completed_ = 0, sync_total_ = 0, sync_failed_ = 0;
     std::string sync_message_;
     bool translating_ = false;
+    bool automatic_sync_ = false, auto_refresh_pending_ = false;
+    std::optional<ReaderSelection> selection_;
+    struct SelectionDrag { TouchPoint anchor; bool first; };
+    std::optional<SelectionDrag> selection_drag_;
+    std::optional<SelectionJob> pending_selection_;
+    std::vector<StoredSelection> selection_marks_;
+    std::string selection_revision_, selection_result_, selection_error_;
+    bool selection_loading_ = false;
+    std::size_t selection_result_page_ = 0;
     std::string translation_request_;
     bool brand_menu_ = false, source_list_ = false;
     struct ListContext { View view; std::int64_t feed; std::optional<std::string> group; std::string search; std::size_t page; };
@@ -152,6 +166,16 @@ private:
     bool draw_image(const ArticleImage& image, Rect area, bool enlarge=false, int clip_bottom=-1);
     void close_reader_tools();
     int reader_panel_height() const;
+    void clear_selection();
+    void load_selection_marks();
+    void select_text(TouchPoint start, TouchPoint end, bool adjusting = false);
+    std::optional<ReaderSelection> classic_selection(TouchPoint start, TouchPoint end, bool adjusting);
+    std::vector<Rect> selection_rects(const SelectionRange& range);
+    SelectionJob selection_job() const;
+    void draw_selection_marks(int clip_bottom);
+    void selection_tools();
+    void selection_panel(int y, int height);
+    void translate_selected_text();
     int article_heading_height();
     void management_screen();
     void confirmation_screen();

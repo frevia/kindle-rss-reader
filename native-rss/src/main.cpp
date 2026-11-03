@@ -84,27 +84,48 @@ public:
     void tick(){
         const auto now=std::chrono::steady_clock::now();
         if(now>=status_due_){app_.set_reader_status(rss::read_reader_status(std::time(nullptr)));status_due_=now+std::chrono::seconds(30);}
-        collect();const auto request=app_.take_request();const auto folder=std::filesystem::path(db_).parent_path();
-        if(request=="sync"||request=="retry-sync"||request.rfind("fulltext:",0)==0||request.rfind("translate:",0)==0){
+        collect();auto request=app_.take_request();
+        if(request.empty()&&!worker_.valid()&&now>=auto_due_){
+            auto_due_=now+std::chrono::seconds(30);
+            try{app_.maybe_auto_sync(std::time(nullptr));request=app_.take_request();}
+            catch(const std::exception& e){auto_due_=now+std::chrono::minutes(30);std::cerr<<"RSS Reader: automatic sync deferred: "<<e.what()<<'\n';}
+        }
+        const auto folder=std::filesystem::path(db_).parent_path();
+        if(request=="sync"||request=="retry-sync"||request=="auto-sync"||request=="translate-selection"||request.rfind("fulltext:",0)==0||request.rfind("translate:",0)==0){
             if(!worker_.valid()){
-                const bool translating=request.rfind("translate:",0)==0;
-                cancel_=false;app_.sync_started(translating);const bool failed_only=request=="retry-sync";
-                const auto fulltext_id=request.rfind("fulltext:",0)==0?std::stoll(request.substr(9)):0;
-                const auto translation_id=translating?std::stoll(request.substr(14)):0;
-                const bool translation_web=translating&&request.substr(10,4)=="web:";
-                worker_=std::async(std::launch::async,[this,failed_only,fulltext_id,translation_id,translation_web]{
-                    rss::Store background(db_);const auto progress=[this](const rss::SyncProgress& p){
-                        std::lock_guard<std::mutex> lock(mutex_);progress_=p;
-                    };
-                    if(translation_id)rss::translate_article(background,translation_id,translation_web,rss::qwen_config(db_),cancel_,progress);
-                    else if(fulltext_id)rss::sync_fulltext(background,fulltext_id,cancel_,progress);
-                    else rss::sync_feeds(background,cancel_,progress,failed_only);
-                });
+                const bool selecting=request=="translate-selection",article_translation=request.rfind("translate:",0)==0;
+                const bool translating=selecting||article_translation;
+                const bool automatic=request=="auto-sync";
+                cancel_=false;
+                try{
+                    selection_result_.clear();selection_job_=selecting?app_.take_selection_request():std::nullopt;
+                    if(selecting&&!selection_job_)throw std::runtime_error("请重新选择需要翻译的文字");
+                    if(!automatic&&(request=="sync"||request=="retry-sync"))store_.set_setting("auto_sync_last_attempt",std::to_string(std::time(nullptr)));
+                    app_.sync_started(translating,automatic);const bool failed_only=request=="retry-sync";
+                    const auto fulltext_id=request.rfind("fulltext:",0)==0?std::stoll(request.substr(9)):0;
+                    const auto translation_id=article_translation?std::stoll(request.substr(14)):0;
+                    const bool translation_web=article_translation&&request.substr(10,4)=="web:";
+                    const auto selection=selection_job_;
+                    if(selection)app_.sync_progress(0,1,0,"正在翻译选中文字");
+                    worker_=std::async(std::launch::async,[this,failed_only,fulltext_id,translation_id,translation_web,selection]{
+                        rss::Store background(db_);const auto progress=[this](const rss::SyncProgress& p){
+                            std::lock_guard<std::mutex> lock(mutex_);progress_=p;
+                        };
+                        if(selection)selection_result_=rss::translate_selection(background,*selection,rss::qwen_config(db_),cancel_);
+                        else if(translation_id)rss::translate_article(background,translation_id,translation_web,rss::qwen_config(db_),cancel_,progress);
+                        else if(fulltext_id)rss::sync_fulltext(background,fulltext_id,cancel_,progress);
+                        else rss::sync_feeds(background,cancel_,progress,failed_only);
+                    });
+                }catch(const std::exception& e){
+                    if(selection_job_){app_.selection_finished(*selection_job_,"",false,e.what());selection_job_.reset();}
+                    else app_.sync_finished(false,e.what());
+                    if(!automatic&&!selecting)throw;
+                }
             }
         }else if(request=="cancel-sync"){
             cancel_=true;if(!worker_.valid())app_.sync_finished(true);else app_.notify("正在取消同步…");
         }else if(request=="import"){
-            import_opml(store_,(folder/"feeds.opml").string());app_.reload();app_.notify("订阅已导入，点击同步获取文章");
+            import_opml(store_,(folder/"feeds.opml").string());app_.reload();app_.notify(store_.setting("auto_sync")=="0"?"订阅已导入，点击同步获取文章":"订阅已导入，将按自动同步周期更新，也可手动同步");
         }else if(request=="export"){
             write_export(store_,(folder/"subscriptions.opml").string());app_.notify("已导出 subscriptions.opml");
         }
@@ -120,11 +141,14 @@ private:
             // Worker state is committed even when its status page is not visible.
             {std::lock_guard<std::mutex> lock(mutex_);progress=std::move(progress_);progress_.reset();}
             if(progress)app_.sync_progress(progress->completed,progress->total,progress->failed,progress->message);
-            app_.sync_finished(cancel_,failure);
+            if(selection_job_){app_.selection_finished(*selection_job_,selection_result_,cancel_,failure);selection_job_.reset();selection_result_.clear();}
+            else app_.sync_finished(cancel_,failure);
         }
     }
     rss::Store& store_;rss::App& app_;std::string db_;
-    std::chrono::steady_clock::time_point status_due_{};
+    std::chrono::steady_clock::time_point status_due_{},auto_due_{};
+    std::optional<rss::SelectionJob> selection_job_;
+    std::string selection_result_;
     std::atomic<bool> cancel_{false};std::future<void> worker_;std::mutex mutex_;std::optional<rss::SyncProgress> progress_;
 };
 volatile std::sig_atomic_t stop_device=0;
@@ -164,19 +188,24 @@ void desktop(rss::Store& store,rss::Canvas& canvas,const std::string& db,std::in
     SDL_RenderSetLogicalSize(renderer,canvas.width,canvas.height);SDL_StartTextInput();
     rss::App app(store,canvas,article,status_font_path());std::vector<std::uint32_t> rgba(canvas.pixels.size());
     UiTasks tasks(store,app,db);
-    std::optional<rss::TouchGesture> gesture;
+    rss::TouchDecoder pointer;
+    bool pointer_down=false;
+    const auto touch_time=[](){return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count());};
+    const auto input=[&](std::uint16_t type,std::uint16_t code,std::int32_t value){if(auto gesture=pointer.consume(type,code,value,touch_time()))app.touch(*gesture);};
     try {
         while(!app.quit){
             SDL_Event event;
             if(SDL_WaitEventTimeout(&event,80)){
                 try {
                     if(event.type==SDL_QUIT)app.quit=true;
-                    else if(event.type==SDL_MOUSEBUTTONDOWN&&event.button.button==SDL_BUTTON_LEFT)
-                        gesture.emplace(rss::TouchPoint{event.button.x,event.button.y});
-                    else if(event.type==SDL_MOUSEMOTION&&gesture)
-                        gesture->update({event.motion.x,event.motion.y});
+                    else if(event.type==SDL_MOUSEBUTTONDOWN&&event.button.button==SDL_BUTTON_LEFT){
+                        pointer_down=true;input(3,47,0);input(3,57,1);input(3,53,event.button.x);input(3,54,event.button.y);input(0,0,0);
+                    }
+                    else if(event.type==SDL_MOUSEMOTION&&pointer_down){
+                        input(3,53,event.motion.x);input(3,54,event.motion.y);input(0,0,0);
+                    }
                     else if(event.type==SDL_MOUSEBUTTONUP&&event.button.button==SDL_BUTTON_LEFT){
-                        if(gesture){auto completed=*gesture;gesture.reset();completed.update({event.button.x,event.button.y});app.touch(completed);}
+                        if(pointer_down){input(3,53,event.button.x);input(3,54,event.button.y);input(3,57,-1);input(0,0,0);pointer_down=false;}
                     }
                     else if(event.type==SDL_TEXTINPUT)app.text_input(event.text.text);
                     else if(event.type==SDL_KEYDOWN){
@@ -189,12 +218,15 @@ void desktop(rss::Store& store,rss::Canvas& canvas,const std::string& db,std::in
                         else if(key==SDLK_RETURN)app.submit();
                     }else if(event.type==SDL_WINDOWEVENT){
                         if(event.window.event==SDL_WINDOWEVENT_FOCUS_LOST||event.window.event==SDL_WINDOWEVENT_LEAVE||
-                           event.window.event==SDL_WINDOWEVENT_SIZE_CHANGED)gesture.reset();
+                           event.window.event==SDL_WINDOWEVENT_SIZE_CHANGED){
+                            if(pointer_down){rss::TouchGesture cancel({0,0});cancel.phase=rss::TouchPhase::Cancel;app.touch(cancel);}
+                            pointer=rss::TouchDecoder{};pointer_down=false;
+                        }
                         app.dirty=true;
                     }
                 }catch(const std::exception& e){app.show_error(e.what());}
             }
-            try{tasks.tick();}catch(const std::exception& e){app.show_error(e.what());}
+            try{if(auto gesture=pointer.poll(touch_time()))app.touch(*gesture);tasks.tick();}catch(const std::exception& e){app.show_error(e.what());}
             if(app.dirty){
                 app.draw();for(std::size_t i=0;i<rgba.size();++i){const auto g=canvas.pixels[i];rgba[i]=0xff000000u|(g<<16)|(g<<8)|g;}
                 SDL_UpdateTexture(texture,nullptr,rgba.data(),canvas.width*4);

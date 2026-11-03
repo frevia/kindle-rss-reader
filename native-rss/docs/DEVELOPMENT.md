@@ -49,6 +49,10 @@ rtk proxy ctest --test-dir native-rss/build --output-on-failure
 
 CLI 可在临时数据库执行 `translate ID` 或 `translate-web ID`。`translation`、`qwen`、`translation_app` 和本机模拟服务 `translation_network` 覆盖段落、配置、缓存、取消、失败、缓存复用、模式切换及旧数据保护；不消耗真实翻译额度。1072×1448 模拟截图通过 `RSS_TEST_SNAPSHOTS` 输出。外部 API 的真实译文质量、KPW3 内存、触摸和耗电仍需另行验证。
 
+`selection.hpp` 定义选区、任务快照与存储记录；`app_selection.cpp` 实现仅保留翻译按钮的选词工具条及选区译文分页。CREngine 用真实文字命中与分行矩形建立 DOM 范围锚点，选区指纹不含来源元信息或排版参数；原排版使用正文 UTF-8 字节范围和实际字宽定位。回绘会核对内容指纹和原文片段，范围按来源与阅读模式隔离，不把文字范围替换为页码。划线在本应用中显示，不接入原生系统笔记。
+
+Store 通过事务内 `CREATE TABLE IF NOT EXISTS article_selections` 增加附表，保留原有数据。复合主键包含文章、来源、模式、指纹和起止锚点；独立更新划线开关或译文，不互相覆盖，删除文章时级联清理。正文更新保留旧行但不再投影；取消订阅时收藏保留规则不变。选中文字最多 6000 UTF-8 字节，译文最多 64 KiB；所有 SQL 使用绑定参数。选区翻译复用唯一后台 future 和 Qwen HTTP 安全边界，用户点击才请求；任务快照隔离页面切换后的晚到结果，取消和错误不自动重试。触摸解码器以单调时钟区分 600ms 长按、拖动、完成和取消，拖动事件按批合并；Kindle 和 SDL 共用解码路径。
+
 ## ARM 构建状态
 
 Apple Silicon macOS 上的依赖构建脚本为 `tools/build_arm.py`，依赖版本与校验来源在 `tools/arm-sources.json`。需要 CMake 3.22+、Make、Perl、curl 和 Python 3.12+，以及 `vendor/zig-aarch64-macos-0.15.2/zig`。Zig 官方归档为 `https://ziglang.org/download/0.15.2/zig-aarch64-macos-0.15.2.tar.xz`，SHA-256 为 `3cc2bab367e185cdfb27501c4b30b1b0653c28d9f73df8dc91488e66ece5fa6b`。编译器目前需预先放置在该位置。
@@ -124,6 +128,8 @@ GUI 的导入按钮读取数据库同目录下的 `feeds.opml`；导出写入 `s
 按钮按实际字形高度垂直居中，主要操作使用黑底白字。页面横向边距 32 px；分区线使用灰度 150，列表和页脚分隔线使用 205，均为 1 px。输入框为 1 px 灰边，弹窗为 2 px 深色边；居中弹窗横向留白 48 px、内边距 32 px，并淡化底下的内容。空状态使用统一线性图标、简短说明和 88 px 高的操作按钮；搜索词已在搜索栏呈现，空结果提示不再重复整段关键词。
 
 `reader_layout_test` 检查各页返回区域像素一致，并实际点击新坐标验证输入取消、搜索范围返回、分组草稿、确认取消与错误返回；`app_test` 覆盖下移后的拼音候选和取消输入。设置面板的开合仍不改变正文分页或锚点。
+
+自动同步使用现有 `settings` 键 `auto_sync`（缺省开启，`0` 关闭）和 `auto_sync_last_attempt`（最近一次手动或自动 RSS 同步尝试的 Unix 时间）；不做数据库 schema 迁移。调度由 UI 主循环复用唯一同步 future，每 30 秒检查当前 Wi-Fi 状态，尝试间隔固定 1800 秒；最近的有效订阅 `synced_at` 与保存的尝试时间共同节流，失败或取消也保留尝试时间。准备自动任务时的存储错误只记录日志并延后 30 分钟再检查，手动任务准备失败会释放运行状态并保持原错误提示流程。休眠时应用不运行，因此不会唤醒设备补做任务。文章列表或正文阅读时可后台启动，设置、输入与确认等交互时推迟；列表数据延迟至安全绘制时刷新，完成事件不覆盖用户操作产生的重绘标记。`auto_sync_test` 以确定时间调用真实 App 行为，不启动网络 worker。
 
 ## 渲染与示例
 

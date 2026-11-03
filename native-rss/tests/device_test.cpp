@@ -97,12 +97,80 @@ int main(){
     bool dropped=false;try{ev(0,3,0);}catch(const std::runtime_error&){dropped=true;}assert(dropped);
     down(100,200);auto after_drop=up();assert(after_drop&&after_drop->start.x==100);
     auto scaled=rss::scale_touch({100,200},0,100,0,200);assert(scaled.x==1071&&scaled.y==1447);
+
+    // Long press starts at the first complete single-contact coordinate frame.
+    rss::TouchDecoder timed;
+    auto tev=[&](int type,int code,int value,std::uint64_t now){return timed.consume(type,code,value,now);};
+    auto tdown=[&](int x,int y,std::uint64_t now){
+        assert(!tev(3,0x2f,0,now));assert(!tev(3,0x39,1,now));
+        assert(!tev(3,0x35,x,now));assert(!tev(3,0x36,y,now));assert(!tev(0,0,0,now));
+    };
+    tdown(10,20,0);
+    assert(!timed.poll(599));
+    auto long_press=timed.poll(600);
+    assert(long_press&&long_press->phase==rss::TouchPhase::LongPress);
+    assert(long_press->duration_ms==600&&long_press->hold_ms==600);
+    assert(!timed.poll(900));
+    assert(!tev(3,0x35,10,950));assert(!tev(0,0,0,950)); // unchanged reports do not emit Move
+    assert(!tev(3,0x35,45,960));auto move=tev(0,0,0,960);
+    assert(move&&move->phase==rss::TouchPhase::Move&&move->end.x==45);
+    assert(move->duration_ms==960&&move->hold_ms==960);
+    assert(!tev(3,0x39,-1,1000));auto timed_complete=tev(0,0,0,1000);
+    assert(timed_complete&&timed_complete->phase==rss::TouchPhase::Complete);
+    assert(timed_complete->duration_ms==1000&&timed_complete->hold_ms==960);
+
+    // A slow swipe that leaves the 24px box before 600ms cannot become a hold.
+    rss::TouchDecoder slow;
+    auto sev=[&](int type,int code,int value,std::uint64_t now){return slow.consume(type,code,value,now);};
+    assert(!sev(3,0x2f,0,1000));assert(!sev(3,0x39,1,1000));
+    assert(!sev(3,0x35,10,1000));assert(!sev(3,0x36,10,1000));assert(!sev(0,0,0,1000));
+    assert(!sev(3,0x35,40,1100));assert(!sev(0,0,0,1100));
+    assert(!slow.poll(1600));
+    assert(!sev(3,0x39,-1,1700));auto slow_complete=sev(0,0,0,1700);
+    assert(slow_complete&&slow_complete->phase==rss::TouchPhase::Complete);
+    assert(slow_complete->hold_ms==100&&slow_complete->duration_ms==700);
+
+    // Exactly 24px of early jitter stays inside the hold box.
+    rss::TouchDecoder jitter;
+    assert(!jitter.consume(3,0x2f,0,0));assert(!jitter.consume(3,0x39,1,0));
+    assert(!jitter.consume(3,0x35,20,0));assert(!jitter.consume(3,0x36,20,0));assert(!jitter.consume(0,0,0,0));
+    assert(!jitter.consume(3,0x35,44,200));assert(!jitter.consume(0,0,0,200));
+    auto jitter_hold=jitter.poll(600);assert(jitter_hold&&jitter_hold->phase==rss::TouchPhase::LongPress);
+
+    // A second contact cancels an active selection once, and suppresses release output.
+    rss::TouchDecoder multi;
+    assert(!multi.consume(3,0x2f,0,0));assert(!multi.consume(3,0x39,1,0));
+    assert(!multi.consume(3,0x35,10,0));assert(!multi.consume(3,0x36,10,0));assert(!multi.consume(0,0,0,0));
+    assert(multi.poll(600));
+    assert(!multi.consume(3,0x2f,1,610));assert(!multi.consume(3,0x39,2,610));
+    auto cancel=multi.consume(0,0,0,610);
+    assert(cancel&&cancel->phase==rss::TouchPhase::Cancel);
+    assert(!multi.consume(3,0x39,-1,620));assert(!multi.consume(3,0x2f,0,620));
+    assert(!multi.consume(3,0x39,-1,620));assert(!multi.consume(0,0,0,620));
+    assert(!multi.consume(3,0x2f,1,630));assert(!multi.consume(3,0x39,-1,630));
+
+    // Release without polling still carries enough hold time for the caller to recognize it.
+    rss::TouchDecoder unpolled;
+    assert(!unpolled.consume(3,0x2f,0,0));assert(!unpolled.consume(3,0x39,1,0));
+    assert(!unpolled.consume(3,0x35,5,0));assert(!unpolled.consume(3,0x36,6,0));assert(!unpolled.consume(0,0,0,0));
+    assert(!unpolled.consume(3,0x39,-1,700));auto unpolled_complete=unpolled.consume(0,0,0,700);
+    assert(unpolled_complete&&unpolled_complete->hold_ms==700&&unpolled_complete->duration_ms==700);
+
+    // Backward clock values clamp at the last observation and cannot underflow into a hold.
+    rss::TouchDecoder backwards;
+    assert(!backwards.consume(3,0x2f,0,100));assert(!backwards.consume(3,0x39,1,100));
+    assert(!backwards.consume(3,0x35,5,100));assert(!backwards.consume(3,0x36,6,100));assert(!backwards.consume(0,0,0,100));
+    assert(!backwards.poll(99));assert(!backwards.poll(699));
+    auto backwards_hold=backwards.poll(700);assert(backwards_hold&&backwards_hold->duration_ms==600);
+
     rss::TouchGesture raw({0,0});raw.update({50,100});raw.update({25,25});
+    raw.phase=rss::TouchPhase::Move;raw.duration_ms=1234;raw.hold_ms=567;
     auto scaled_gesture=rss::scale_gesture(raw,0,100,0,100);
     assert(scaled_gesture.start.x==0&&scaled_gesture.start.y==0);
     assert(scaled_gesture.end.x==268&&scaled_gesture.end.y==362);
     assert(scaled_gesture.minimum.x==0&&scaled_gesture.minimum.y==0);
     assert(scaled_gesture.maximum.x==536&&scaled_gesture.maximum.y==1447);
+    assert(scaled_gesture.phase==rss::TouchPhase::Move&&scaled_gesture.duration_ms==1234&&scaled_gesture.hold_ms==567);
     raw.update({101,30});bool bad_scale=false;
     try{rss::scale_gesture(raw,0,100,0,100);}catch(const std::runtime_error&){bad_scale=true;}assert(bad_scale);
 }

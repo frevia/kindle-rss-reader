@@ -133,6 +133,22 @@ void validate_feed_url(const std::string& url) {
     curl_free(scheme); curl_free(host); curl_url_cleanup(parsed);
     if (!valid) throw std::runtime_error("订阅地址必须是有效的 HTTP(S) URL");
 }
+void validate_selection(const SelectionJob& job) {
+    const auto mode=static_cast<int>(job.mode);
+    if(job.entry_id<=0||mode<0||mode>2||job.revision.empty()||job.revision.size()>1024||job.revision.find('\0')!=std::string::npos||
+       job.range.start.empty()||job.range.start.size()>4096||job.range.start.find('\0')!=std::string::npos||
+       job.range.end.empty()||job.range.end.size()>4096||job.range.end.find('\0')!=std::string::npos||job.range.start==job.range.end||
+       job.range.text.empty()||job.range.text.size()>6000||job.range.text.find('\0')!=std::string::npos)
+        throw std::runtime_error("无效选区");
+    try { translation_units(job.revision);translation_units(job.range.start); translation_units(job.range.end);if(!translation_units(job.range.text))throw std::runtime_error("空选区"); }
+    catch (...) { throw std::runtime_error("选区包含无效 UTF-8"); }
+}
+void validate_selection_translation(const std::string& translated) {
+    if(translated.empty()||translated.size()>64*1024||translated.find('\0')!=std::string::npos)
+        throw std::runtime_error("无效选区译文");
+    try { if(!translation_units(translated))throw std::runtime_error("空译文"); }
+    catch (...) { throw std::runtime_error("选区译文包含无效 UTF-8"); }
+}
 bool valid_http_url(const std::string& url) {
     if (url.empty() || url.size() > 2048 || std::any_of(url.begin(),url.end(),[](unsigned char c){return c<=32||c==127;})) return false;
     CURLU* parsed = curl_url();
@@ -198,6 +214,10 @@ Store::Store(const std::string& path) {
             exec(db_, "CREATE TABLE IF NOT EXISTS article_translation_blocks (entry_id INTEGER NOT NULL,web INTEGER NOT NULL,revision TEXT NOT NULL,"
                       "ordinal INTEGER NOT NULL,html TEXT NOT NULL,PRIMARY KEY(entry_id,web,revision,ordinal),"
                       "FOREIGN KEY(entry_id,web,revision) REFERENCES article_translations(entry_id,web,revision) ON DELETE CASCADE)");
+            exec(db_, "CREATE TABLE IF NOT EXISTS article_selections (entry_id INTEGER NOT NULL REFERENCES entries(id) ON DELETE CASCADE,"
+                      "web INTEGER NOT NULL,mode INTEGER NOT NULL,revision TEXT NOT NULL,start_anchor TEXT NOT NULL,end_anchor TEXT NOT NULL,"
+                      "text TEXT NOT NULL,highlighted INTEGER NOT NULL DEFAULT 0,translation TEXT NOT NULL DEFAULT '',"
+                      "PRIMARY KEY(entry_id,web,mode,revision,start_anchor,end_anchor))");
             exec(db_, "COMMIT");
         } catch (...) { sqlite3_exec(db_, "ROLLBACK", nullptr, nullptr, nullptr); throw; }
         exec(db_, "CREATE INDEX IF NOT EXISTS entry_order ON entries(published DESC,id DESC)");
@@ -633,6 +653,39 @@ void Store::set_translation_state(std::int64_t id,bool web,const std::string& re
         }
         exec(db_,"COMMIT");
     } catch(...) {sqlite3_exec(db_,"ROLLBACK",nullptr,nullptr,nullptr);throw;}
+}
+std::vector<StoredSelection> Store::selections(std::int64_t entry_id,bool web,ReadingMode mode,const std::string& revision) const {
+    const auto value=static_cast<int>(mode);
+    if(entry_id<=0||value<0||value>2||revision.empty()||revision.size()>1024||revision.find('\0')!=std::string::npos)throw std::runtime_error("无效选区");
+    Statement q(db_,"SELECT start_anchor,end_anchor,text,highlighted,translation FROM article_selections WHERE entry_id=? AND web=? AND mode=? AND revision=? ORDER BY start_anchor,end_anchor");
+    q.integer(1,entry_id);q.boolean(2,web);q.integer(3,value);q.text(4,revision);
+    std::vector<StoredSelection> result;int step;
+    while((step=sqlite3_step(q.get()))==SQLITE_ROW){
+        StoredSelection item;item.range.start=column_text(q.get(),0);item.range.end=column_text(q.get(),1);item.range.text=column_text(q.get(),2);
+        item.highlighted=sqlite3_column_int(q.get(),3)!=0;item.translation=column_text(q.get(),4);result.push_back(std::move(item));
+    }
+    check(db_,step);return result;
+}
+std::optional<StoredSelection> Store::selection(const SelectionJob& job) const {
+    validate_selection(job);
+    Statement q(db_,"SELECT text,highlighted,translation FROM article_selections WHERE entry_id=? AND web=? AND mode=? AND revision=? AND start_anchor=? AND end_anchor=?");
+    q.integer(1,job.entry_id);q.boolean(2,job.web);q.integer(3,static_cast<int>(job.mode));q.text(4,job.revision);q.text(5,job.range.start);q.text(6,job.range.end);
+    const auto step=sqlite3_step(q.get());check(db_,step);if(step==SQLITE_DONE||column_text(q.get(),0)!=job.range.text)return std::nullopt;
+    StoredSelection item;item.range=job.range;item.highlighted=sqlite3_column_int(q.get(),1)!=0;item.translation=column_text(q.get(),2);return item;
+}
+void Store::set_highlight(const SelectionJob& job,bool highlighted) {
+    validate_selection(job);
+    Statement q(db_,"INSERT INTO article_selections(entry_id,web,mode,revision,start_anchor,end_anchor,text,highlighted) VALUES(?,?,?,?,?,?,?,?) "
+                    "ON CONFLICT(entry_id,web,mode,revision,start_anchor,end_anchor) DO UPDATE SET highlighted=excluded.highlighted WHERE text=excluded.text");
+    q.integer(1,job.entry_id);q.boolean(2,job.web);q.integer(3,static_cast<int>(job.mode));q.text(4,job.revision);q.text(5,job.range.start);q.text(6,job.range.end);q.text(7,job.range.text);q.boolean(8,highlighted);q.run();
+    if(sqlite3_changes(db_)!=1)throw std::runtime_error("选区锚点内容已变化");
+}
+void Store::save_selection_translation(const SelectionJob& job,const std::string& translated) {
+    validate_selection(job);validate_selection_translation(translated);
+    Statement q(db_,"INSERT INTO article_selections(entry_id,web,mode,revision,start_anchor,end_anchor,text,translation) VALUES(?,?,?,?,?,?,?,?) "
+                    "ON CONFLICT(entry_id,web,mode,revision,start_anchor,end_anchor) DO UPDATE SET translation=excluded.translation WHERE text=excluded.text");
+    q.integer(1,job.entry_id);q.boolean(2,job.web);q.integer(3,static_cast<int>(job.mode));q.text(4,job.revision);q.text(5,job.range.start);q.text(6,job.range.end);q.text(7,job.range.text);q.text(8,translated);q.run();
+    if(sqlite3_changes(db_)!=1)throw std::runtime_error("选区锚点内容已变化");
 }
 void Store::set_position(std::int64_t id, std::int64_t offset, bool fulltext,ReadingMode mode) {
     const auto value=std::max<std::int64_t>(0,offset);

@@ -3,13 +3,19 @@
 #include "render.hpp"
 #include "store.hpp"
 #include <algorithm>
+#include <cstdint>
+#include <cctype>
+#include <iterator>
 #include <stdexcept>
+#include <utility>
 
 #ifdef RSS_CRE
 #include "lvdocview.h"
 #include "lvfntman.h"
 #include "crhyphman.h"
 #include "ldomdocument.h"
+#include "ldomword.h"
+#include "ldomxrange.h"
 #include "lvgraydrawbuf.h"
 #include <libxml/HTMLparser.h>
 #include <libxml/uri.h>
@@ -48,6 +54,16 @@ std::string revision(const std::string& document) {
     std::uint64_t hash = 14695981039346656037ULL;
     for (unsigned char c : document) { hash ^= c; hash *= 1099511628211ULL; }
     return std::to_string(hash); // Content identity only, never used as a security boundary.
+}
+std::string selection_fingerprint(const Entry& entry) {
+    std::uint64_t hash = 14695981039346656037ULL;
+    const auto add=[&](const std::string& value) {
+        for(unsigned char c:value){hash^=c;hash*=1099511628211ULL;}
+        hash^=0xff;hash*=1099511628211ULL;
+    };
+    add(entry.title);add(entry.html);add(entry.text);
+    for(const auto& image:entry.images){add(image.url);add(image.alt);}
+    return "selection-"+std::to_string(hash);
 }
 void write_file(const std::filesystem::path& path, const std::string& data) {
     std::ofstream out(path, std::ios::binary);
@@ -109,8 +125,11 @@ struct CreReader::Impl {
     std::filesystem::path directory;
     std::unique_ptr<LVDocView> view;
     std::string content_revision;
+    std::string selection_revision;
     bool translated_mode = false;
     int width = 0, height = 0, size = 0, gap = 0;
+    int visible_words_page = -1;
+    std::vector<Rect> visible_words;
     Impl() {
         const auto session = std::getenv("RSS_CRE_CACHE");
         const auto guard = std::getenv("RSS_UI_GUARD");
@@ -233,6 +252,7 @@ void CreReader::open(const Entry& entry, const std::string& base_url, const std:
     const auto document = "<!DOCTYPE html><html lang=\"zh-CN\"><head><meta charset=\"UTF-8\"/></head><body"+std::string(body_class)+"><h1 class=\"rss-title\">" +
         title + "</h1><p class=\"rss-meta\">" + escape(metadata) + "</p>" + body + "</body></html>";
     next->content_revision = revision(document);
+    next->selection_revision = selection_fingerprint(entry);
     next->translated_mode = entry.reading_mode!=ReadingMode::Original;
     write_file(next->directory / "article.html", document);
     auto& fonts = engine(font_);
@@ -284,6 +304,7 @@ void CreReader::layout(int width, int height, int font_size, int line_gap) {
     value.view->setFontSize(font_size);
     value.view->setStyleSheet(lString8(css.str().c_str()));
     value.width = width; value.height = height; value.size = font_size; value.gap = line_gap;
+    value.visible_words_page = -1; value.visible_words.clear();
     if (value.view->isDocumentOpened()) {
         value.view->Render();
         if (page_count() > 512) throw std::runtime_error("文章分页过多，请使用原排版");
@@ -313,6 +334,86 @@ bool skip_position_node(ldomNode* node) {
     if(!node->isElement())return false;
     const auto name=node->getNodeName(),kind=node->getAttributeValue("class");
     return name==U"head"||kind==U"rss-title"||kind==U"rss-meta"||kind==U"rss-missing";
+}
+bool selection_text_node(ldomNode* node) {
+    if(!node||!node->isText())return false;
+    for(auto* parent=node->getParentNode();parent;parent=parent->getParentNode()) {
+        if(skip_position_node(parent))return false;
+        if(parent->isElement()&&parent->getNodeName()==U"img")return false;
+    }
+    return true;
+}
+bool word_at_point(LVDocView& view,int x,int y,ldomXRange& word) {
+    auto point=view.getNodeByPoint(lvPoint(x,y),true);
+    if(point.isNull()||!selection_text_node(point.getNode()))return false;
+    const auto hits=[&](ldomXRange& range){
+        LVArray<lvRect> rects;range.getSegmentRects(rects);
+        for(int i=0;i<rects.length();++i){
+            auto top=rects[i].topLeft(),bottom=rects[i].bottomRight();
+            if(view.docToWindowPoint(top)&&view.docToWindowPoint(bottom,true)&&x>=top.x&&x<bottom.x&&y>=top.y&&y<bottom.y)return true;
+        }
+        return false;
+    };
+    const auto text=point.getNode()->getText();
+    const auto ascii_word=[](lChar32 c){return c<128&&(std::isalnum(static_cast<unsigned char>(c))||c=='\''||c=='-'||c=='_');};
+    // The engine groups adjacent English and Chinese text into one word.
+    for(const auto offset:{point.getOffset(),point.getOffset()-1})if(offset>=0&&offset<text.length()&&ascii_word(text[offset])){
+        int begin=offset,end=offset+1;while(begin>0&&ascii_word(text[begin-1]))--begin;while(end<text.length()&&ascii_word(text[end]))++end;
+        ldomXRange candidate(ldomXPointer(point.getNode(),begin),ldomXPointer(point.getNode(),end));
+        if(hits(candidate)){word=candidate;return true;}
+    }
+    return ldomXRange::getWordRange(word,point)&&hits(word);
+}
+std::vector<Rect> range_rects(LVDocView& view,ldomXRange& range,int width,int height) {
+    std::vector<Rect> result;
+    LVArray<lvRect> segments;
+    range.getSegmentRects(segments);
+    for(int i=0;i<segments.length();++i) {
+        auto top=segments[i].topLeft(),bottom=segments[i].bottomRight();
+        if(!view.docToWindowPoint(top)||!view.docToWindowPoint(bottom,true))continue;
+        const int left=std::clamp(top.x,0,width),right=std::clamp(bottom.x,0,width);
+        const int upper=std::clamp(top.y,0,height),lower=std::clamp(bottom.y,0,height);
+        if(right>left&&lower>upper)result.push_back({left,upper,right-left,lower-upper});
+    }
+    return result;
+}
+std::vector<Rect> visible_word_rects(LVDocView& view,int width,int height) {
+    std::vector<Rect> result;
+    const int page=view.getCurPage();
+    auto range=view.getPageDocumentRange(page);
+    if(range.isNull())return result;
+    LVArray<ldomWord> words;
+    range->getRangeWords(words);
+    for(int i=0;i<words.length();++i) {
+        auto& candidate=words[i];
+        if(candidate.isNull()||!selection_text_node(candidate.getNode()))continue;
+        ldomXRange word(candidate);
+        LVArray<lvRect> segments;
+        word.getSegmentRects(segments);
+        for(int j=0;j<segments.length();++j) {
+            auto top=segments[j].topLeft(),bottom=segments[j].bottomRight();
+            if(!view.docToWindowPoint(top)||!view.docToWindowPoint(bottom,true))continue;
+            const int left=std::clamp(top.x,0,width),right=std::clamp(bottom.x,0,width);
+            const int upper=std::clamp(top.y,0,height),lower=std::clamp(bottom.y,0,height);
+            if(right>left&&lower>upper)result.push_back({left,upper,right-left,lower-upper});
+        }
+    }
+    return result;
+}
+bool nearest_word(LVDocView& view,const std::vector<Rect>& rects,int x,int y,ldomXRange& word) {
+    if(rects.empty())return false;
+    const auto distance=[](int point,int start,int length) {
+        return point<start?start-point:point>=start+length?point-(start+length-1):0;
+    };
+    auto nearest=rects.begin();
+    for(auto it=std::next(rects.begin());it!=rects.end();++it) {
+        const int dy=distance(y,it->y,it->h),best_dy=distance(y,nearest->y,nearest->h);
+        const int dx=distance(x,it->x,it->w),best_dx=distance(x,nearest->x,nearest->w);
+        if(dy<best_dy||(dy==best_dy&&dx<best_dx))nearest=it;
+    }
+    const int hit_x=std::clamp(x,nearest->x,nearest->x+nearest->w-1);
+    const int hit_y=std::clamp(y,nearest->y,nearest->y+nearest->h-1);
+    return word_at_point(view,hit_x,hit_y,word);
 }
 }
 std::size_t CreReader::text_position(std::size_t page) {
@@ -363,6 +464,65 @@ std::size_t CreReader::page_for_text_position(std::size_t position) {
     if(target.isNull())return 0;
     impl_->view->goToBookmark(target);return static_cast<std::size_t>(impl_->view->getCurPage());
 }
+std::optional<ReaderSelection> CreReader::select(std::size_t page,int x1,int y1,int x2,int y2,bool adjusting) {
+    if(!impl_||page>=page_count()||(!adjusting&&(x1<0||x1>=impl_->width||x2<0||x2>=impl_->width||
+       y1<0||y1>=impl_->height||y2<0||y2>=impl_->height)))return std::nullopt;
+    if(adjusting) {
+        x1=std::clamp(x1,0,impl_->width-1);x2=std::clamp(x2,0,impl_->width-1);
+        y1=std::clamp(y1,0,impl_->height-1);y2=std::clamp(y2,0,impl_->height-1);
+    }
+    auto& view=*impl_->view;
+    const int old_page=view.getCurPage();
+    view.goToPage(static_cast<int>(page),false);
+    std::optional<ReaderSelection> result;
+    ldomXRange first,last;
+    const auto endpoint=[&](int x,int y,ldomXRange& word) {
+        if(word_at_point(view,x,y,word))return true;
+        if(!adjusting)return false;
+        if(impl_->visible_words_page!=static_cast<int>(page)) {
+            impl_->visible_words=visible_word_rects(view,impl_->width,impl_->height);
+            impl_->visible_words_page=static_cast<int>(page);
+        }
+        return nearest_word(view,impl_->visible_words,x,y,word);
+    };
+    if(endpoint(x1,y1,first)&&endpoint(x2,y2,last)) {
+        const bool reverse=first.getStart().compare(last.getStart())>0;
+        ldomXRange selected(reverse?last.getStart():first.getStart(),reverse?first.getEnd():last.getEnd());
+        selected.sort();
+        const std::string text=UnicodeToUtf8(selected.getRangeText(U'\n',6001)).c_str();
+        if(!text.empty()&&text.size()<=6000) {
+            ReaderSelection value;
+            value.range={impl_->selection_revision+":"+UnicodeToUtf8(selected.getStart().toString()).c_str(),
+                         impl_->selection_revision+":"+UnicodeToUtf8(selected.getEnd().toString()).c_str(),text};
+            value.rects=range_rects(view,selected,impl_->width,impl_->height);
+            if(!value.rects.empty())result=std::move(value);
+        }
+    }
+    if(old_page>=0)view.goToPage(old_page,false);
+    return result;
+}
+std::vector<Rect> CreReader::selection_rects(std::size_t page,const SelectionRange& range) {
+    if(!impl_||page>=page_count()||range.text.empty()||range.text.size()>6000||range.start.size()>4096||range.end.size()>4096)return {};
+    const auto prefix=impl_->selection_revision+":";
+    if(range.start.rfind(prefix,0)!=0||range.end.rfind(prefix,0)!=0)return {};
+    auto& view=*impl_->view;
+    const int old_page=view.getCurPage();
+    view.goToPage(static_cast<int>(page),false);
+    std::vector<Rect> result;
+    try {
+        auto doc=view.getDocument();
+        auto start=doc->createXPointer(Utf8ToUnicode(range.start.substr(prefix.size()).c_str()));
+        auto end=doc->createXPointer(Utf8ToUnicode(range.end.substr(prefix.size()).c_str()));
+        if(!start.isNull()&&!end.isNull()&&selection_text_node(start.getNode())&&selection_text_node(end.getNode())) {
+            ldomXRange selected(start,end);
+            selected.sort();
+            const std::string text=UnicodeToUtf8(selected.getRangeText(U'\n',6001)).c_str();
+            if(text==range.text)result=range_rects(view,selected,impl_->width,impl_->height);
+        }
+    } catch(...) { result.clear(); }
+    if(old_page>=0)view.goToPage(old_page,false);
+    return result;
+}
 void CreReader::draw(Canvas& canvas, std::size_t page, int x, int y, int clip_bottom) {
     if (!impl_ || page >= page_count() || x < 0 || y < 0 || x + impl_->width > canvas.width || y + impl_->height > canvas.height)
         throw std::runtime_error("新版排版绘制范围无效");
@@ -387,6 +547,8 @@ std::size_t CreReader::restore(const std::string&) { return 0; }
 std::string CreReader::anchor(std::size_t) { return {}; }
 std::size_t CreReader::text_position(std::size_t) { return 0; }
 std::size_t CreReader::page_for_text_position(std::size_t) { return 0; }
+std::optional<ReaderSelection> CreReader::select(std::size_t,int,int,int,int,bool) { return std::nullopt; }
+std::vector<Rect> CreReader::selection_rects(std::size_t,const SelectionRange&) { return {}; }
 void CreReader::draw(Canvas&, std::size_t, int, int, int) { throw std::runtime_error("此构建未启用新版排版"); }
 }
 #endif

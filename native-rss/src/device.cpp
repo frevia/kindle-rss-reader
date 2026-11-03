@@ -5,6 +5,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <cerrno>
+#include <chrono>
 #ifdef __linux__
 #include <fcntl.h>
 #include <linux/fb.h>
@@ -127,18 +128,28 @@ void KindleDevice::restore(){
 std::optional<TouchGesture> KindleDevice::touch(int timeout_ms){
     auto& d=*impl_;pollfd poller{d.input,POLLIN,0};
     const int ready=::poll(&poller,1,std::clamp(timeout_ms,0,1000));
-    if(ready<0){if(errno==EINTR)return std::nullopt;device_error("等待触摸失败");}
-    if(!ready)return std::nullopt;
+    if(ready<0&&errno!=EINTR)device_error("等待触摸失败");
     if(poller.revents&(POLLERR|POLLHUP|POLLNVAL))throw std::runtime_error("触摸设备已断开");
+    auto now_ms=[](){return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count());};
+    auto scale=[&](const TouchGesture& gesture){return scale_gesture(gesture,d.x.minimum,d.x.maximum,d.y.minimum,d.y.maximum);};
+    if(ready<=0){if(auto gesture=d.decoder.poll(now_ms()))return scale(*gesture);return std::nullopt;}
     InputEvent event{};
+    std::optional<TouchGesture> latest_move;
     for(int n=0;n<256;++n){
         const auto bytes=::read(d.input,&event,sizeof(event));
-        if(bytes<0&&(errno==EAGAIN||errno==EINTR))return std::nullopt;
+        if(bytes<0&&(errno==EAGAIN||errno==EINTR)){
+            if(auto gesture=d.decoder.poll(now_ms()))return scale(*gesture);
+            return latest_move?std::optional<TouchGesture>(scale(*latest_move)):std::nullopt;
+        }
         if(bytes!=sizeof(event))throw std::runtime_error("触摸事件读取不完整");
-        if(auto gesture=d.decoder.consume(event.type,event.code,event.value))
-            return scale_gesture(*gesture,d.x.minimum,d.x.maximum,d.y.minimum,d.y.maximum);
+        if(auto gesture=d.decoder.consume(event.type,event.code,event.value,now_ms())){
+            if(gesture->phase==TouchPhase::Move)latest_move=std::move(gesture);
+            else return scale(*gesture);
+        }
     }
-    return std::nullopt;
+    if(auto gesture=d.decoder.poll(now_ms()))return scale(*gesture);
+    return latest_move?std::optional<TouchGesture>(scale(*latest_move)):std::nullopt;
 }
 #else
 struct KindleDevice::Impl {};
@@ -154,10 +165,13 @@ void validate_kpw3_layout(const FrameLayout& l){
        static_cast<std::uint64_t>(l.stride)*(l.yoffset+l.height)>l.memory_size||l.memory_size>64*1024*1024)
         throw std::runtime_error("屏幕布局不符合 KPW3 8 位竖屏要求");
 }
-std::optional<TouchGesture> TouchDecoder::consume(std::uint16_t type,std::uint16_t code,std::int32_t value){
+std::optional<TouchGesture> TouchDecoder::consume(std::uint16_t type,std::uint16_t code,std::int32_t value,std::uint64_t now_ms){
+    if(have_time_&&now_ms<last_ms_)now_ms=last_ms_;
+    last_ms_=now_ms;have_time_=true;
     if(type==0&&code==3){
         active_=released_=have_x_=have_y_=path_started_=cancelled_=false;
         gesture_.reset();active_slots_.clear();slot_=x_=y_=0;
+        start_ms_=hold_ms_=last_ms_=0;have_time_=left_bounds_=long_sent_=cancel_sent_=false;
         throw std::runtime_error("触摸事件丢失，需要重新读取设备状态");
     }
     if(type==3){
@@ -168,6 +182,7 @@ std::optional<TouchGesture> TouchDecoder::consume(std::uint16_t type,std::uint16
             else if(code==0x39){
                 if(value>=0){
                     active_=true;released_=false;path_started_=false;gesture_.reset();
+                    left_bounds_=long_sent_=cancel_sent_=false;hold_ms_=0;
                     cancelled_=!active_slots_.empty();
                 }else{released_=active_;active_=false;}
             }
@@ -179,19 +194,53 @@ std::optional<TouchGesture> TouchDecoder::consume(std::uint16_t type,std::uint16
         }
     }
     if(type==0&&code==0){
+        auto update=[&](TouchPoint point){
+            gesture_->update(point);
+            const auto dx=static_cast<std::int64_t>(point.x)-gesture_->start.x;
+            const auto dy=static_cast<std::int64_t>(point.y)-gesture_->start.y;
+            if(!left_bounds_&&(dx>24||dx< -24||dy>24||dy< -24)){
+                left_bounds_=true;hold_ms_=now_ms>=start_ms_?now_ms-start_ms_:0;
+            }
+            gesture_->duration_ms=now_ms>=start_ms_?now_ms-start_ms_:0;
+            gesture_->hold_ms=left_bounds_?hold_ms_:gesture_->duration_ms;
+        };
         if(released_){
+            if(gesture_)update({x_,y_});
+            if(cancelled_&&long_sent_&&!cancel_sent_&&gesture_){
+                auto cancelled=*gesture_;cancelled.phase=TouchPhase::Cancel;cancel_sent_=true;
+                released_=false;active_=path_started_=cancelled_=false;gesture_.reset();long_sent_=false;
+                return cancelled;
+            }
             released_=false;
-            if(gesture_)gesture_->update({x_,y_});
             auto completed=(!cancelled_&&path_started_)?gesture_:std::nullopt;
+            if(completed)completed->phase=TouchPhase::Complete;
             active_=path_started_=cancelled_=false;gesture_.reset();
             return completed;
         }
         if(active_&&have_x_&&have_y_){
-            if(!path_started_){gesture_.emplace(TouchPoint{x_,y_});path_started_=true;}
-            else gesture_->update({x_,y_});
+            if(!path_started_){
+                gesture_.emplace(TouchPoint{x_,y_});path_started_=true;start_ms_=now_ms;
+                hold_ms_=0;left_bounds_=long_sent_=cancel_sent_=false;reported_={x_,y_};
+            }else update({x_,y_});
+            if(cancelled_&&long_sent_&&!cancel_sent_&&gesture_){
+                auto cancelled=*gesture_;cancelled.phase=TouchPhase::Cancel;cancel_sent_=true;
+                return cancelled;
+            }
+            if(long_sent_&&!cancelled_&&gesture_&&(x_!=reported_.x||y_!=reported_.y)){
+                reported_={x_,y_};auto moved=*gesture_;moved.phase=TouchPhase::Move;return moved;
+            }
         }
     }
     return std::nullopt;
+}
+std::optional<TouchGesture> TouchDecoder::poll(std::uint64_t now_ms){
+    if(have_time_&&now_ms<last_ms_)now_ms=last_ms_;
+    last_ms_=now_ms;have_time_=true;
+    if(!active_||!path_started_||cancelled_||left_bounds_||long_sent_||!gesture_)return std::nullopt;
+    gesture_->duration_ms=now_ms>=start_ms_?now_ms-start_ms_:0;
+    gesture_->hold_ms=gesture_->duration_ms;
+    if(gesture_->duration_ms<600)return std::nullopt;
+    long_sent_=true;reported_={x_,y_};gesture_->phase=TouchPhase::LongPress;return gesture_;
 }
 TouchPoint scale_touch(TouchPoint p,int xmin,int xmax,int ymin,int ymax){
     if(xmin<0||ymin<0||xmax<=xmin||ymax<=ymin||xmax>65535||ymax>65535||
@@ -204,6 +253,7 @@ TouchGesture scale_gesture(const TouchGesture& gesture,int xmin,int xmax,int ymi
     scaled.end=scale_touch(gesture.end,xmin,xmax,ymin,ymax);
     scaled.minimum=scale_touch(gesture.minimum,xmin,xmax,ymin,ymax);
     scaled.maximum=scale_touch(gesture.maximum,xmin,xmax,ymin,ymax);
+    scaled.phase=gesture.phase;scaled.duration_ms=gesture.duration_ms;scaled.hold_ms=gesture.hold_ms;
     return scaled;
 }
 std::string probe_device(){

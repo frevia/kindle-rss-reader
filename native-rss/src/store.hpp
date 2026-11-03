@@ -1,5 +1,6 @@
 #pragma once
 #include "model.hpp"
+#include "selection.hpp"
 #include <optional>
 #include <sqlite3.h>
 
@@ -47,6 +48,10 @@ public:
     std::vector<std::string> translation_blocks(std::int64_t id, bool web, const std::string& revision) const;
     void save_translation_block(std::int64_t id, bool web, const std::string& revision, std::size_t block, const std::string& html);
     void set_translation_state(std::int64_t id, bool web, const std::string& revision, const std::string& state, const std::string& error = "");
+    std::vector<StoredSelection> selections(std::int64_t entry_id, bool web, ReadingMode mode, const std::string& revision) const;
+    std::optional<StoredSelection> selection(const SelectionJob& job) const;
+    void set_highlight(const SelectionJob& job, bool highlighted);
+    void save_selection_translation(const SelectionJob& job, const std::string& translated);
     void finish_reading(std::int64_t id);
     void mark_feed_read(std::int64_t feed_id); // 0 = all.
     void remove_feed(std::int64_t id); // Keep starred entries and their source metadata.
