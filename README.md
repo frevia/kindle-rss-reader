@@ -4,7 +4,7 @@
 
 已有真机验证设备为 **Kindle Paperwhite 3（KPW3，2015 款）**。当前源码新增按屏幕和触摸能力运行的 Kindle 兼容版，其他机型仍需实机验收，具体条件见[机型兼容说明](native-rss/docs/COMPATIBILITY.md)。设备需要已经越狱，并完成越狱教程中的后续环境设置。
 
-当前源码为 **v0.0.4-beta.1** 升级测试版，包含 v0.0.3 发布后新增的功能。文档以当前源码为准，并将尚未进入已发布安装包的功能标为“源码开发版”；新增变化见[未发布更新记录](CHANGELOG.md#未发布)，已发布版本的功能与验证范围见 [v0.0.3 发布说明](native-rss/docs/RELEASE-v0.0.3.md)。仍使用 v0.0.2 时，请参阅[旧版本的使用指南](https://github.com/frevia/kindle-rss-reader/blob/v0.0.2/native-rss/docs/USAGE.md)。
+当前源码为 **v0.0.4-beta.2** 升级测试版，包含 v0.0.3 发布后新增的功能。文档以当前源码为准，并将尚未进入已发布安装包的功能标为“源码开发版”；新增变化见[未发布更新记录](CHANGELOG.md#未发布)，已发布版本的功能与验证范围见 [v0.0.3 发布说明](native-rss/docs/RELEASE-v0.0.3.md)。仍使用 v0.0.2 时，请参阅[旧版本的使用指南](https://github.com/frevia/kindle-rss-reader/blob/v0.0.2/native-rss/docs/USAGE.md)。
 
 ## 可以用它做什么
 
