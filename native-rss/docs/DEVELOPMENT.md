@@ -12,7 +12,7 @@
 
 ## 本机构建
 
-需要 CMake、pkg-config、C++17 编译器及 libxml2、sqlite3、libcurl（支持 CURLOPT_PROTOCOLS_STR）、OpenSSL、zlib、freetype2、HarfBuzz、libpng、libwebp、libavif 1.1.0+（启用 libyuv）、sdl2 开发库。
+需要 CMake、pkg-config、C++17 编译器及 libxml2、sqlite3 3.38+（启用内置 JSON 函数）、libcurl（支持 CURLOPT_PROTOCOLS_STR）、OpenSSL、zlib、freetype2、HarfBuzz、libpng、libwebp、libavif 1.1.0+（启用 libyuv）、sdl2 开发库。
 
 先确认这些库能通过 `pkg-config` 查到；非系统前缀安装时，将对应的 `lib/pkgconfig` 加入 `PKG_CONFIG_PATH`。例如 libavif 安装在自选前缀后，使用 `PKG_CONFIG_PATH=/absolute/prefix/lib/pkgconfig`。不要将 ARM 的依赖目录用于宿主构建。缺少 `libavif` 时 CMake 会停止；已有旧构建目录成功不代表新环境能直接构建。
 
@@ -51,7 +51,7 @@ CLI 可在临时数据库执行 `translate ID` 或 `translate-web ID`。`transla
 
 `selection.hpp` 定义选区、任务快照与存储记录；`app_selection.cpp` 实现仅保留翻译按钮的选词工具条及选区译文分页。CREngine 用真实文字命中与分行矩形建立 DOM 范围锚点，选区指纹不含来源元信息或排版参数；原排版使用正文 UTF-8 字节范围和实际字宽定位。回绘会核对内容指纹和原文片段，范围按来源与阅读模式隔离，不把文字范围替换为页码。划线在本应用中显示，不接入原生系统笔记。
 
-Store 通过事务内 `CREATE TABLE IF NOT EXISTS article_selections` 增加附表，保留原有数据。复合主键包含文章、来源、模式、指纹和起止锚点；独立更新划线开关或译文，不互相覆盖，删除文章时级联清理。正文更新保留旧行但不再投影；取消订阅时收藏保留规则不变。选中文字最多 6000 UTF-8 字节，译文最多 64 KiB；所有 SQL 使用绑定参数。选区翻译复用唯一后台 future 和 Qwen HTTP 安全边界，用户点击才请求；任务快照隔离页面切换后的晚到结果，取消和错误不自动重试。触摸解码器以单调时钟区分 600ms 长按、拖动、完成和取消，拖动事件按批合并；Kindle 和 SDL 共用解码路径。
+Store 通过事务内 `CREATE TABLE IF NOT EXISTS article_selections` 增加附表，保留原有数据。复合主键包含文章、来源、模式、指纹和起止锚点；独立更新划线开关或译文，不互相覆盖，删除文章时级联清理。正文更新保留旧行但不再投影；取消订阅时收藏保留规则不变。选中文字最多 6000 UTF-8 字节，译文最多 64 KiB；所有 SQL 使用绑定参数。选区翻译复用唯一后台 future、当前翻译服务配置及相同的 HTTP 安全边界，用户点击才请求；任务快照隔离页面切换后的晚到结果，取消和错误不自动重试。触摸解码器以单调时钟区分 600ms 长按、拖动、完成和取消，拖动事件按批合并；Kindle 和 SDL 共用解码路径。
 
 ## ARM 构建状态
 
