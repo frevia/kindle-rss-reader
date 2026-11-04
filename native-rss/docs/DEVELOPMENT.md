@@ -204,7 +204,7 @@ rtk proxy native-rss/build/rss-performance native-rss/vendor/runtime/reader.ttf 
 
 启动器在 guardian fork 前创建 `/tmp/rss-cre-session.*` 私有目录并导出 `RSS_CRE_CACHE`。退出时先关闭阅读器并删除本会话缓存，再恢复服务及USB；启动器被杀时由独立监护进程执行同样的清理。原会话锁、数据库路径及系统恢复保护继续使用，不需要额外测试入口。
 
-启动器的实际条件以 `device/launch.sh` 为准：需要 `/mnt/us/libkh/bin/fbink` 可执行，以及 `timeout`、`flock`、`stat`、`pidof`、`awk`、`dd`、`mktemp`、`mkfifo`、`head` 和系统 LIPC 工具；设备密码锁开启时会拒绝启动。真机历史证据仍只来自 KPW3；兼容版使用动态屏幕快照与 FBInk 刷新，屏幕和触摸能力检查不应绕过。
+启动器的实际条件以 `device/launch.sh` 为准：需要一份通过设备预检的 FBInk，以及 `timeout`、`flock`、`stat`、`pidof`、`awk`、`dd`、`mktemp`、`mkfifo`、`head` 和系统 LIPC 工具；设备密码锁开启时会拒绝启动。依次尝试 `/mnt/us/libkh/bin/fbink`、`/usr/bin/fbink`、`/mnt/us/koreader/fbink`，通过 `RSS_FBINK` 将所选路径传给阅读器，保证预检、刷新和恢复一致；不修改已有工具。真机历史证据仍只来自 KPW3；兼容版使用动态屏幕快照与 FBInk 刷新，屏幕和触摸能力检查不应绕过。
 
 存在 `/etc/upstart/statusbar.conf` 时还需要 `/sbin/initctl`：只读取任务状态和主进程 PID，将其纳入已有的进程身份、暂停和恢复保护，不执行任务 stop/start。预先停止的状态栏保持停止，身份不明或阅读期间发生替换会退出阅读。Snow 面板的选择和硬件修订回退见 [机型兼容说明](COMPATIBILITY.md)。
 

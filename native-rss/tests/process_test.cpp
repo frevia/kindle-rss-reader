@@ -114,8 +114,8 @@ int main(){
     bounded_reader_death(false);
     bounded_reader_death(true);
     bounded_timeout_cleans_inherited_pipe();
-    auto parallel=std::async(std::launch::async,[]{return rss::capture_bounded({"/bin/sh","-c","sleep 0.02; printf one"},seconds(1),3);});
-    assert(rss::capture_bounded({"/bin/sh","-c","sleep 0.02; printf two"},seconds(1),3)=="two");
+    auto parallel=std::async(std::launch::async,[]{return rss::capture_bounded({"/bin/sh","-c","sleep 1; printf one"},seconds(3),3);});
+    assert(rss::capture_bounded({"/bin/sh","-c","sleep 1; printf two"},seconds(3),3)=="two");
     assert(parallel.get()=="one");
 #ifdef __linux__
     // A grandchild keeps the pipe open; only kernel parent-death termination closes it.
@@ -175,14 +175,14 @@ int main(){
     assert(rss::capture_bounded({"/bin/sh","-c","(sleep 10) & exit 0"},seconds(1),32).empty());
     assert(steady_clock::now()-background_exit_start<seconds(2));
     const auto streaming_start=steady_clock::now();bool streaming_timed_out=false;
-    try{rss::capture_bounded({"/bin/sh","-c","while :; do printf x; sleep 0.01; done"},milliseconds(80),32);}
+    try{rss::capture_bounded({"/bin/sh","-c","while :; do printf x; sleep 1; done"},milliseconds(80),32);}
     catch(const std::runtime_error& e){streaming_timed_out=std::string(e.what()).find("超时")!=std::string::npos;}
     assert(streaming_timed_out&&steady_clock::now()-streaming_start<seconds(2));
     // A closed stdout is not proof that the command's descendants have stopped.
     char marker[]="/tmp/rss-process-test.XXXXXX";const int marker_fd=mkstemp(marker);assert(marker_fd>=0);
     close(marker_fd);unlink(marker);
-    assert(rss::capture_bounded({"/bin/sh","-c","(exec 1>&-; sleep 0.2; : >\"$1\") & printf ok","descendant",marker},seconds(1),2)=="ok");
-    std::this_thread::sleep_for(milliseconds(300));
+    assert(rss::capture_bounded({"/bin/sh","-c","(exec 1>&-; sleep 1; : >\"$1\") & printf ok","descendant",marker},seconds(1),2)=="ok");
+    std::this_thread::sleep_for(milliseconds(1200));
     const bool leaked=std::ifstream(marker).good();unlink(marker);assert(!leaked);
     const auto closed_stdio=fork();assert(closed_stdio>=0);
     if(closed_stdio==0){

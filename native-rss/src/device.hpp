@@ -16,6 +16,7 @@ struct KindleProfile {
     const char* historical_firmware="none";
 };
 KindleProfile kindle_profile(const std::string& serial);
+bool touch_tool_allowed(const std::string& name,bool direct,bool pointer,bool pen,bool finger);
 struct FrameLayout {
     std::uint32_t width=0,height=0,stride=0,bpp=0,xoffset=0,yoffset=0,virtual_height=0;
     std::uint64_t memory_size=0;
@@ -70,7 +71,7 @@ std::optional<Rect> changed_region(const std::vector<std::uint8_t>& before,
                                   const std::vector<std::uint8_t>& after,
                                   int width=1072,int height=1448);
 std::vector<std::string> fbink_refresh_args(Rect region,bool full);
-void refresh_fbink(Rect region,bool full,const std::string& executable="/mnt/us/libkh/bin/fbink");
+void refresh_fbink(Rect region,bool full,const std::string& executable="");
 // The launcher must own the system UI session for this object's entire lifetime.
 class KindleDevice {
 public:

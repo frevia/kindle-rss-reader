@@ -8,6 +8,7 @@
 #include <cerrno>
 #include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #ifdef __linux__
 #include <dirent.h>
 #include <fcntl.h>
@@ -20,6 +21,10 @@
 #endif
 
 namespace rss {
+bool touch_tool_allowed(const std::string& name,bool direct,bool pointer,bool pen,bool finger){
+    // KPW3's legacy cyttsp4_mt reports BTN_TOOL_FINGER without INPUT_PROP_DIRECT.
+    return !pointer&&!pen&&(direct||!finger||name=="cyttsp4_mt");
+}
 KindleProfile kindle_profile(const std::string& serial){
     if(serial.size()<6||serial.size()>64)return {};
     for(unsigned char c:serial)if(!((c>='0'&&c<='9')||(c>='A'&&c<='Z')||(c>='a'&&c<='z')))return {};
@@ -60,11 +65,14 @@ TouchDecoder::Protocol select_touch_protocol(bool has_slot,bool has_tracking_id,
 }
 std::vector<std::string> fbink_refresh_args(Rect r,bool full){
     if(r.x<0||r.y<0||r.w<=0||r.h<=0)throw std::runtime_error("无效刷新区域");
-    std::vector<std::string> args{"/mnt/us/libkh/bin/fbink","-q","-w","-W","GC16"};if(full)args.push_back("-f");
+    const auto selected=std::getenv("RSS_FBINK");
+    const std::string executable=selected?selected:"/mnt/us/libkh/bin/fbink";
+    if(executable!="/mnt/us/libkh/bin/fbink"&&executable!="/usr/bin/fbink"&&executable!="/mnt/us/koreader/fbink")throw std::runtime_error("无效 FBInk 程序路径");
+    std::vector<std::string> args{executable,"-q","-w","-W","GC16"};if(full)args.push_back("-f");
     args.insert(args.end(),{"--refresh","top="+std::to_string(r.y)+",left="+std::to_string(r.x)+",width="+std::to_string(r.w)+",height="+std::to_string(r.h)});return args;
 }
 void refresh_fbink(Rect region,bool full,const std::string& executable){
-    auto args=fbink_refresh_args(region,full);args[0]=executable;
+    auto args=fbink_refresh_args(region,full);if(!executable.empty())args[0]=executable;
     const auto output=capture_bounded(args,std::chrono::seconds(5),4096,true);
     // FBInk's CLI ignores wait errors; WARN remains visible with -q. Only this optional wait is harmless.
     const std::string optional_wait="[FBInk] Waiting for update submission is not supported on your device!";
@@ -117,7 +125,7 @@ std::optional<InputInfo> inspect_input(const std::string& path,bool snow_model){
     ioctl(fd,EVIOCGPROP(sizeof(props)),props);ioctl(fd,EVIOCGBIT(EV_KEY,sizeof(keys)),keys);ioctl(fd,EVIOCGBIT(EV_ABS,sizeof(abs)),abs);
     const bool mt=bit(abs,ABS_MT_POSITION_X)&&bit(abs,ABS_MT_POSITION_Y);
     const bool direct=bit(props,INPUT_PROP_DIRECT);
-    const bool excluded=bit(keys,BTN_TOOL_PEN)||bit(props,INPUT_PROP_POINTER)||(!direct&&bit(keys,BTN_TOOL_FINGER));
+    const bool excluded=!touch_tool_allowed(info.name,direct,bit(props,INPUT_PROP_POINTER),bit(keys,BTN_TOOL_PEN),bit(keys,BTN_TOOL_FINGER));
     const bool touchscreen=direct||bit(keys,BTN_TOUCH);
     bool ok=false;
     if(touchscreen&&!excluded&&mt&&ioctl(fd,EVIOCGABS(ABS_MT_POSITION_X),&info.x)==0&&ioctl(fd,EVIOCGABS(ABS_MT_POSITION_Y),&info.y)==0&&info.x.maximum>info.x.minimum&&info.y.maximum>info.y.minimum){

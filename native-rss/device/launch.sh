@@ -9,6 +9,7 @@ PROC=/proc
 GET=/usr/bin/lipc-get-prop
 SET=/usr/bin/lipc-set-prop
 REFRESH=/mnt/us/libkh/bin/fbink
+FBINK_ALTERNATES="/usr/bin/fbink /mnt/us/koreader/fbink"
 KILL=kill
 PASSCODE=/var/local/system/userpasswdenabled
 UPDATE=/mnt/us/native-rss/.update
@@ -30,7 +31,7 @@ fi
 for tool in timeout flock stat pidof awk dd mktemp mkfifo head; do
     command -v "$tool" >/dev/null 2>&1 || fail "缺少工具 $tool"
 done
-for tool in "$GET" "$SET" "$REFRESH"; do
+for tool in "$GET" "$SET"; do
     [ -x "$tool" ] || fail "缺少程序 $tool"
 done
 [ ! -L "$STATE" ] || fail '状态目录不能是符号链接'
@@ -153,6 +154,16 @@ fbink_value() {
     # FBInk emits shell assignments; parse only the numeric fields, never eval them.
     printf '%s\n' "$fbink_probe" | awk -v key="$1" 'BEGIN {RS=";"; FS="="} $1 == key {value=$2; count++} END {if(count != 1) exit 1; print value}'
 }
+fbink_compatible() {
+    [ -x "$1" ] || return 1
+    fbink_probe=$(timeout 5 "$1" -q -e) || return 1
+    fbink_id=$(fbink_value deviceId) || return 1
+    case "$fbink_id" in ''|0*|*[!0-9]*) return 1 ;; esac
+    [ "${#fbink_id}" -le 5 ] && [ "$fbink_id" -le 65535 ] || return 1
+    [ "$(fbink_value isSunxi)" = 0 ] && [ "$(fbink_value invertedGrayscale)" = 0 ] &&
+        [ "$(fbink_value BPP)" = 8 ] && [ "$(fbink_value screenWidth)" = "$width" ] &&
+        [ "$(fbink_value screenHeight)" = "$height" ] && [ "$(fbink_value lineLength)" = "$stride" ]
+}
 screen_signature() {
     printf '%s\n' "$1" | awk -F= '$1 ~ /^(width|height|stride|bpp|xoffset|yoffset|virtual_height|memory_size|rotation|grayscale|driver)$/ {print}'
 }
@@ -240,14 +251,15 @@ snapshot_rows=$((yoffset+height))
 [ "$snapshot_bytes" -eq "$((stride*snapshot_rows))" ] && [ "$snapshot_bytes" -le 67108864 ] || fail '无效屏幕快照长度'
 original_screen=$(screen_signature "$probe")
 printf '%s\n' "$probe"
-fbink_probe=$(timeout 5 "$REFRESH" -q -e) || fail 'FBInk 无法识别设备，请检查共享工具版本'
-fbink_id=$(fbink_value deviceId) || fail 'FBInk 缺少机型识别信息'
-case "$fbink_id" in ''|0*|*[!0-9]*) fail 'FBInk 未识别此机型' ;; esac
-[ "${#fbink_id}" -le 5 ] && [ "$fbink_id" -le 65535 ] || fail '无效 FBInk 机型编号'
-[ "$(fbink_value isSunxi)" = 0 ] && [ "$(fbink_value invertedGrayscale)" = 0 ] &&
-    [ "$(fbink_value BPP)" = 8 ] && [ "$(fbink_value screenWidth)" = "$width" ] &&
-    [ "$(fbink_value screenHeight)" = "$height" ] && [ "$(fbink_value lineLength)" = "$stride" ] ||
-    fail 'FBInk 屏幕能力不匹配，请导出设备诊断报告'
+fbink_selected=
+ulimit -c 0
+for candidate in "$REFRESH" $FBINK_ALTERNATES; do
+    if fbink_compatible "$candidate"; then fbink_selected=$candidate; break; fi
+done
+[ -n "$fbink_selected" ] || fail '没有通过设备预检的 FBInk，请导出设备诊断报告'
+REFRESH=$fbink_selected
+RSS_FBINK=$REFRESH; export RSS_FBINK
+printf 'fbink_program=%s\n' "$REFRESH"
 records=
 for service in awesome JunoStatusBarDriver volumd; do
     if ! pids=$(pidof "$service"); then

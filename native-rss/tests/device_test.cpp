@@ -6,8 +6,22 @@
 #include <fstream>
 #include <unistd.h>
 #include <sys/stat.h>
+#include <cstdlib>
 
 int main(){
+    assert(rss::touch_tool_allowed("cyttsp4_mt",false,false,false,true));
+    assert(!rss::touch_tool_allowed("touchpad",false,false,false,true));
+    assert(!rss::touch_tool_allowed("cyttsp4_mt",false,true,false,true));
+    assert(!rss::touch_tool_allowed("cyttsp4_mt",true,false,true,true));
+    assert(rss::touch_tool_allowed("touchscreen",true,false,false,true));
+    assert(rss::touch_tool_allowed("touchscreen",false,false,false,false));
+    const auto previous_fbink=std::getenv("RSS_FBINK");const bool had_fbink=previous_fbink!=nullptr;const std::string saved_fbink=previous_fbink?previous_fbink:"";
+    for(const auto* path:{"/mnt/us/libkh/bin/fbink","/usr/bin/fbink","/mnt/us/koreader/fbink"}){
+        setenv("RSS_FBINK",path,1);assert(rss::fbink_refresh_args({0,0,8,8},false).front()==path);
+    }
+    setenv("RSS_FBINK","relative/fbink",1);bool bad_fbink=false;
+    try{rss::fbink_refresh_args({0,0,8,8},false);}catch(const std::runtime_error&){bad_fbink=true;}assert(bad_fbink);
+    unsetenv("RSS_FBINK");
     for(int slot=0;slot<32;++slot){
         rss::TouchDecoder decoder(rss::TouchDecoder::Protocol::TypeB);
         decoder.consume(3,0x2f,slot,0);decoder.consume(3,0x39,100+slot,0);
@@ -444,4 +458,5 @@ int main(){
     unfinished.consume(3,0x39,4);unfinished.consume(3,0x35,10);unfinished.consume(3,0x36,20);unfinished.consume(0,0,0);
     unfinished.consume(1,330,0);
     bool bad_frame=false;try{unfinished.consume(3,0x39,5);}catch(const std::runtime_error&){bad_frame=true;}assert(bad_frame);
+    if(had_fbink)setenv("RSS_FBINK",saved_fbink.c_str(),1);else unsetenv("RSS_FBINK");
 }

@@ -77,9 +77,10 @@ elif name=="set":
     if mode=="pillow-error" and args[-1]=="disable":sys.exit(1)
     if mode=="soft-pillow-error" and "hideMe" in args[-1]:sys.exit(1)
     if mode=="soft-restore-error" and "showMe" in args[-1]:sys.exit(1)
-elif name=="refresh":
+elif name in ("refresh","refresh-fallback"):
     if "-e" in args:
         if mode=="fbink-error":sys.exit(1)
+        if mode.startswith("fbink-fallback") and name=="refresh":sys.exit(139)
         width,height,stride={"small-screen":(600,800,608),"large-screen":(1860,2480,1872)}.get(mode,(1072,1448,1088))
         print(f"deviceId={0 if mode=='fbink-unknown' else 201};isSunxi={int(mode=='fbink-sunxi')};"
               f"invertedGrayscale={int(mode=='fbink-inverted')};BPP=8;screenWidth={width};screenHeight={height};"
@@ -127,6 +128,7 @@ elif name=="app":
         if mode=="injected-width":print("width=1;exit 0")
     else:
         assert os.environ["RSS_UI_GUARD"]=="1"
+        assert os.environ["RSS_FBINK"]==str(root/"bin"/("refresh-fallback" if mode.startswith("fbink-fallback") else "refresh"))
         if mode=="article":
             assert args[-3:]==["--article","42","device"],args
             log("article-start 42")
@@ -174,6 +176,8 @@ class LauncherTests(unittest.TestCase):
                 (root/"state/session.log").symlink_to(root/"protected")
             for name in ("stat","chmod","flock","timeout","pidof","initctl","get","set","refresh","kill","app","mktemp","rm","runner"):
                 tool=root/"bin"/name;tool.write_text("#!"+sys.executable+"\n"+FAKE);tool.chmod(0o755)
+            if mode.startswith("fbink-fallback"):
+                fallback=root/"bin/refresh-fallback";fallback.write_bytes((root/"bin/refresh").read_bytes());fallback.chmod(0o755)
             for pid,name in ((900001,"awesome"),(900002,"JunoStatusBarDr"),(900003,"volumd")):
                 p=root/"proc"/str(pid);p.mkdir(parents=True)
                 (p/"comm").write_text(name+"\n")
@@ -220,7 +224,7 @@ class LauncherTests(unittest.TestCase):
             values={"STATE":root/"state","APP":root/"bin/app","DB":root/"rss.sqlite","FB":root/"fb",
                     "PROC":root/"proc","GET":root/"bin/get","SET":root/"bin/set","REFRESH":root/"bin/refresh","KILL":root/"bin/kill","PASSCODE":root/"passcode","UPDATE":root/"update","LAUNCH":root/"restart.sh",
                     "INITCTL":root/"bin/initctl","STATUSBAR_JOB":root/"statusbar.conf",
-                    "UPSTART_DIR":root/"upstart","FIRMWARE":root/"prettyversion"}
+                    "UPSTART_DIR":root/"upstart","FIRMWARE":root/"prettyversion","FBINK_ALTERNATES":root/"bin/refresh-fallback"}
             script=SOURCE.read_text().splitlines()
             (root/"cache").mkdir()
             source="\n".join(script)+"\n"
@@ -228,7 +232,7 @@ class LauncherTests(unittest.TestCase):
             script=source.splitlines()
             for i,line in enumerate(script):
                 key=line.split("=",1)[0]
-                if key in values:script[i]=key+"='"+str(values[key])+"'"
+                if key in values:script[i]=key+"='"+str(values.pop(key))+"'"
             source="\n".join(script)+"\n"
             # macOS has no /proc; the production guardian uses Linux start time and zombie state.
             source=re.sub(r'^owner_born=.*$', 'owner_born=123',source,flags=re.M)
@@ -280,6 +284,13 @@ class LauncherTests(unittest.TestCase):
             if mode in ("small-screen","large-screen"):
                 self.assertEqual((root/"fb").read_bytes(),b"x"*snapshot_size)
             return result,events,(root/"fb").read_bytes()[0:1]
+
+    def test_broken_fbink_falls_back_to_verified_executable(self):
+        result,events,pixel=self.run_case("fbink-fallback")
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertEqual(pixel,b"x")
+        self.assertIn("app-start",events)
+        self.assertIn("refresh",events)
 
     def test_firmware_pillow_boundaries(self):
         for mode in ("firmware-5.6","firmware-5.6.4","firmware-5.6.5","firmware-5.6.5.1","firmware-5.7.2","firmware-5.12.4"):

@@ -9,8 +9,8 @@
 | 程序 | ARM32／ARMv7、静态 EABI5 soft-float；不加载设备的 glibc，不按系统动态链接器复制两套应用。ARMv5／ARMv6 老设备不在范围内。 |
 | 屏幕 | 8 位灰度、竖屏，宽 600–2560、高 800–3400；校验 stride、偏移、虚拟高度和实际映射内存。其他位深拒绝启动，不修改系统屏幕模式。 |
 | 界面 | 保留 1072×1448 逻辑排版，等比缩放并居中留白；输入反向映射至同一画面。KPW3 尺寸不缩放，其他设备的分页与逻辑字号保持一致。 |
-| 刷新 | 使用设备已有的 `/mnt/us/libkh/bin/fbink`，启动前检查机型识别、尺寸与 stride 一致性，拒绝 sunxi 和反色 framebuffer；按变化区域刷新，每六次有效更新全刷。刷新检查退出码与有界诊断输出，等待错误或未知诊断会退出设备循环，不提交成功帧。FBInk 必须支持实际硬件，不能以文件存在代替识别成功。 |
-| 触摸 | 根据 evdev 能力发现触摸屏，支持 MT Type B、MT Type A、已知 Basic 2019 面板的 Snow 协议和单点 ABS／BTN_TOUCH；Type B 以首个活动槽为主触点，逐槽保留坐标，支持非零槽、多指取消、长按、移动及事件丢失保护。多个不明确候选会拒绝启动。 |
+| 刷新 | 依次检查设备已有的 `/mnt/us/libkh/bin/fbink`、`/usr/bin/fbink`、`/mnt/us/koreader/fbink`，选择机型识别、尺寸与 stride 一致的程序；拒绝 sunxi 和反色 framebuffer。预检、阅读刷新和退出恢复使用同一程序，不替换共享工具。按变化区域刷新，每六次有效更新全刷；同时检查退出码与有界诊断输出，等待错误或未知诊断会退出设备循环，不提交成功帧。 |
+| 触摸 | 根据 evdev 能力发现触摸屏，支持 MT Type B、MT Type A、已知 Basic 2019 面板的 Snow 协议和单点 ABS／BTN_TOUCH；Type B 以首个活动槽为主触点，逐槽保留坐标，支持非零槽、多指取消、长按、移动及事件丢失保护。KPW3 的旧版 `cyttsp4_mt` 缺少 `INPUT_PROP_DIRECT` 且声明 `BTN_TOOL_FINGER`，按精确驱动名允许检测，仍要求触摸按钮和有效坐标轴，并排除 pointer／pen。多个不明确候选会拒绝启动。 |
 | 系统会话 | 需要 Upstart、可解析的 Kindle 5 固件版本、可验证身份的 awesome／volumd 和 LIPC 电源／浮层接口；Juno 状态栏存在时一并接管。发现 `statusbar.conf` 时查询独立状态栏，将运行进程纳入同一暂停／恢复流程；未知状态拒绝启动。未满足条件时保持拒绝，不绕过 USB 数据保护。 |
 | 电量 | 优先通过 LIPC 读取 powerd 的 `battLevel`／`isCharging`，查询失败或数据无效时逐项回退 sysfs；没有有效电量时显示未知。 |
 
