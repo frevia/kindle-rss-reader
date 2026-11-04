@@ -359,17 +359,19 @@ bool recover_update(const fs::path& root) {
     fs::remove_all(folder/"stage");
     for(const auto& record:records) {
         safe_path(root,record.path);const auto target=root/record.path;
+        const auto temporary=fs::path(target.string()+".rss-update-new");safe_path(root,temporary.lexically_relative(root));
         if(record.existed) {
             safe_path(folder/"backup",record.path);require(fs::is_regular_file(folder/"backup"/record.path),"升级备份缺失，请通过 USB 恢复");
-            const auto temporary=fs::path(target.string()+".rss-update-new");safe_path(root,temporary.lexically_relative(root));
             durable_copy(folder/"backup"/record.path,temporary);fs::rename(temporary,target);
-        }else fs::remove(target);
+        }else {fs::remove(temporary);fs::remove(target);}
     }
     if(fs::exists(folder/"database.sqlite")) {
-        for(const auto* name:{"rss.sqlite","rss.sqlite.rss-update-new","rss.sqlite-wal","rss.sqlite-shm"})safe_path(root,fs::path("native-rss/data")/name);
+        for(const auto* name:{"rss.sqlite","rss.sqlite.rss-update-new","rss.sqlite-wal","rss.sqlite-shm","rss.sqlite-journal"})safe_path(root,fs::path("native-rss/data")/name);
         durable_copy(folder/"database.sqlite",root/"native-rss/data/rss.sqlite.rss-update-new");
+        // Old SQLite sidecars must not replay newer pages over the restored snapshot.
+        for(const auto* name:{"rss.sqlite-wal","rss.sqlite-shm","rss.sqlite-journal"})fs::remove(root/"native-rss/data"/name);
+        ::sync();
         fs::rename(root/"native-rss/data/rss.sqlite.rss-update-new",root/"native-rss/data/rss.sqlite");
-        fs::remove(root/"native-rss/data/rss.sqlite-wal");fs::remove(root/"native-rss/data/rss.sqlite-shm");
     }
     ::sync();fs::remove(folder/"journal");fs::remove(folder/"ready");write(folder/"result","上次升级未完成，已恢复升级前的程序与阅读数据");::sync();return true;
 }

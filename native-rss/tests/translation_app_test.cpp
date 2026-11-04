@@ -80,7 +80,7 @@ int main() {
         }
         app.draw();const auto unconfigured=canvas.pixels;
         tap(180,1296);assert(app.take_request()=="translate:rss:"+std::to_string(id));
-        app.sync_finished(false,"请先在 translation.conf 中设置 RSS_QWEN_API_KEY");app.draw();
+        app.sync_finished(false,"请先在 translation.conf 中设置 RSS_TRANSLATION_API_KEY");app.draw();
         assert(app.sync_state()==App::SyncState::Failed&&app.reading_mode()==ReadingMode::Original);
         assert(canvas.pixels!=unconfigured);
         if(const auto path=std::getenv("RSS_TEST_SNAPSHOTS")) {

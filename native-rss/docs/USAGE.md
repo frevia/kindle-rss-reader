@@ -47,36 +47,51 @@
 
 ## 文章翻译（源码开发版）
 
-本节介绍尚未包含在已发布 v0.0.3 安装包中的开发功能。翻译使用阿里云百炼的 **Qwen-MT Flash**，用于英文文章翻成简体中文；首次翻译需要联网，文章内容会提交给所配置的服务，并按服务账户计费。
+本节介绍尚未包含在已发布 v0.0.3 安装包中的开发功能。翻译用于英文文章翻成简体中文；首次翻译需要联网，文章内容会提交给所配置的服务，并按服务账户计费。默认使用阿里云百炼 Qwen-MT，也可配置 SiliconFlow、智谱或其他 OpenAI 兼容服务。
 
 ### 长按选词和选区翻译
 
 长按正文约 0.6 秒选中单词，继续拖动可以扩选；松手后也可拖动两端的选区标记调整范围。扩选时手指可以落在行间或页边，终点会贴近最近的文字行；选区两端的标记可继续拖动调整。短划仍用于翻页。浮动工具条跟随选区，优先显示在上方，空间不足时显示在下方，只保留 **翻译** 按钮。点正文空白或按返回可关闭选区，不改变阅读位置。
 
-点 **翻译** 才会把选中的英文文字发送给千问，沿用下方配置的 API Key。选区译文会缓存在本机；再次选择相同范围可直接查看，不重复请求。译文较长时，在小面板中点 **上一页 / 下一页** 查看完整内容；关闭面板继续阅读。网络失败、取消后可以手动重试，不自动重复请求。同步、正文下载和翻译共用一个后台任务，有其他任务进行时需等待完成。
+点 **翻译** 才会把选中的英文文字发送给当前配置的翻译服务，沿用下方配置的 API Key。选区译文会缓存在本机；再次选择相同范围可直接查看，不重复请求。译文较长时，在小面板中点 **上一页 / 下一页** 查看完整内容；关闭面板继续阅读。网络失败、取消后可以手动重试，不自动重复请求。同步、正文下载和翻译共用一个后台任务，有其他任务进行时需等待完成。
 
 RSS 内容、网页正文以及原文 / 译文 / 双语分别保留各自的选区译文；正文更新后旧范围不会套到新内容。当前支持本页拖选，暂不支持拖动跨页选区。
 
-### 配置自己的 API Key
+### 配置翻译服务
 
-1. 在阿里云百炼开通模型服务，获取对应地域的 API Key。默认连接北京地域；申请及地域说明见[官方文档](https://help.aliyun.com/zh/model-studio/get-api-key)。
-2. 退出阅读器，连接电脑，在 Kindle 磁盘的 `native-rss/data/` 中新建纯文本文件 **translation.conf**（不要保存为 `.txt`）。写入：
+退出阅读器，连接电脑，在 Kindle 磁盘的 `native-rss/data/` 中新建纯文本文件 **translation.conf**（不要保存为 `.txt`）。使用 UTF-8 编码，值两边不加引号，也不加 `export`；以 `#` 开头的行是注释。下面是使用 SiliconFlow 的最简示例：
 
-   ```ini
-   RSS_QWEN_API_KEY=在这里填写自己的APIKey
-   ```
+```ini
+RSS_TRANSLATION_PROVIDER=siliconflow
+RSS_TRANSLATION_API_KEY=在这里填写自己的APIKey
+```
 
-   使用 UTF-8 编码，值两边不加引号，也不加 `export`。以 `#` 开头的行是注释。密钥保存在这个本地文件中，不写入文章数据库，也不包含在 OPML 导出中；完整备份整个应用文件夹时会一起复制，请妥善保管。
-3. 如需使用百炼控制台提供的业务空间专属地址，在同一文件增加一行，填写**完整的请求地址**：
+服务商、默认地址和默认模型如下。API Key 均需自行申请；服务的可用性、限流、收费规则和翻译效果由服务商决定，免费额度不保证长期可用，也不保证效果超过 Qwen。
 
-   ```ini
-   RSS_QWEN_ENDPOINT=https://你的业务空间ID.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/chat/completions
-   ```
+| `RSS_TRANSLATION_PROVIDER` | 默认 endpoint | 默认 model | API Key 申请入口 |
+| --- | --- | --- | --- |
+| `qwen`（默认） | `https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions` | `qwen-mt-flash` | [阿里云百炼密钥管理（北京）](https://bailian.console.aliyun.com/cn-beijing/model/settings/api-key) |
+| `siliconflow` | `https://api.siliconflow.cn/v1/chat/completions` | `tencent/Hunyuan-MT-7B` | [硅基流动 API 密钥](https://cloud.siliconflow.cn/account/ak) |
+| `zhipu` | `https://open.bigmodel.cn/api/paas/v4/chat/completions` | `glm-4-flash-250414` | [智谱 API Keys](https://bigmodel.cn/usercenter/proj-mgmt/apikeys) |
 
-   地址必须与 API Key 的地域一致；旧北京地址 `https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions` 仍是默认值。只填写可信的服务地址，密钥会发送到该地址。
-4. 安全弹出 Kindle，重新打开阅读器。更换密钥时修改同一个文件即可，每次启动翻译任务都会重新读取配置。
+登录对应平台后，在密钥页面创建 API Key，填入 `RSS_TRANSLATION_API_KEY`。智谱请选择“模型标准 API”类型的 Key，个人或团队套餐的 Key 不通用；参见[智谱官方指引](https://docs.bigmodel.cn/cn/guide/start/quick-start)。Qwen 的申请步骤见[百炼官方指引](https://help.aliyun.com/zh/model-studio/get-api-key/)，硅基流动见[官方指引](https://docs.siliconflow.cn/docs/usercases/use-siliconcloud-in-dify)。这里的 API Key 是调用凭证，token 是用量单位。
 
-开发时也可以设置同名环境变量 `RSS_QWEN_API_KEY` 和 `RSS_QWEN_ENDPOINT`；环境变量优先于文件，空的 API Key 环境变量会禁用翻译。配置文件与 `--db` 指定的数据库放在同一个目录，不执行其中的任何 shell 命令。
+所有服务商统一使用 `RSS_TRANSLATION_API_KEY`，不再按模型或服务商区分 Key 变量名。切换服务商时同时填写对应平台的 Key；模型和地址不填时使用该服务商默认值，已填写的覆盖项也需要同步修改或删除。Qwen 服务仅支持 `qwen-mt-` 系列模型，Key 与地址的地域须一致；普通聊天模型请选择对应服务商或 `openai-compatible`。
+
+如需覆盖模型或地址，可在文件中增加 `RSS_TRANSLATION_MODEL` 或 `RSS_TRANSLATION_ENDPOINT`。`openai-compatible` 是接口格式，Key 需向实际使用的服务商申请。例如，OpenAI 兼容服务必须明确提供完整的 `chat/completions` 地址和模型名：
+
+```ini
+RSS_TRANSLATION_PROVIDER=openai-compatible
+RSS_TRANSLATION_API_KEY=在这里填写自己的APIKey
+RSS_TRANSLATION_ENDPOINT=https://api.example.com/v1/chat/completions
+RSS_TRANSLATION_MODEL=your-model-name
+```
+
+Endpoint 必须是完整请求地址，不是服务根地址；仅接受 HTTPS，字面回环地址上的 HTTP 仅用于本机测试。请求不跟随重定向、不继承代理。只填写可信地址，因为 API Key 和文章内容会发送给该服务。
+
+开发时也可以设置同名 `RSS_TRANSLATION_*` 环境变量，环境变量优先于文件；空值也会覆盖文件值，空 API Key 会禁用请求。每次翻译任务开始时重新读取全部配置。旧版 Qwen 专用配置需将 Key 和地址变量名分别改为 `RSS_TRANSLATION_API_KEY`、`RSS_TRANSLATION_ENDPOINT`，值保持不变。
+
+配置文件与 `--db` 指定的数据库放在同一个目录，不执行其中的 shell 命令。Key 保存在本地配置文件中，不写入 SQLite，也不包含在 OPML 或应用安装包中；完整备份整个应用文件夹时会一起复制，请妥善保管。切换服务不会自动重新翻译或清空已有缓存；继续未完成的文章翻译时，已有段落缓存可能来自之前的服务。
 
 ### 原文、译文和双语阅读
 
@@ -88,7 +103,7 @@ RSS 内容、网页正文以及原文 / 译文 / 双语分别保留各自的选�
 
 每个成功段落都会保存到本地，之后切换模式和离线阅读不再请求翻译。取消或失败后，点 **继续翻译剩余段落**，已保存段落会复用；缺少译文的段落保留英文并标明尚未翻译。每轮最多工作约五分钟，超时暂停后可继续。同步与翻译共用一个后台任务，同步期间需等待完成后再翻译。
 
-遇到鉴权失败，请检查密钥、地域和模型权限；遇到限流、余额不足、断网或不完整响应，请处理后手动重试。请求不会自动重试；取消不能撤回已经发到服务端的请求，因此可能仍有计费。原文更新后会提示重新翻译，旧译文不自动套到新正文上。原文、收藏及原有书签会保留。
+遇到鉴权失败，请检查密钥、服务地址和模型权限；遇到限流、余额不足、断网或不完整响应，请处理后手动重试。请求不会自动重试或自动切换模型、服务商；取消不能撤回已经发到服务端的请求，因此可能仍有计费。原文更新后会提示重新翻译，旧译文不自动套到新正文上。原文、收藏及原有书签会保留。
 
 ## 打开文章和调整字号
 

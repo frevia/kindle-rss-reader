@@ -23,8 +23,8 @@ std::int64_t midnight() {
 }
 std::string date(std::int64_t t) {
     if(t<=0)return "";
-    auto time=static_cast<time_t>(t);auto local=std::localtime(&time);char out[40]{};
-    if(local)std::strftime(out,sizeof(out),"%m.%d",local);
+    const auto time=static_cast<time_t>(t);std::tm local{};char out[40]{};
+    if(reader_local_time(time,local))std::strftime(out,sizeof(out),"%m.%d",&local);
     return out;
 }
 bool under(const std::string& value,const std::string& parent){return value==parent||(!parent.empty()&&value.rfind(parent+"/",0)==0);}
@@ -690,7 +690,7 @@ void App::reader_panel_screen(){
         const bool working=running&&own_task,ready=state.state=="ready";
         const bool failed=state.state=="failed"||(own_task&&sync_state_==SyncState::Failed);
         const auto count=std::to_string(state.completed)+" / "+std::to_string(state.total)+" 段";
-        std::string heading="尚未翻译",message="联网使用千问翻译，文章内容将发送至千问；译文保存在本机。";
+        std::string heading="尚未翻译",message="联网使用所配置的翻译服务，文章内容将发送至该服务；译文保存在本机。";
         if(working){
             heading=sync_total_>0?"正在翻译 · "+std::to_string(sync_completed_)+" / "+std::to_string(sync_total_)+" 段":"正在准备翻译";
             message="可收起面板继续阅读，已完成的译文会自动保存。";

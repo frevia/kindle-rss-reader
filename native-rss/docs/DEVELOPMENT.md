@@ -39,13 +39,13 @@ rtk proxy ctest --test-dir native-rss/build --output-on-failure
 
 ## 文章翻译
 
-`src/translation.*` 用现有 libxml2 将正文拆成互不重叠的翻译段落，保留外层文章结构；图片和代码使用受控占位符保护。单段正文不超过 6000 UTF-8 字节。翻译请求保留完整语义段落，去掉行内链接/强调标签后紧密拼接文字，避免把单词、介词短语拆散。代码/图片用受控占位符和 Qwen `terms` 同源同译术语表保护，模型看不到真实代码或图片 HTML；返回的纯文字必须通过 UTF-8、大小、无新增标签和占位符校验。原文保留链接与强调结构；译文按中文语序呈现，不强求沿用英文链接位置。`Entry.reading_mode` 区分原文、译文、双语，`web_content` 继续区分 RSS / 网页来源。双语由段落缓存拼装，生成后重新派生纯文本，供两种排版复用。
+`src/translation.*` 用现有 libxml2 将正文拆成互不重叠的翻译段落，保留外层文章结构；图片和代码使用受控占位符保护。单段正文不超过 6000 UTF-8 字节。翻译请求保留完整语义段落，去掉行内链接/强调标签后紧密拼接文字，避免把单词、介词短语拆散。代码/图片用受控占位符保护；Qwen 请求还在 `terms` 中加入同源同译术语表，模型看不到真实代码或图片 HTML。所有服务返回的纯文字必须通过 UTF-8、大小、无新增标签和占位符校验。原文保留链接与强调结构；译文按中文语序呈现，不强求沿用英文链接位置。`Entry.reading_mode` 区分原文、译文、双语，`web_content` 继续区分 RSS / 网页来源。双语由段落缓存拼装，生成后重新派生纯文本，供两种排版复用。
 
-`src/qwen.*` 读取数据库同目录下的 `translation.conf`，支持 `RSS_QWEN_API_KEY` 和 `RSS_QWEN_ENDPOINT`，同名环境变量优先；模型固定为 `qwen-mt-flash`。配置最多 16 KiB，使用简单键值格式，不执行 shell。每次任务重新读取，密钥不进入 SQLite、OPML、安装包或源码包。外部地址只接受 HTTPS，HTTP 仅允许字面回环地址供本机测试；带鉴权的请求不跟随重定向、不继承代理，不回显服务端错误正文。
+`src/qwen.*` 保留现有翻译服务实现入口，并读取数据库同目录下的 `translation.conf`：`RSS_TRANSLATION_PROVIDER`（默认 `qwen`）、`RSS_TRANSLATION_API_KEY`、`RSS_TRANSLATION_MODEL`、`RSS_TRANSLATION_ENDPOINT`。内置 provider 为 `qwen`、`siliconflow`、`zhipu`，各自默认模型和完整 endpoint 见[使用指南](USAGE.md#配置翻译服务)；`openai-compatible` 要求显式指定 model 和 endpoint。Qwen provider 仅支持 `qwen-mt-` 系列模型。配置最多 16 KiB，使用简单键值格式，不执行 shell；每次任务重读全部配置。所有服务商共用这四个配置项，不读取服务商专用变量；同名环境变量优先于文件，空值也视为已设置。密钥不进入 SQLite、OPML、安装包或源码包。外部地址只接受 HTTPS，HTTP 仅允许字面回环地址供本机测试；带鉴权的请求不跟随重定向、不继承代理，不回显服务端错误正文。
 
-`net.cpp` 复用 UI 的单后台任务与取消信号，翻译不在绘制或数据库事务内联网。单请求超时 45 秒、响应最多 256 KiB，逐次请求间隔至少 1.1 秒，一轮预算约五分钟；未完成时暂停，只有用户重试才继续，不自动重试可能已计费的请求。所有请求使用单条 user 消息和 `translation_options` 指定 English → Chinese，普通段落整段只请求一次；含受保护内容时将标记同时加入 `terms`，source/target 都是标记本身。检查 `finish_reason`，截断结果不缓存。JSON 解码复用 SQLite 3.38+ 内置 JSON 函数，不新增 SDK 或第三方解析器。
+统一网络入口复用 `net.cpp`、UI 的单后台任务与取消信号，翻译不在绘制或数据库事务内联网。单请求超时 45 秒、响应最多 256 KiB，逐次请求间隔至少 1.1 秒，一轮预算约五分钟；未完成时暂停，只有用户重试才继续，不自动重试可能已计费的请求。Qwen 请求使用单条 user 消息、`translation_options` 指定 English → Chinese，并以 `terms` 保护受控标记；其他兼容服务使用包含翻译要求的单条 user 消息，标记仍受保护。要求模型输出中文纯文本；检查 `finish_reason`，截断结果不缓存，并执行相同的响应与占位符校验。JSON 解码复用 SQLite 3.38+ 内置 JSON 函数，不新增 SDK 或第三方解析器。
 
-`article_translations` 与 `article_translation_blocks` 附表以文章、来源及源内容指纹区分缓存。每段单独事务提交；失败或取消保留成功段落，新版本完成前保留旧版本缓存，完整保存新版本后再清理旧版本。整段纯文本缓存使用 `rss-translation-v3` 指纹前缀，旧 v2 碎片缓存不会继续用于显示，需手动重新翻译。文章删除时级联清理，收藏随原文保留。翻译模式的阅读偏好与书签使用独立设置键；原来的 RSS / 网页原文位置不被译文覆盖。跨模式用正文 Unicode 字符位置和段落映射定位，不沿用不同文档的页码。额外保存当前文档对应的源指纹、已缓存段落数及原文段落位置；后台补全译文后据此恢复，缓存未变时仍使用精确书签。只读预览不写入恢复位置，原文更新后不套用旧段落位置。双语模式的嵌套图片只保留在原文一侧，译文模式继续保留图片。新版排版将原文缩小并降低视觉权重，中文使用正常字重和完整宽度，取消译文侧竖线、缩进和密集链接下划线；行距继续跟随用户设置，原文模式样式不变。
+`article_translations` 与 `article_translation_blocks` 附表以文章、来源及源内容指纹区分缓存，不按服务商分桶。切换 provider 不自动重译或清缓存；继续未完成文章时可能复用先前服务商生成的段落。每段单独事务提交；失败或取消保留成功段落，新版本完成前保留旧版本缓存，完整保存新版本后再清理旧版本。整段纯文本缓存使用 `rss-translation-v3` 指纹前缀，旧 v2 碎片缓存不会继续用于显示，需手动重新翻译。文章删除时级联清理，收藏随原文保留。翻译模式的阅读偏好与书签使用独立设置键；原来的 RSS / 网页原文位置不被译文覆盖。跨模式用正文 Unicode 字符位置和段落映射定位，不沿用不同文档的页码。额外保存当前文档对应的源指纹、已缓存段落数及原文段落位置；后台补全译文后据此恢复，缓存未变时仍使用精确书签。只读预览不写入恢复位置，原文更新后不套用旧段落位置。双语模式的嵌套图片只保留在原文一侧，译文模式继续保留图片。新版排版将原文缩小并降低视觉权重，中文使用正常字重和完整宽度，取消译文侧竖线、缩进和密集链接下划线；行距继续跟随用户设置，原文模式样式不变。
 
 CLI 可在临时数据库执行 `translate ID` 或 `translate-web ID`。`translation`、`qwen`、`translation_app` 和本机模拟服务 `translation_network` 覆盖段落、配置、缓存、取消、失败、缓存复用、模式切换及旧数据保护；不消耗真实翻译额度。1072×1448 模拟截图通过 `RSS_TEST_SNAPSHOTS` 输出。外部 API 的真实译文质量、KPW3 内存、触摸和耗电仍需另行验证。
 
@@ -197,6 +197,8 @@ rtk proxy native-rss/build/rss-performance native-rss/vendor/runtime/reader.ttf 
 拼音词库来自 [Rime pinyin-simp](https://github.com/rime/rime-pinyin-simp)，采用 Apache 2.0 许可；固定提交、原始文件、许可和校验值位于 `third_party/pinyin/`。`python3 tools/generate_pinyin.py` 校验源文件后生成按拼音和词频排序的只读表，候选数量以生成脚本输出为准。程序使用二分查找，不在输入时加载或扫描完整词库；词库随原生二进制离线提供。
 
 ## 维护设备启动环境
+
+通过 Wi-Fi SSH 调试时，USBNetwork 应配置 `USE_WIFI="true"`、`USE_WIFI_SSHD_ONLY="true"`，避免启用 SSH 时把 USB 切为网卡模式。退出阅读器后若只能充电，先核对会话日志、`volumd` 进程状态与 `useUsbForNetwork`；`useUsbForNetwork=1` 且加载 `g_ether` 表示 USBNetwork 模式，不能据此断言阅读器未恢复服务。切回 USBMS 后应为 `useUsbForNetwork=0`、加载 `g_file_storage`，再通过实际拔插和主机磁盘挂载确认。不要让阅读器启动器强制覆盖用户的 USBNetwork 模式。
 
 这一节供定位启动失败时核对，不需要让安装用户逐项执行或记住命令。先按真实调用链区分入口问题与运行环境问题：KUAL 菜单和 `reader-scriptlet.sh` 最终都调用 `launch.sh`，后者只在选择书库入口时需要 SH_Integration。`launch.sh` 不调用或检查 Hotfix、Scriptlets、微信读书或商店；它单独检查并调用 FBInk。Universal Hotfix 可以提供 Scriptlets 和 FBInk，但不是唯一来源，不应无条件要求安装或重装。用户侧按[安装教程](INSTALL.md)复制并打开应用，只有入口缺失或启动失败时才进入[启动问题排查](TROUBLESHOOTING.md)，按对应现象检查环境或导出检查文件。
 

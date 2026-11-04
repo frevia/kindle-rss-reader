@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise selection Qwen requests against a local fake provider only."""
+"""Exercise selection translation requests against a local fake provider only."""
 import http.server
 import json
 import pathlib
@@ -58,8 +58,8 @@ class SelectionNetworkTests(unittest.TestCase):
         cls.server.server_close()
         cls.thread.join(timeout=2)
 
-    def run_case(self, path, scenario):
-        return subprocess.run([self.binary, self.base + path, scenario], text=True,
+    def run_case(self, path, scenario, provider=None):
+        return subprocess.run([self.binary, self.base + path, scenario] + ([provider] if provider else []), text=True,
                               capture_output=True, timeout=15)
 
     def requests(self):
@@ -97,6 +97,25 @@ class SelectionNetworkTests(unittest.TestCase):
                 seen = self.requests()
                 self.assertEqual(len(seen), 1)
                 self.assert_request(seen[0])
+
+    def test_chat_provider_selection_is_manual_single_request_and_cached(self):
+        for provider in ("siliconflow", "zhipu", "openai-compatible"):
+            with self.subTest(provider=provider):
+                with Provider.lock:
+                    Provider.seen = []
+                result = self.run_case("/ok", "success-cache", provider)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                seen = self.requests()
+                self.assertEqual(len(seen), 1)
+                _, headers, request = seen[0]
+                self.assertEqual(headers["Authorization"], "Bearer fake-selection-key")
+                self.assertEqual(request["model"], "custom-chat")
+                self.assertNotIn("translation_options", request)
+                self.assertEqual(len(request["messages"]), 1)
+                content = request["messages"][0]["content"]
+                self.assertIn("Simplified Chinese", content)
+                self.assertTrue(content.endswith("\n\nSelected phrase."))
+                self.assertNotIn("Full article body", content)
 
     def test_cancel_before_send_and_during_request(self):
         result = self.run_case("/ok", "cancel-before")

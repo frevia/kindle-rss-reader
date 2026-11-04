@@ -268,7 +268,7 @@ std::string post_qwen(const QwenConfig& config,const std::string& input,const st
     if(initialized!=CURLE_OK)throw std::runtime_error("翻译网络初始化失败");
     std::unique_ptr<CURL,decltype(&curl_easy_cleanup)> curl(curl_easy_init(),curl_easy_cleanup);
     if(!curl)throw std::runtime_error("无法创建翻译连接");
-    const auto body=qwen_request(input,protected_tokens);
+    const auto body=qwen_request(input,protected_tokens,config);
     curl_slist* raw=nullptr;
     for(const auto& header:{std::string("Content-Type: application/json"),"Authorization: Bearer "+config.api_key,std::string("Expect:")}) {
         auto next=curl_slist_append(raw,header.c_str());

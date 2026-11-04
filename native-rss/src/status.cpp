@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <ctime>
 #include <cstdint>
+#include <limits>
 #include <optional>
 
 namespace rss {
@@ -76,6 +77,16 @@ bool ReaderStatus::operator==(const ReaderStatus& other) const{
 }
 bool ReaderStatus::operator!=(const ReaderStatus& other) const{return !(*this==other);}
 
+bool reader_local_time(std::time_t now,std::tm& local,const std::string& root){
+    if(const auto offset=kindle_offset(read_small(path(root,"var/local/system/tz"),4096),now)){
+        if((*offset>0&&now>std::numeric_limits<std::time_t>::max()-*offset)||
+           (*offset<0&&now<std::numeric_limits<std::time_t>::min()-*offset))return false;
+        const auto shifted=now+*offset;
+        return gmtime_r(&shifted,&local)!=nullptr;
+    }
+    return localtime_r(&now,&local)!=nullptr;
+}
+
 ReaderStatus read_reader_status(std::time_t now,const std::string& root){
     ReaderStatus status;
     status.battery=capacity(read_small(path(root,"sys/class/power_supply/max77696-battery/capacity")));
@@ -85,12 +96,7 @@ ReaderStatus read_reader_status(std::time_t now,const std::string& root){
     status.wifi=network=="up\n"||network=="up";
     std::tm local{};
     char clock[6]="--:--";
-    if(localtime_r(&now,&local))std::strftime(clock,sizeof(clock),"%H:%M",&local);
-    if(const auto offset=kindle_offset(read_small(path(root,"var/local/system/tz"),4096),now)){
-        auto seconds=(static_cast<std::int64_t>(now)%86400+*offset)%86400;
-        if(seconds<0)seconds+=86400;
-        std::snprintf(clock,sizeof(clock),"%02d:%02d",static_cast<int>(seconds/3600),static_cast<int>(seconds/60%60));
-    }
+    if(reader_local_time(now,local,root))std::strftime(clock,sizeof(clock),"%H:%M",&local);
     status.clock=clock;
     return status;
 }

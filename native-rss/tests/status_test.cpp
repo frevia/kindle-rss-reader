@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <string>
 #include <unistd.h>
 
@@ -51,15 +52,34 @@ int main(){
         return out+"\n\n";
     };
     const auto tz=root/"var/local/system/tz";
+    auto local_date=[&](std::time_t time){
+        std::tm local{};assert(rss::reader_local_time(time,local,root.string()));
+        char out[40]{};std::strftime(out,sizeof(out),"%Y-%m-%d %H:%M",&local);return std::string(out);
+    };
     write(tz,zone(28800));assert(rss::read_reader_status(7200,root.string()).clock=="10:00");
+    assert(local_date(57599)=="1970-01-01 23:59");
+    assert(local_date(57600)=="1970-01-02 00:00");
+    assert(local_date(1735660800)=="2025-01-01 00:00");
+    assert(local_date(0)=="1969-12-31 19:00");
+    assert(local_date(3600)=="1970-01-01 09:00");
+    std::tm overflow{};
+    assert(!rss::reader_local_time(std::numeric_limits<std::time_t>::max(),overflow,root.string()));
+    assert(!rss::reader_local_time(std::numeric_limits<std::time_t>::min(),overflow,root.string()));
     assert(rss::read_reader_status(0,root.string()).clock=="19:00");
     assert(rss::read_reader_status(-7200,root.string()).clock=="17:00");
     write(tz,zone(-12600));assert(rss::read_reader_status(7200,root.string()).clock=="22:30");
+    assert(local_date(7200)=="1969-12-31 22:30");
+    assert(local_date(12600)=="1970-01-01 00:00");
     write(tz,zone(90000));assert(rss::read_reader_status(7200,root.string()).clock=="02:00");
     const auto valid=zone(28800);
     for(std::size_t i=0;i<valid.size();++i){write(tz,valid.substr(0,i));assert(rss::read_reader_status(7200,root.string()).clock=="02:00");}
     write(tz,std::string(4096,'x'));assert(rss::read_reader_status(7200,root.string()).clock=="02:00");
     std::filesystem::remove(tz);
+    assert(local_date(57600)=="1970-01-01 16:00");
+    setenv("TZ","EST5EDT,M3.2.0/2,M11.1.0/2",1);tzset();
+    assert(local_date(1741503599)=="2025-03-09 01:59");
+    assert(local_date(1741503600)=="2025-03-09 03:00");
+    setenv("TZ","UTC0",1);tzset();
     auto same=status;assert(status==same);same.clock="--:--";assert(status!=same);
     std::filesystem::remove_all(battery);std::filesystem::remove(wifi);
     status=rss::read_reader_status(0,root.string());

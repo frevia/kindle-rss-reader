@@ -11,7 +11,7 @@
 using namespace rss;
 
 int main(int argc,char** argv) {
-    assert(argc==3);const std::string endpoint=argv[1],scenario=argv[2];
+    assert(argc==3||argc==4);const std::string endpoint=argv[1],scenario=argv[2];
     const auto path="/tmp/kindle-rss-selection-net-"+std::to_string(getpid())+".sqlite";std::remove(path.c_str());
     Store store(path);Feed feed;feed.url="https://selection.test/feed";const auto feed_id=store.add_feed(feed);
     Entry article;article.guid="selected";article.title="Article title";article.url="https://selection.test/article";
@@ -21,6 +21,7 @@ int main(int argc,char** argv) {
     SelectionJob job;job.entry_id=id;job.mode=ReadingMode::Original;job.revision=translation_revision(*source);
     job.range={"byte:0","byte:14","Selected phrase."};
     QwenConfig config;config.api_key="fake-selection-key";config.endpoint=endpoint;
+    if(argc==4){config.provider=argv[3];config.model="custom-chat";}
     std::atomic<bool> cancel{false};
     if(scenario=="stale") {
         article.text="Changed article body";article.html="<p>Changed article body</p>";ParsedFeed changed;changed.entries={article};store.save_entries(feed_id,changed);

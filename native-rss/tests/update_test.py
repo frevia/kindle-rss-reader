@@ -148,6 +148,73 @@ class UpdateTests(unittest.TestCase):
             self.assertEqual(db.execute("SELECT value FROM saved").fetchone()[0], "before update")
         self.assertEqual(self.run_driver("recover", self.root).stdout.strip(), "0")
 
+    def test_recover_removes_partial_new_file_when_original_was_absent(self):
+        self.stage()
+        self.run_driver("backup", self.root)
+        self.run_driver("apply", self.root)
+        target = self.root / "native-rss/fonts/reader.ttf"
+        temporary = target.with_name(target.name + ".rss-update-new")
+        target.unlink()
+        temporary.write_bytes(b"partial update")
+
+        self.assertEqual(self.run_driver("recover", self.root).stdout.strip(), "1")
+        self.assertFalse(target.exists())
+        self.assertFalse(temporary.exists())
+        self.assertEqual(self.run_driver("recover", self.root).stdout.strip(), "0")
+
+    def test_recover_discards_hot_sqlite_journal_before_restoring_database(self):
+        database = self.root / "native-rss/data/rss.sqlite"
+        with sqlite3.connect(database) as db:
+            db.execute("CREATE TABLE padding (id INTEGER PRIMARY KEY, value BLOB)")
+            db.executemany("INSERT INTO padding(value) VALUES (?)", [(b"a" * 3500,)] * 200)
+        self.stage()
+        self.run_driver("backup", self.root)
+        self.run_driver("apply", self.root)
+
+        script = """\
+import os
+import sqlite3
+import sys
+
+db = sqlite3.connect(sys.argv[1])
+db.execute("PRAGMA journal_mode=DELETE")
+db.execute("PRAGMA synchronous=FULL")
+db.execute("UPDATE saved SET value='new-version-migration'")
+db.commit()
+db.execute("PRAGMA cache_size=1")
+db.execute("PRAGMA cache_spill=1")
+db.execute("BEGIN IMMEDIATE")
+db.execute("UPDATE saved SET value='uncommitted'")
+db.execute("UPDATE padding SET value=randomblob(3500)")
+os._exit(0)
+"""
+        subprocess.run([sys.executable, "-c", script, str(database)], check=True)
+        journal = database.with_name(database.name + "-journal")
+        self.assertEqual(journal.read_bytes()[:8], bytes.fromhex("d9d505f920a163d7"))
+
+        self.assertEqual(self.run_driver("recover", self.root).stdout.strip(), "1")
+        self.assertFalse(journal.exists())
+        with sqlite3.connect(database) as db:
+            self.assertEqual(db.execute("SELECT value FROM saved").fetchone()[0], "before update")
+            self.assertEqual(db.execute("PRAGMA integrity_check").fetchone()[0], "ok")
+
+    def test_recover_rejects_symlinked_temporary_file_and_database_journal(self):
+        self.stage()
+        self.run_driver("backup", self.root)
+        self.run_driver("apply", self.root)
+        outside = self.base / "outside"
+        outside.write_bytes(b"outside data")
+        for relative in ("native-rss/fonts/reader.ttf.rss-update-new",
+                         "native-rss/data/rss.sqlite-journal"):
+            with self.subTest(path=relative):
+                link = self.root / relative
+                link.symlink_to(outside)
+                self.run_driver("recover", self.root, ok=False)
+                self.assertEqual(outside.read_bytes(), b"outside data")
+                self.assertTrue((self.ready_dir() / "journal").exists())
+                link.unlink()
+        self.assertEqual(self.run_driver("recover", self.root).stdout.strip(), "1")
+
     def test_commit_keeps_new_program_and_disables_rollback(self):
         self.stage()
         self.run_driver("apply", self.root)

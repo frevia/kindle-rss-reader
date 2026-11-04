@@ -17,15 +17,15 @@ int main(int argc,char** argv) {
     const auto folder=std::filesystem::temp_directory_path()/("rss-qwen-test-"+std::to_string(getpid()));
     std::filesystem::create_directories(folder);
     const auto path=(folder/"rss.sqlite").string();
-    unsetenv("RSS_QWEN_API_KEY");unsetenv("RSS_QWEN_ENDPOINT");
+    for(const auto* key:{"RSS_QWEN_API_KEY","RSS_QWEN_ENDPOINT","RSS_TRANSLATION_PROVIDER","RSS_TRANSLATION_API_KEY","RSS_TRANSLATION_MODEL","RSS_TRANSLATION_ENDPOINT"})unsetenv(key);
     rejects([&]{qwen_config(path);});
-    {std::ofstream out(folder/"translation.conf");out<<"\xef\xbb\xbf# local configuration\nRSS_QWEN_API_KEY=local-test-key\nRSS_QWEN_ENDPOINT=http://127.0.0.1:1234/translate\n";}
+    {std::ofstream out(folder/"translation.conf");out<<"\xef\xbb\xbf# local configuration\nRSS_TRANSLATION_API_KEY=local-test-key\nRSS_TRANSLATION_ENDPOINT=http://127.0.0.1:1234/translate\n";}
     auto config=qwen_config(path);assert(config.api_key=="local-test-key");
     assert(config.endpoint=="http://127.0.0.1:1234/translate");
-    setenv("RSS_QWEN_API_KEY","environment-test-key",1);
+    setenv("RSS_TRANSLATION_API_KEY","environment-test-key",1);
     assert(qwen_config(path).api_key=="environment-test-key");
-    {std::ofstream out(folder/"translation.conf");out<<"RSS_QWEN_API_KEY=changed-test-key\n";}
-    unsetenv("RSS_QWEN_API_KEY");assert(qwen_config(path).api_key=="changed-test-key");
+    {std::ofstream out(folder/"translation.conf");out<<"RSS_TRANSLATION_API_KEY=changed-test-key\n";}
+    unsetenv("RSS_TRANSLATION_API_KEY");assert(qwen_config(path).api_key=="changed-test-key");
     const auto valid=config;
     for(const auto* endpoint:{"http://example.com/api","file:///etc/passwd","https://name:secret@example.com/api","https://example.com/api?key=secret","https://example.com/api#fragment","https://example.com/\r\n"}) {
         config=valid;config.endpoint=endpoint;rejects([&]{validate_qwen_config(config);});
@@ -60,6 +60,49 @@ int main(int argc,char** argv) {
         rejects([&]{qwen_translation(response);});
     rejects([&]{qwen_translation(std::string(256*1024+1,'x'));});
     rejects([&]{qwen_request(std::string(6001,'x'));});
+
+    for(const auto* provider:{"siliconflow","zhipu","openai-compatible"}) {
+        {std::ofstream out(folder/"translation.conf");out<<"RSS_TRANSLATION_PROVIDER="<<provider<<"\n";}
+        setenv("RSS_QWEN_API_KEY","old-qwen-env-key",1);
+        rejects([&]{qwen_config(path);}); // Provider-specific environment variables are not credentials.
+        {std::ofstream out(folder/"translation.conf",std::ios::app);out<<"RSS_TRANSLATION_API_KEY=new-provider-key\n";}
+        if(std::string(provider)=="openai-compatible") {
+            rejects([&]{qwen_config(path);});
+            {std::ofstream out(folder/"translation.conf",std::ios::app);out<<"RSS_TRANSLATION_MODEL=custom-chat\n";}
+            rejects([&]{qwen_config(path);});
+            {std::ofstream out(folder/"translation.conf",std::ios::app);out<<"RSS_TRANSLATION_ENDPOINT=https://custom.invalid/v1/chat/completions\n";}
+        }
+        const auto multi=qwen_config(path);
+        assert(multi.api_key=="new-provider-key"&&multi.provider==provider);
+        if(multi.provider=="siliconflow")assert(multi.model=="tencent/Hunyuan-MT-7B"&&multi.endpoint=="https://api.siliconflow.cn/v1/chat/completions");
+        if(multi.provider=="zhipu")assert(multi.model=="glm-4-flash-250414"&&multi.endpoint=="https://open.bigmodel.cn/api/paas/v4/chat/completions");
+        const auto body=qwen_request("Keep "+protected_token,{protected_token},multi);
+        assert(body.find("\"model\":\""+multi.model+"\"")!=std::string::npos);
+        assert(body.find("translation_options")==std::string::npos&&body.find("Simplified Chinese")!=std::string::npos);
+        assert(body.find("Keep "+protected_token)!=std::string::npos&&body.find("exactly unchanged")!=std::string::npos);
+        assert(body.find("new-provider-key")==std::string::npos);
+        rejects([&]{qwen_request("Missing placeholder",{protected_token},multi);});
+        setenv("RSS_TRANSLATION_API_KEY","environment-provider-key",1);
+        setenv("RSS_TRANSLATION_MODEL","environment-model",1);
+        setenv("RSS_TRANSLATION_ENDPOINT","https://override.invalid/v1/chat/completions",1);
+        const auto overridden=qwen_config(path);
+        assert(overridden.api_key=="environment-provider-key"&&overridden.model=="environment-model"&&overridden.endpoint=="https://override.invalid/v1/chat/completions");
+        setenv("RSS_TRANSLATION_API_KEY","",1);rejects([&]{qwen_config(path);});
+        for(const auto* key:{"RSS_TRANSLATION_API_KEY","RSS_TRANSLATION_MODEL","RSS_TRANSLATION_ENDPOINT"})unsetenv(key);
+    }
+    {std::ofstream out(folder/"translation.conf");out<<"RSS_TRANSLATION_API_KEY=generic-file-key\nRSS_TRANSLATION_MODEL=qwen-mt-plus\n";}
+    assert(qwen_config(path).api_key=="generic-file-key");
+    assert(qwen_request("Hello",{},qwen_config(path)).find("qwen-mt-plus")!=std::string::npos);
+    setenv("RSS_TRANSLATION_PROVIDER","siliconflow",1);
+    assert(qwen_config(path).provider=="siliconflow");
+    setenv("RSS_TRANSLATION_PROVIDER","",1);rejects([&]{qwen_config(path);});
+    unsetenv("RSS_TRANSLATION_PROVIDER");unsetenv("RSS_QWEN_API_KEY");
+    for(const auto* provider:{"unknown","","Qwen"}) {auto invalid=valid;invalid.provider=provider;rejects([&]{validate_qwen_config(invalid);});}
+    for(const auto* model:{"","bad\nmodel","bad model","qwen-plus"}) {auto invalid=valid;invalid.model=model;rejects([&]{validate_qwen_config(invalid);});}
+    {std::ofstream out(folder/"translation.conf");out<<"RSS_TRANSLATION_API_KEY=\n";}
+    rejects([&]{qwen_config(path);});
+    {std::ofstream out(folder/"translation.conf");out<<"RSS_QWEN_API_KEY=old-key\n";}
+    rejects([&]{qwen_config(path);});
 
     Store store(path);Feed feed;feed.url="https://example.invalid/feed";const auto fid=store.add_feed(feed);
     Entry source;source.guid="one";source.title="English title";source.html="<p>A quiet reader.</p><p>Offline reading.</p>";source.text=html_to_text(source.html);

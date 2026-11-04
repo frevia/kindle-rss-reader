@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise Qwen HTTP contracts against a local fake provider, with no real key."""
+"""Exercise translation HTTP contracts against a local fake provider, with no real key."""
 import http.server
 import json
 import os
@@ -29,6 +29,8 @@ class Provider(http.server.BaseHTTPRequestHandler):
         status = 200
         request = json.loads(data)
         text = request["messages"][0]["content"]
+        if "translation_options" not in request:
+            text = text.split("\n\n", 1)[1]
         # Old HTML-fragment requests trigger the malformed-link and dropped-link failure.
         translated = "< a href=\"https://example.invalid/lost\">漏链接</a>" if re.search(r"<\s*/?\w", text) else text
         for source, target in (("English title", "英文标题"), ("A quiet reader.", "A 安静读者。"),
@@ -90,6 +92,7 @@ class TranslationNetworkTests(unittest.TestCase):
         self.folder = tempfile.TemporaryDirectory()
         self.db = pathlib.Path(self.folder.name) / "rss.sqlite"
         self.endpoint = "/ok"
+        self.provider = "qwen"
         self.cli("list")
         self.html = "<p>A <strong>quiet</strong> reader.</p><p>Offline reading matters.</p><p>Use <code>keep_inline()</code> reader.</p><pre>print('keep code')</pre>"
         with sqlite3.connect(self.db) as conn:
@@ -105,8 +108,13 @@ class TranslationNetworkTests(unittest.TestCase):
 
     def cli(self, *args, expected=0, key=True):
         env = dict(os.environ)
-        env["RSS_QWEN_API_KEY"] = "test-key" if key else ""
-        env["RSS_QWEN_ENDPOINT"] = self.base + self.endpoint
+        env = {k: v for k, v in env.items() if not k.startswith(("RSS_TRANSLATION_", "RSS_QWEN_"))}
+        env["RSS_TRANSLATION_API_KEY"] = "test-key" if key else ""
+        env["RSS_TRANSLATION_ENDPOINT"] = self.base + self.endpoint
+        if self.provider != "qwen":
+            env["RSS_TRANSLATION_PROVIDER"] = self.provider
+            if self.provider == "openai-compatible":
+                env["RSS_TRANSLATION_MODEL"] = "custom-chat"
         result = subprocess.run([self.binary, "--db", str(self.db), *args], env=env,
                                 text=True, capture_output=True, timeout=20)
         self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
@@ -186,6 +194,48 @@ class TranslationNetworkTests(unittest.TestCase):
         rendered = pathlib.Path(self.folder.name) / "complex.pgm"
         self.cli("--article", "2", "render", str(rendered))
         self.assertTrue(rendered.exists())
+
+    def test_chat_providers_preserve_placeholders_and_reuse_cache(self):
+        for provider, model in (("siliconflow", "tencent/Hunyuan-MT-7B"),
+                                ("zhipu", "glm-4-flash-250414"), ("openai-compatible", "custom-chat")):
+            with self.subTest(provider=provider):
+                self.provider = provider
+                with sqlite3.connect(self.db) as conn:
+                    conn.execute("DELETE FROM article_translation_blocks")
+                    conn.execute("DELETE FROM article_translations")
+                with Provider.lock:
+                    Provider.seen = []
+                self.cli("translate", "1")
+                first = len(Provider.seen)
+                self.assertGreaterEqual(first, 3)
+                for path, headers, request in Provider.seen:
+                    self.assertEqual(path, "/ok")
+                    self.assertEqual(headers["Authorization"], "Bearer test-key")
+                    self.assertEqual(request["model"], model)
+                    self.assertNotIn("translation_options", request)
+                    self.assertFalse(request["stream"])
+                    self.assertEqual([m["role"] for m in request["messages"]], ["user"])
+                    prompt, text = request["messages"][0]["content"].split("\n\n", 1)
+                    self.assertIn("Simplified Chinese", prompt)
+                    self.assertNotRegex(text, r"<\s*/?\w|keep_inline|print\(")
+                    for token in re.findall(r"RSSKEEP\d+X\d+Q", text):
+                        self.assertIn(token, prompt)
+                self.assertEqual(self.rows("SELECT state FROM article_translations"), [("ready",)])
+                self.assertEqual(self.rows("SELECT html FROM entries"), [(self.html,)])
+                self.assertEqual(self.rows("SELECT html FROM article_translation_blocks WHERE ordinal=0"), [("英文标题",)])
+                self.cli("translate", "1")
+                self.assertEqual(len(Provider.seen), first)
+
+    def test_chat_provider_failures_do_not_retry_or_cache(self):
+        self.provider = "siliconflow"
+        for endpoint in ("/unauthorized", "/rate", "/redirect", "/truncated", "/hostile", "/bad-json"):
+            with self.subTest(endpoint=endpoint):
+                self.endpoint = endpoint
+                before = len(Provider.seen)
+                self.cli("translate", "1", expected=2)
+                self.assertEqual(len(Provider.seen), before + 1)
+                self.assertEqual(self.rows("SELECT count(*) FROM article_translation_blocks"), [(0,)])
+        self.assertFalse(any(path == "/stolen" for path, _, _ in Provider.seen))
 
     def test_rejects_provider_failures_without_retry_or_key_leak(self):
         for endpoint in ("/unauthorized", "/rate", "/redirect", "/truncated", "/hostile", "/empty", "/bad-json", "/large"):
