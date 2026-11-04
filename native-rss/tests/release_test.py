@@ -44,7 +44,7 @@ class ReleaseTests(unittest.TestCase):
             "native-rss/bin/kindle-rss-home": elf(),
             "native-rss/COPYING": b"GPLv3 fixture",
             "extensions/native-rss/config.xml": b"<extension><information><version>0.0.3</version></information></extension>",
-            "native-rss/UPDATE.json": b'{"format":1,"model":"KPW3","version":"v0.0.3"}\n',
+            "native-rss/UPDATE.json": b'{"format":1,"model":"Kindle","version":"v0.0.3"}\n',
         }
         self.build = {"inputs": self.inputs, "reader": self.reader,
                       "binary_sha256": hashlib.sha256(elf()).hexdigest(),
@@ -58,7 +58,7 @@ class ReleaseTests(unittest.TestCase):
     def write_archives(self):
         self.files["native-rss/BUILD.json"] = json.dumps(self.build).encode()
         self.manifest["files"] = {name: hashlib.sha256(data).hexdigest() for name, data in self.files.items()}
-        with zipfile.ZipFile(self.output / "kindle-rss-kpw3-dev.zip", "w") as z:
+        with zipfile.ZipFile(self.output / "kindle-rss-kindle-dev.zip", "w") as z:
             for name, data in self.files.items(): z.writestr(name, data)
             z.writestr("native-rss/MANIFEST.json", json.dumps(self.manifest))
         with zipfile.ZipFile(self.output / "kindle-rss-source-dev.zip", "w") as z:
@@ -69,7 +69,7 @@ class ReleaseTests(unittest.TestCase):
             destination = release.stage_release(self.output, TAG)
             verify.assert_called_once_with(self.bundle)
         self.assertEqual(destination, self.output / "release-v0.0.3")
-        names = ["RSS-Reader-v0.0.3-KPW3.zip", "RSS-Reader-v0.0.3-source.zip", "RSS-Reader-v0.0.3-third-party-sources.zip"]
+        names = ["RSS-Reader-v0.0.3-Kindle.zip", "RSS-Reader-v0.0.3-source.zip", "RSS-Reader-v0.0.3-third-party-sources.zip"]
         self.assertEqual((destination / "SHA256SUMS.txt").read_text(),
                          "".join(f"{release.package.sha256(destination / name)}  {name}\n" for name in names))
 
@@ -90,10 +90,11 @@ class ReleaseTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "版本"): release.stage_release(self.output, "v0.0.4")
 
     def test_invalid_update_metadata_blocks_release(self):
-        for data in (b'{"format":1,"model":"KPW2","version":"v0.0.3"}',
-                     b'{"format":true,"model":"KPW3","version":"v0.0.3"}',
-                     b'{"format":2,"model":"KPW3","version":"v0.0.3"}',
-                     b'{"format":1,"model":"KPW3","version":"v0.0.4"}', b"{"):
+        for data in (b'{"format":1,"model":"KPW3","version":"v0.0.3"}',
+                     b'{"format":1,"model":"KPW2","version":"v0.0.3"}',
+                     b'{"format":true,"model":"Kindle","version":"v0.0.3"}',
+                     b'{"format":2,"model":"Kindle","version":"v0.0.3"}',
+                     b'{"format":1,"model":"Kindle","version":"v0.0.4"}', b"{"):
             with self.subTest(data=data):
                 self.files["native-rss/UPDATE.json"] = data
                 self.write_archives()

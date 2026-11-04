@@ -2,7 +2,7 @@
 
 这份文档用于修改代码、编译程序和排查实现问题。首次接触本项目，请先读[安装教程](INSTALL.md)和[使用指南](USAGE.md)。自行编译需要下载名称带 `-source.zip` 的源码包；下面的命令从解压后能看到 `native-rss` 的那一层运行。固定工具链版本、系统路径和技术限制供开发时核对。
 
-面向 KPW3 的独立原生 RSS 阅读器。C++17、CREngine 正文排版与 FreeType 灰度渲染、SQLite 离线存储、libxml2 订阅解析和 libcurl 联网；桌面使用 SDL 展示相同的渲染结果。不是 KOReader 插件，也不是网页套壳。
+面向 Kindle 的独立原生 RSS 阅读器，当前源码新增按设备能力检查的兼容版，范围见 [COMPATIBILITY.md](COMPATIBILITY.md)。C++17、CREngine 正文排版与 FreeType 灰度渲染、SQLite 离线存储、libxml2 订阅解析和 libcurl 联网；桌面使用 SDL 展示相同的渲染结果。不是 KOReader 插件，也不是网页套壳。
 
 **当前是开发验证版，尚不是真机验收完成的 Kindle 成品。** ARM 静态构建已安装到 KPW3；开发包提供中文字体和证书。单次启动退出、休眠、应用及启动器强杀恢复已有真机证据，拼音搜索选词经用户确认。离线连续翻页、USB 退出、OPML、阅读位置、字号与收藏已通过用户实机验证；长期使用仍待验收。完整范围见[实施计划](PLAN.md)，设备证据见 [DEVICE.md](DEVICE.md)。
 
@@ -73,7 +73,7 @@ ARM 网络访问使用开发包中的 `/mnt/us/native-rss/certs/ca-bundle.pem`�
 rtk proxy python3 native-rss/tools/package.py
 ```
 
-需要先完成 ARM 构建。工具验证源码及二进制哈希，拒绝过期产物；缺少运行资源时按 `tools/runtime-sources.json` 下载并验证。输出 `output/kindle-rss-kpw3-dev.zip` 和 `output/kindle-rss-source-dev.zip`，不自动安装。包含 Noto Sans SC（OFL 1.1）、Mozilla 根证书（MPL 2.0）、KUAL 入口、第三方许可、安装说明和逐文件 SHA-256 清单。程序使用未修改的可变字体，设置字重为 400。
+需要先完成 ARM 构建。工具验证源码及二进制哈希，拒绝过期产物；缺少运行资源时按 `tools/runtime-sources.json` 下载并验证。输出 `output/kindle-rss-kindle-dev.zip` 和 `output/kindle-rss-source-dev.zip`，不自动安装。包含 Noto Sans SC（OFL 1.1）、Mozilla 根证书（MPL 2.0）、KUAL 入口、第三方许可、安装说明和逐文件 SHA-256 清单。程序使用未修改的可变字体，设置字重为 400。
 
 组合阅读程序选择 GPLv3 分发，原始源码保留 MIT；CREngine-ng 的固定版本及上游许可声明必须与已核对的来源记录一致。`release.py` 同时验证许可、构建输入、安装文件、项目源码和第三方对应源码，任何一项缺失或不匹配都会拒绝发布。详见[许可与源码核对](RELEASE_LICENSE_AUDIT.md)。
 
@@ -83,9 +83,9 @@ rtk proxy python3 native-rss/tools/package.py
 
 ### 在线升级协议（源码开发版）
 
-`src/update.cpp` 使用已有 libcurl、SQLite JSON、OpenSSL SHA256 与 zlib，手动查询固定公开仓库的 `/releases/latest`，仅接受数值更大的 `vMAJOR.MINOR.PATCH` 正式版本。按文件名选择 KPW3 ZIP 与 `SHA256SUMS.txt`；不发送 GitHub 令牌，初始资产地址必须属于本仓库对应标签。每次跳转重新校验 HTTPS 与 GitHub 域名，禁止降级 HTTP 或跳出 GitHub 服务。API、校验文本、ZIP 分别限制为 2 MiB、64 KiB、128 MiB；解压后最多 256 MiB / 1024 文件。联网走 UI 单后台任务和取消信号，不与订阅同步或翻译并行。
+`src/update.cpp` 使用已有 libcurl、SQLite JSON、OpenSSL SHA256 与 zlib，手动查询固定公开仓库的 `/releases/latest`，仅接受数值更大的 `vMAJOR.MINOR.PATCH` 正式版本。按文件名选择 Kindle 兼容 ZIP 与 `SHA256SUMS.txt`；不发送 GitHub 令牌，初始资产地址必须属于本仓库对应标签。每次跳转重新校验 HTTPS 与 GitHub 域名，禁止降级 HTTP 或跳出 GitHub 服务。API、校验文本、ZIP 分别限制为 2 MiB、64 KiB、128 MiB；解压后最多 256 MiB / 1024 文件。联网走 UI 单后台任务和取消信号，不与订阅同步或翻译并行。
 
-`package.py` 将 `native-rss/UPDATE.json`（`format: 1`、`model: KPW3`、CMake 对应 `version: vX.Y.Z`）纳入逐文件 MANIFEST。`release.py` 校验元数据与标签一致，现有四个发布附件及工作流无需改名。升级器仅解压本打包器生成的普通 DEFLATE ZIP 条目，拒绝 ZIP64、加密、数据描述符、额外字段、重复或越界路径、个人数据路径及目标符号链接，并核对逐文件哈希与实际文件集合。未来更改归档特性或协议时需要先升级客户端，不应将不兼容的包公开为最新版。
+`package.py` 将 `native-rss/UPDATE.json`（`format: 1`、`model: Kindle`、CMake 对应 `version: vX.Y.Z`）纳入逐文件 MANIFEST。`release.py` 校验元数据与标签一致，安装附件使用 `RSS-Reader-vX.Y.Z-Kindle.zip`，历史 KPW3 专用开发版需经 USB 迁移一次，兼容版不会在线回退到旧专用包。升级器仅解压本打包器生成的普通 DEFLATE ZIP 条目，拒绝 ZIP64、加密、数据描述符、额外字段、重复或越界路径、个人数据路径及目标符号链接，并核对逐文件哈希与实际文件集合。未来更改归档特性或协议时需要先升级客户端，不应将不兼容的包公开为最新版。
 
 下载暂存于 `native-rss/.update`；安装前通过 SQLite backup API 保存一致性数据库副本。阅读器以专用退出码 42 交接到旧程序副本 `runner`：启动器等待数据库关闭，在恢复监护与暂停 volumd 的保护下执行 `update-apply`。安装先完整备份现有文件并持久化 journal，再逐文件以 rename 替换；不原地覆盖运行中的文件，不整目录替换 data/documents/extensions。新的启动器恢复系统界面后重启，程序首次成功显示设备画面才提交 journal。安装出错立即回退，安装中断或新程序启动失败则在下次启动、打开数据库之前通过旧 runner 恢复。此机制不提供数据库迁移功能，也不证明硬件掉电时文件系统仍完整；外部备份和真机验收仍必要。
 
@@ -204,7 +204,13 @@ rtk proxy native-rss/build/rss-performance native-rss/vendor/runtime/reader.ttf 
 
 启动器在 guardian fork 前创建 `/tmp/rss-cre-session.*` 私有目录并导出 `RSS_CRE_CACHE`。退出时先关闭阅读器并删除本会话缓存，再恢复服务及USB；启动器被杀时由独立监护进程执行同样的清理。原会话锁、数据库路径及系统恢复保护继续使用，不需要额外测试入口。
 
-启动器的实际条件以 `device/launch.sh` 为准：需要 `/mnt/us/libkh/bin/fbink` 可执行，以及 `timeout`、`flock`、`stat`、`pidof`、`awk`、`dd`、`mktemp`、`mkfifo` 和系统 LIPC 工具；设备密码锁开启时会拒绝启动。当前只验证过 KPW3，屏幕和触摸布局校验不应绕过。
+启动器的实际条件以 `device/launch.sh` 为准：需要 `/mnt/us/libkh/bin/fbink` 可执行，以及 `timeout`、`flock`、`stat`、`pidof`、`awk`、`dd`、`mktemp`、`mkfifo`、`head` 和系统 LIPC 工具；设备密码锁开启时会拒绝启动。真机历史证据仍只来自 KPW3；兼容版使用动态屏幕快照与 FBInk 刷新，屏幕和触摸能力检查不应绕过。
+
+存在 `/etc/upstart/statusbar.conf` 时还需要 `/sbin/initctl`：只读取任务状态和主进程 PID，将其纳入已有的进程身份、暂停和恢复保护，不执行任务 stop/start。预先停止的状态栏保持停止，身份不明或阅读期间发生替换会退出阅读。Snow 面板的选择和硬件修订回退见 [机型兼容说明](COMPATIBILITY.md)。
+
+`/etc/prettyversion.txt` 的 Kindle 5 版本决定 Pillow 恢复策略，5.6.5 前软隐藏／显示，之后硬禁用／启用；未知版本与 SysV 在接管前拒绝。机型表只提供 DPI、平台提示和明确的触摸例外，不替代硬件检查或首页固件哈希校验。电量首选有时间与长度上限的 LIPC 查询，再逐项回退 sysfs；现有 30 秒采样频率保持不变。退出时 `display_metrics` 汇总缩放、差分、复制和 FBInk 耗时，测量方法及验证边界见 [机型兼容说明](COMPATIBILITY.md)。
+
+`process.cpp` 为每个外部命令创建独立监护，负责命令组超时和阅读器消失后的清理；监护不保留其他命令的生命周期管道。会话 FIFO 随实际工具退出而关闭。`capture_bounded` 默认只捕获 stdout，刷新调用额外合并 stderr 并严格校验，不能只凭 FBInk 的成功退出码提交 `last`。`process_test` 覆盖阅读器 SIGKILL、持 FIFO 后代、超时、后台退出和标准描述符缺失；`device_test` 覆盖所有 32 个 Type B 主槽、逐槽增量坐标、多指取消，以及退出 0 的刷新等待错误。
 
 `device/diagnose.sh` 导出部分工具路径、设备参数和启动日志，但不会自动补装组件，也不会逐项覆盖启动器的全部检查。协助用户时先根据报告确认原因，再提供适合其设备的补装步骤。FBInk 的上游来源见[第三方组件说明](../../THIRD_PARTY_NOTICES.md)，程序本身不包含在当前安装包中。
 

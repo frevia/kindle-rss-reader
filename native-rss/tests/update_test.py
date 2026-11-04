@@ -24,7 +24,7 @@ REQUIRED = {
 def payload(metadata=None):
     files = dict(REQUIRED)
     files["native-rss/UPDATE.json"] = json.dumps(
-        metadata or {"format": 1, "model": "KPW3", "version": VERSION},
+        metadata or {"format": 1, "model": "Kindle", "version": VERSION},
         separators=(",", ":"),
     ).encode()
     files["native-rss/docs/release-notes.md"] = b"release notes"
@@ -228,9 +228,10 @@ os._exit(0)
 
     def test_invalid_metadata_and_manifest_are_rejected_without_install_changes(self):
         cases = [
-            (payload({"format": 1, "model": "KPW2", "version": VERSION}), "model"),
-            (payload({"format": 2, "model": "KPW3", "version": VERSION}), "format"),
-            (payload({"format": 1, "model": "KPW3", "version": "v999.0.1"}), "version"),
+            (payload({"format": 1, "model": "KPW3", "version": VERSION}), "legacy model"),
+            (payload({"format": 1, "model": "KPW2", "version": VERSION}), "other model"),
+            (payload({"format": 2, "model": "Kindle", "version": VERSION}), "format"),
+            (payload({"format": 1, "model": "Kindle", "version": "v999.0.1"}), "version"),
         ]
         for files, label in cases:
             with self.subTest(label=label):

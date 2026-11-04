@@ -101,7 +101,7 @@ jobs:
           from pathlib import Path
           tag = os.environ["RELEASE_TAG"]
           folder = Path("native-rss/output") / f"release-{tag}"
-          with zipfile.ZipFile(folder / f"RSS-Reader-{tag}-KPW3.zip") as device, zipfile.ZipFile(folder / f"RSS-Reader-{tag}-source.zip") as source:
+          with zipfile.ZipFile(folder / f"RSS-Reader-{tag}-Kindle.zip") as device, zipfile.ZipFile(folder / f"RSS-Reader-{tag}-source.zip") as source:
               manifest = json.loads(device.read("native-rss/MANIFEST.json"))["files"]
               assert set(device.namelist()) == set(manifest) | {"native-rss/MANIFEST.json"}
               for name, digest in manifest.items():
@@ -137,8 +137,8 @@ jobs:
               --title "RSS Reader $RELEASE_TAG" --notes-file "$RUNNER_TEMP/release-notes.md"
           fi
           gh release upload "$RELEASE_TAG" --clobber \
-            "native-rss/output/release-$RELEASE_TAG/RSS-Reader-$RELEASE_TAG-KPW3.zip" \
+            "native-rss/output/release-$RELEASE_TAG/RSS-Reader-$RELEASE_TAG-Kindle.zip" \
             "native-rss/output/release-$RELEASE_TAG/RSS-Reader-$RELEASE_TAG-source.zip" \
             "native-rss/output/release-$RELEASE_TAG/RSS-Reader-$RELEASE_TAG-third-party-sources.zip" \
             "native-rss/output/release-$RELEASE_TAG/SHA256SUMS.txt"
-          echo 'Draft ready. Verify the downloaded installation archive on KPW3 before publishing.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Draft ready. KPW3 is the tested device; verify each newly supported Kindle model before publishing.' >> "$GITHUB_STEP_SUMMARY"

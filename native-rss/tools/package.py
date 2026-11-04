@@ -23,7 +23,7 @@ def update_metadata():
     match = re.search(r"(?m)^\s*project\(kindle_rss VERSION ([0-9]+\.[0-9]+\.[0-9]+) LANGUAGES CXX\)\s*$", cmake)
     if not match:
         raise RuntimeError("无法从 CMakeLists.txt 读取项目版本")
-    return {"format": 1, "model": "KPW3", "version": "v" + match.group(1)}
+    return {"format": 1, "model": "Kindle", "version": "v" + match.group(1)}
 
 
 def write_zip(path, files):
@@ -221,7 +221,7 @@ def main():
         "reader": reader, "distribution_license": "GPL-3.0-only", "home_adapter": {"included": bool(args.home_patch), "enabled_by_default": False}, "public_release_ready": True, "files": checksums}, indent=2).encode(), False)
     output = ROOT / "output"
     output.mkdir(exist_ok=True)
-    target = output / "kindle-rss-kpw3-dev.zip"
+    target = output / "kindle-rss-kindle-dev.zip"
     write_zip(target, files)
     sources = source_files(ROOT)
     sources.update({name: value for name, value in files.items() if name.startswith("native-rss/licenses/")})

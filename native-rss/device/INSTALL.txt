@@ -1,10 +1,12 @@
 RSS Reader 安装说明
 
-适用于已越狱的 Kindle Paperwhite 3（KPW3，2015 款），其他机型暂未验证。
+Kindle 兼容版按屏幕和触摸能力检查设备；已有真机记录为 KPW3，新增机型仍待实机验收。
+要求 ARMv7、可识别的 Kindle 5／Upstart 系统、8 位灰度竖屏和受支持的触摸输入。
+范围与诊断见 native-rss/docs/COMPATIBILITY.md。
 请先完成所用越狱教程中的后续环境设置，并在 Kindle 设置中关闭设备密码锁。
 
 安装
-1. 在电脑解压名称以 -KPW3.zip 结尾的安装包。
+1. 在电脑解压名称以 -Kindle.zip 结尾的兼容安装包。
 2. 用能传文件的 USB 数据线连接 Kindle。
 3. 把 native-rss、documents、extensions 三个文件夹合并复制到 Kindle 磁盘，
    放在打开磁盘后能直接看到 documents 的这一层，不要多套一层解压文件夹。

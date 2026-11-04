@@ -14,6 +14,10 @@ void write(const std::filesystem::path& file,const std::string& value){
     std::filesystem::create_directories(file.parent_path());
     std::ofstream out(file);out<<value;
 }
+void make_lipc(const std::filesystem::path& program,const std::filesystem::path& dir){
+    write(program,"#!/bin/sh\n[ \"$1\" = -i ] && [ \"$2\" = com.lab126.powerd ] || exit 9\ncase \"$3\" in battLevel) cat '"+ (dir/"lipc-level").string()+"';; isCharging) cat '"+(dir/"lipc-charging").string()+"';; *) exit 8;; esac\n");
+    std::filesystem::permissions(program,std::filesystem::perms::owner_exec|std::filesystem::perms::owner_read|std::filesystem::perms::owner_write);
+}
 }
 
 int main(){
@@ -84,6 +88,73 @@ int main(){
     std::filesystem::remove_all(battery);std::filesystem::remove(wifi);
     status=rss::read_reader_status(0,root.string());
     assert(status.battery==-1&&!status.charging&&!status.wifi);
+    for(const auto* name:{"max77796-battery","bd7181x_bat","bd71827_bat"}){
+        const auto alternate=root/"sys/class/power_supply"/name;
+        write(alternate/"capacity","47\n");write(alternate/"status","Discharging\n");
+        assert(rss::read_reader_status(0,root.string()).battery==47);
+        assert(!rss::read_reader_status(0,root.string()).charging);
+        write(alternate/"charging","1\n");
+        assert(rss::read_reader_status(0,root.string()).charging);
+        std::filesystem::remove(alternate/"charging");
+        if(std::string(name)=="max77796-battery"){
+            write(root/"sys/class/power_supply/max77796-charger/status","Charging\n");
+            assert(rss::read_reader_status(0,root.string()).charging);
+        }
+        write(alternate/"capacity","101\n");
+        assert(rss::read_reader_status(0,root.string()).battery==-1);
+        std::filesystem::remove_all(alternate);
+        std::filesystem::remove_all(root/"sys/class/power_supply/max77796-charger");
+    }
+    write(battery/"capacity","20\n");write(battery/"status","Discharging\n");
+    write(root/"sys/class/power_supply/bd71827_bat/capacity","90\n");
+    assert(rss::read_reader_status(0,root.string()).battery==20);
+    make_lipc(root/"lipc-get-prop",root);
+    write(root/"lipc-level","0\n");write(root/"lipc-charging","1\n");
+    status=rss::read_reader_status(0,root.string(),(root/"lipc-get-prop").string());
+    assert(status.battery==0&&status.charging);
+    write(root/"lipc-level","100 \t\n");write(root/"lipc-charging","0\n");
+    status=rss::read_reader_status(0,root.string(),(root/"lipc-get-prop").string());
+    assert(status.battery==100&&!status.charging);
+    for(const auto* invalid:{"","+1"," 1","101","1\n0", "999999999999999999999999999999999999999999"}){
+        write(root/"lipc-level",invalid);write(root/"lipc-charging","1\n");
+        status=rss::read_reader_status(0,root.string(),(root/"lipc-get-prop").string());
+        assert(status.battery==20&&status.charging);
+    }
+    write(root/"lipc-level","50\n");write(root/"lipc-charging","2\n");
+    status=rss::read_reader_status(0,root.string(),(root/"lipc-get-prop").string());
+    assert(status.battery==50&&!status.charging);
+    write(root/"lipc-level","60\n");write(root/"lipc-charging","1\n0");
+    status=rss::read_reader_status(0,root.string(),(root/"lipc-get-prop").string());
+    assert(status.battery==60&&!status.charging);
+    write(root/"lipc-level",std::string(40,'9'));write(root/"lipc-charging","0\n");
+    status=rss::read_reader_status(0,root.string(),(root/"lipc-get-prop").string());
+    assert(status.battery==20&&!status.charging);
+    for(const auto& invalid:{std::string("50\0\n",4),std::string("50\n\n"),std::string("50x"),std::string(33,'0')}){
+        write(root/"lipc-level",invalid);
+        assert(rss::read_reader_status(0,root.string(),(root/"lipc-get-prop").string()).battery==20);
+    }
+    write(root/"lipc-level",std::string(30,'0')+"50");write(root/"lipc-charging","0\n");
+    assert(rss::read_reader_status(0,root.string(),(root/"lipc-get-prop").string()).battery==50);
+    write(battery/"status","Charging\n");write(root/"lipc-charging","invalid\n");
+    status=rss::read_reader_status(0,root.string(),(root/"lipc-get-prop").string());
+    assert(status.battery==50&&status.charging);
+    write(battery/"status","Discharging\n");
+    std::filesystem::remove_all(root/"sys/class/power_supply/bd71827_bat");
+    write(battery/"capacity","invalid\n");write(battery/"status","Charging\n");
+    write(root/"lipc-level","42\n");write(root/"lipc-charging","invalid\n");
+    status=rss::read_reader_status(0,root.string(),(root/"lipc-get-prop").string());
+    assert(status.battery==42&&status.charging);
+    write(root/"lipc-level","invalid\n");write(root/"lipc-charging","0\n");
+    status=rss::read_reader_status(0,root.string(),(root/"lipc-get-prop").string());
+    assert(status.battery==-1&&!status.charging);
+    write(battery/"capacity","20\n");write(battery/"status","Discharging\n");
+    write(root/"lipc-get-prop","#!/bin/sh\nsleep 1\n");
+    std::filesystem::permissions(root/"lipc-get-prop",std::filesystem::perms::owner_exec|std::filesystem::perms::owner_read|std::filesystem::perms::owner_write);
+    const auto began=std::chrono::steady_clock::now();
+    status=rss::read_reader_status(0,root.string(),(root/"lipc-get-prop").string());
+    assert(status.battery==20&&!status.charging&&std::chrono::steady_clock::now()-began<std::chrono::seconds(2));
+    status=rss::read_reader_status(0,root.string(),"/no/such/lipc-get-prop");
+    assert(status.battery==20&&!status.charging);
     std::filesystem::remove_all(root);
     if(had_tz)setenv("TZ",saved_tz.c_str(),1);else unsetenv("TZ");
     tzset();

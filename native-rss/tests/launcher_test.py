@@ -52,17 +52,39 @@ elif name=="timeout":
     try:sys.exit(subprocess.run(args[1:],timeout=float(args[0])).returncode)
     except subprocess.TimeoutExpired:sys.exit(124)
 elif name=="pidof":
+    if (mode in ("no-statusbar","statusbar-without-juno") and args[0]=="JunoStatusBarDriver") or (mode=="no-volumd" and args[0]=="volumd"):sys.exit(1)
     if args[0]=="kindle-rss-home":
         if not mode.startswith("home-") and mode!="launcher-killed-home":sys.exit(1)
         print("900004 900005" if mode=="home-ambiguous" else "900004")
     else:print({"awesome":900001,"JunoStatusBarDriver":900002,"volumd":900003}[args[0]])
+elif name=="initctl":
+    assert args==["status","statusbar"],args
+    counter=root/"statusbar-queries"
+    count=int(counter.read_text())+1 if counter.exists() else 1;counter.write_text(str(count))
+    if mode=="statusbar-query-error":sys.exit(1)
+    if mode=="statusbar-query-timeout":time.sleep(20)
+    if mode=="statusbar-invalid-pid":print("statusbar start/running, process 900006;exit 0")
+    elif mode=="statusbar-starting":print("statusbar start/starting, process 900006")
+    elif mode=="statusbar-stopped" or (mode=="statusbar-start-during-reader" and not (root/"started").exists()):print("statusbar stop/waiting")
+    elif mode=="statusbar-alias":print("statusbar start/running, process 900002")
+    elif (mode=="statusbar-replaced-before-stop" and count>=2) or (mode in ("statusbar-restart-during-reader","statusbar-start-during-reader") and (root/"started").exists()):print("statusbar start/running, process 900007")
+    else:print("statusbar start/running, process 900006")
 elif name=="get":
     if mode=="power-error" and (root/"started").exists():sys.exit(1)
     print("screenSaver" if mode=="sleep" and (root/"started").exists() else "active")
 elif name=="set":
     log("set "+" ".join(args))
     if mode=="pillow-error" and args[-1]=="disable":sys.exit(1)
-elif name=="refresh":log("refresh")
+    if mode=="soft-pillow-error" and "hideMe" in args[-1]:sys.exit(1)
+    if mode=="soft-restore-error" and "showMe" in args[-1]:sys.exit(1)
+elif name=="refresh":
+    if "-e" in args:
+        if mode=="fbink-error":sys.exit(1)
+        width,height,stride={"small-screen":(600,800,608),"large-screen":(1860,2480,1872)}.get(mode,(1072,1448,1088))
+        print(f"deviceId={0 if mode=='fbink-unknown' else 201};isSunxi={int(mode=='fbink-sunxi')};"
+              f"invertedGrayscale={int(mode=='fbink-inverted')};BPP=8;screenWidth={width};screenHeight={height};"
+              f"lineLength={1 if mode=='fbink-mismatch' else stride};")
+    else:log("refresh")
 elif name=="runner":
     assert os.environ["RSS_UPDATE_GUARD"]=="1"
     with (root/"state/session.lock").open("a") as lock:
@@ -86,13 +108,23 @@ elif name=="kill":
         if mode=="home-stop-error" and sig=="-STOP" and pid==900004:sys.exit(1)
         if mode=="launcher-killed-early" and sig=="-STOP" and pid==900001:
             os.kill(os.getppid(),signal.SIGKILL)
-        if mode=="stop-error" and sig=="-STOP" and pid==900002:sys.exit(1)
+        if mode in ("stop-error","soft-stop-error") and sig=="-STOP" and pid==900002:sys.exit(1)
+        if mode=="statusbar-signal-error" and sig=="-STOP" and pid==900006:sys.exit(1)
     else:
         try:os.kill(pid,0 if sig=="-0" else getattr(signal,"SIG"+sig[1:]))
         except ProcessLookupError:sys.exit(1)
 elif name=="app":
     if args==["probe"]:
-        print("width=1072\nheight=1448\nstride=1088\nbpp=8\nxoffset=0\nyoffset=0\nrotation=3\ndriver=mxc_epdc_fb\nlayout=accepted")
+        width,height,stride,xoffset,yoffset={"small-screen":(600,800,608,0,0),
+            "large-screen":(1860,2480,1872,4,1)}.get(mode,(1072,1448,1088,0,0))
+        print(f"width={width}\nheight={height}\nstride={stride}\nbpp=8\nxoffset={xoffset}\nyoffset={yoffset}")
+        print("rotation="+ ("0" if mode=="layout-changed" and (root/"started").exists() else "3"))
+        print(f"driver=mxc_epdc_fb\nvirtual_height={height*4}\nmemory_size={stride*height*4}")
+        print("layout="+("rejected" if mode=="unsupported-layout" else "accepted"))
+        print("input="+("unsupported" if mode=="unsupported-touch" else "accepted"))
+        print("snapshot_bytes="+("99999999" if mode=="bad-snapshot" else str(stride*(yoffset+height))))
+        if mode=="duplicate-stride":print("stride=608")
+        if mode=="injected-width":print("width=1;exit 0")
     else:
         assert os.environ["RSS_UI_GUARD"]=="1"
         if mode=="article":
@@ -105,14 +137,19 @@ elif name=="app":
         (root/"started").touch()
         with (root/"fb").open("r+b") as f:f.write(b"!")
         log("app-start")
+        if mode in ("statusbar-running","statusbar-without-juno","launcher-killed-statusbar"):
+            assert "-STOP 900006" in (root/"events").read_text()
         if mode in ("update-install","update-failed"):sys.exit(42)
-        if mode in ("launcher-killed", "launcher-killed-home"):
+        if mode in ("launcher-killed", "launcher-killed-home", "launcher-killed-statusbar", "launcher-killed-soft"):
             owner=int(os.environ["RSS_LAUNCHER_PID"])
             while os.getppid()==owner:time.sleep(.02)
             time.sleep(2)
             log("app-terminated")
             sys.exit(0)
-        if mode in ("sleep","power-error"):time.sleep(20)
+        if mode in ("sleep","power-error","statusbar-restart-during-reader","statusbar-start-during-reader"):time.sleep(20)
+        if mode=="statusbar-pid-reuse":
+            p=root/"proc/900006/stat";p.write_text(p.read_text().replace(" 123\n"," 999\n"))
+            time.sleep(20)
         if mode=="crash":sys.exit(7)
         if mode=="pid-reuse":
             p=root/"proc/900001/stat"
@@ -135,13 +172,23 @@ class LauncherTests(unittest.TestCase):
                 (root/"protected").write_text("untouched")
                 (root/"state/session.log").unlink()
                 (root/"state/session.log").symlink_to(root/"protected")
-            for name in ("stat","chmod","flock","timeout","pidof","get","set","refresh","kill","app","mktemp","rm","runner"):
+            for name in ("stat","chmod","flock","timeout","pidof","initctl","get","set","refresh","kill","app","mktemp","rm","runner"):
                 tool=root/"bin"/name;tool.write_text("#!"+sys.executable+"\n"+FAKE);tool.chmod(0o755)
             for pid,name in ((900001,"awesome"),(900002,"JunoStatusBarDr"),(900003,"volumd")):
                 p=root/"proc"/str(pid);p.mkdir(parents=True)
                 (p/"comm").write_text(name+"\n")
                 (p/"stat").write_text(" ".join([str(pid),"("+name+")","S"]+["0"]*18+["123"])+"\n")
                 (p/"status").write_text("State:\tS (sleeping)\n")
+            if mode.startswith("statusbar-") or mode=="launcher-killed-statusbar":
+                (root/"statusbar.conf").write_text("fixture job\n")
+                for pid in (900006,900007):
+                    p=root/"proc"/str(pid);p.mkdir()
+                    name="KPPChromeStatus";state="T" if mode=="statusbar-prestopped" and pid==900006 else "S"
+                    (p/"comm").write_text(name+"\n")
+                    (p/"stat").write_text(" ".join([str(pid),"("+name+")",state]+["0"]*18+["123"])+"\n")
+                    (p/"status").write_text("State:\t"+state+" (fixture)\n")
+                if mode=="statusbar-missing-process":(root/"proc/900006/comm").unlink()
+                if mode=="statusbar-no-initctl":(root/"bin/initctl").unlink()
             if mode.startswith("home-") or mode=="launcher-killed-home":
                 for pid in (900004,900005):
                     p=root/"proc"/str(pid);p.mkdir(parents=True)
@@ -150,7 +197,8 @@ class LauncherTests(unittest.TestCase):
                     (p/"comm").write_text(comm+"\n")
                     (p/"stat").write_text(" ".join([str(pid),"("+comm+")",state]+["0"]*18+["123"]) +"\n")
                     (p/"status").write_text("State:\t"+state+" (sleeping)\n")
-            (root/"fb").write_bytes(b"x"*1575424)
+            snapshot_size={"small-screen":608*800,"large-screen":1872*2481}.get(mode,1575424)
+            (root/"fb").write_bytes(b"x"*(snapshot_size-(1 if mode=="short-snapshot" else 0)))
             if mode=="passcode":(root/"passcode").touch()
             (root/"update").mkdir()
             (root/"update/runner").write_bytes((root/"bin/runner").read_bytes());(root/"update/runner").chmod(0o755)
@@ -158,8 +206,21 @@ class LauncherTests(unittest.TestCase):
                 (root/"update/journal").write_text("interrupted update")
                 (root/"bin/app").unlink()  # Recovery must work even if the new program cannot execute.
             (root/"restart.sh").write_text('echo restart >> "$FIXTURE/events"\n')
+            if mode!="firmware-sysv":(root/"upstart").mkdir()
+            version={"firmware-5.6.4":"5.6.4","firmware-5.6.5":"5.6.5","firmware-5.6.5.1":"5.6.5.1",
+                     "firmware-5.6":"5.6","firmware-5.7.2":"5.7.2","firmware-5.12.4":"5.12.4",
+                     "firmware-invalid":"5.6.5;exit","firmware-leading-zero":"5.06.5",
+                     "firmware-incomplete":"5.","firmware-future":"6.0.0"}.get(mode,"5.16.2.1.1")
+            if mode.startswith("soft-") or mode=="launcher-killed-soft":version="5.6.4"
+            firmware="Kindle "+version+" (fixture)\n"
+            if mode=="firmware-duplicate":firmware+="Kindle 5.6.4\n"
+            if mode=="firmware-oversized":firmware+="x"*2048
+            (root/"prettyversion").write_text(firmware)
+            if mode=="firmware-missing":(root/"prettyversion").unlink()
             values={"STATE":root/"state","APP":root/"bin/app","DB":root/"rss.sqlite","FB":root/"fb",
-                    "PROC":root/"proc","GET":root/"bin/get","SET":root/"bin/set","REFRESH":root/"bin/refresh","KILL":root/"bin/kill","PASSCODE":root/"passcode","UPDATE":root/"update","LAUNCH":root/"restart.sh"}
+                    "PROC":root/"proc","GET":root/"bin/get","SET":root/"bin/set","REFRESH":root/"bin/refresh","KILL":root/"bin/kill","PASSCODE":root/"passcode","UPDATE":root/"update","LAUNCH":root/"restart.sh",
+                    "INITCTL":root/"bin/initctl","STATUSBAR_JOB":root/"statusbar.conf",
+                    "UPSTART_DIR":root/"upstart","FIRMWARE":root/"prettyversion"}
             script=SOURCE.read_text().splitlines()
             (root/"cache").mkdir()
             source="\n".join(script)+"\n"
@@ -177,7 +238,7 @@ class LauncherTests(unittest.TestCase):
             if mode.startswith("launcher-killed"):
                 process=subprocess.Popen(["/bin/sh",str(launch)],env=env,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
                 try:
-                    if mode in ("launcher-killed", "launcher-killed-home"):
+                    if mode in ("launcher-killed", "launcher-killed-home", "launcher-killed-statusbar", "launcher-killed-soft"):
                         end=time.monotonic()+10
                         while not (root/"started").exists() and time.monotonic()<end:time.sleep(.02)
                         self.assertTrue((root/"started").exists())
@@ -216,7 +277,150 @@ class LauncherTests(unittest.TestCase):
             if mode in ("state-nonroot", "state-unsafe", "state-chmod-error"):
                 expected={"state-nonroot":0o2770,"state-unsafe":0o777,"state-chmod-error":0o2770}[mode]
                 self.assertEqual((root/"state").stat().st_mode & 0o7777,expected)
+            if mode in ("small-screen","large-screen"):
+                self.assertEqual((root/"fb").read_bytes(),b"x"*snapshot_size)
             return result,events,(root/"fb").read_bytes()[0:1]
+
+    def test_firmware_pillow_boundaries(self):
+        for mode in ("firmware-5.6","firmware-5.6.4","firmware-5.6.5","firmware-5.6.5.1","firmware-5.7.2","firmware-5.12.4"):
+            with self.subTest(mode=mode):
+                result,events,pixel=self.run_case(mode)
+                self.assertEqual(result.returncode,0,result.stderr)
+                self.assertEqual(pixel,b"x")
+                soft=mode in ("firmware-5.6","firmware-5.6.4")
+                changes=[e for e in events if e.startswith("set com.lab126.pillow ")]
+                self.assertEqual(len(changes),2)
+                if soft:
+                    self.assertIn("interrogatePillow",changes[0]);self.assertIn("hideMe();",changes[0])
+                    self.assertIn("showMe();",changes[1])
+                else:
+                    self.assertTrue(changes[0].endswith("disableEnablePillow disable"))
+                    self.assertTrue(changes[1].endswith("disableEnablePillow enable"))
+                self.assertLess(events.index(changes[0]),events.index("-STOP 900001"))
+                self.assertLess(events.index(changes[1]),events.index("-CONT 900003"))
+
+    def test_unknown_firmware_refuses_before_ui_changes(self):
+        for mode in ("firmware-sysv","firmware-missing","firmware-invalid","firmware-incomplete",
+                     "firmware-leading-zero","firmware-duplicate","firmware-oversized","firmware-future"):
+            with self.subTest(mode=mode):
+                result,events,pixel=self.run_case(mode)
+                self.assertEqual(result.returncode,1,result.stderr)
+                self.assertEqual(pixel,b"x")
+                self.assertFalse(any(e.startswith(("-STOP ","-CONT ","set ")) for e in events))
+                self.assertNotIn("app-start",events)
+
+    def test_soft_pillow_failure_recovery(self):
+        for mode in ("soft-pillow-error","soft-stop-error","soft-restore-error"):
+            with self.subTest(mode=mode):
+                result,events,_=self.run_case(mode)
+                self.assertEqual(result.returncode,1,result.stderr)
+                self.assertTrue(any("showMe();" in e for e in events))
+                self.assertFalse(any("disableEnablePillow" in e for e in events))
+                if mode!="soft-restore-error":self.assertNotIn("app-start",events)
+                else:self.assertIn("-CONT 900003",events)
+
+    def test_soft_pillow_guardian_restores_after_launcher_kill(self):
+        result,events,pixel=self.run_case("launcher-killed-soft")
+        self.assertEqual(result.returncode,-9)
+        self.assertEqual(pixel,b"x")
+        restore=next(e for e in events if "showMe();" in e)
+        self.assertLess(events.index("app-terminated"),events.index(restore))
+        self.assertLess(events.index(restore),events.index("-CONT 900003"))
+        self.assertFalse(any("disableEnablePillow" in e for e in events))
+
+    def test_independent_statusbar_is_paused_and_restored(self):
+        for mode in ("statusbar-running","statusbar-without-juno"):
+            with self.subTest(mode=mode):
+                result,events,pixel=self.run_case(mode)
+                self.assertEqual(result.returncode,0,result.stderr)
+                self.assertEqual(pixel,b"x")
+                self.assertLess(events.index("-STOP 900006"),events.index("app-start"))
+                self.assertLess(events.index("-CONT 900006"),events.index("-CONT 900003"))
+                self.assertNotIn("-STOP 900007",events)
+
+    def test_stopped_statusbar_and_alias_do_not_add_signals(self):
+        for mode in ("statusbar-stopped","statusbar-alias"):
+            with self.subTest(mode=mode):
+                result,events,pixel=self.run_case(mode)
+                self.assertEqual(result.returncode,0,result.stderr)
+                self.assertEqual(pixel,b"x")
+                self.assertNotIn("-STOP 900006",events)
+                self.assertNotIn("-CONT 900006",events)
+                self.assertEqual(events.count("-STOP 900002"),1)
+                self.assertEqual(events.count("-CONT 900002"),1)
+
+    def test_statusbar_preflight_failures_prevent_takeover(self):
+        for mode in ("statusbar-query-error","statusbar-query-timeout","statusbar-invalid-pid",
+                     "statusbar-starting","statusbar-missing-process","statusbar-prestopped","statusbar-no-initctl"):
+            with self.subTest(mode=mode):
+                result,events,pixel=self.run_case(mode)
+                self.assertEqual(result.returncode,1,result.stderr)
+                self.assertEqual(pixel,b"x")
+                self.assertNotIn("app-start",events)
+                self.assertFalse(any(event.startswith("-STOP ") or event.startswith("-CONT ") for event in events))
+
+    def test_statusbar_change_before_pause_prevents_foreign_signals(self):
+        result,events,pixel=self.run_case("statusbar-replaced-before-stop")
+        self.assertEqual(result.returncode,1,result.stderr)
+        self.assertNotIn("app-start",events)
+        self.assertNotIn("-STOP 900006",events)
+        self.assertNotIn("-STOP 900007",events)
+        self.assertNotIn("-CONT 900007",events)
+
+    def test_statusbar_changes_during_reading_stop_the_reader(self):
+        for mode in ("statusbar-restart-during-reader","statusbar-start-during-reader"):
+            with self.subTest(mode=mode):
+                result,events,pixel=self.run_case(mode)
+                self.assertEqual(result.returncode,1,result.stderr)
+                self.assertIn("app-start",events)
+                self.assertNotIn("-STOP 900007",events)
+                self.assertNotIn("-CONT 900007",events)
+                self.assertIn("-CONT 900003",events)
+
+    def test_statusbar_failure_and_pid_reuse_keep_recovery_safe(self):
+        result,events,pixel=self.run_case("statusbar-signal-error")
+        self.assertEqual(result.returncode,1,result.stderr)
+        self.assertNotIn("app-start",events)
+        self.assertIn("-CONT 900006",events)
+        self.assertIn("-CONT 900003",events)
+        result,events,pixel=self.run_case("statusbar-pid-reuse")
+        self.assertEqual(result.returncode,1,result.stderr)
+        self.assertNotIn("-CONT 900006",events)
+
+    def test_guardian_recovers_independent_statusbar(self):
+        result,events,pixel=self.run_case("launcher-killed-statusbar")
+        self.assertEqual(result.returncode,-9,result.stderr)
+        self.assertEqual(pixel,b"x")
+        self.assertIn("-CONT 900006",events)
+        self.assertLess(events.index("app-terminated"),events.index("-CONT 900006"))
+        self.assertLess(events.index("-CONT 900006"),events.index("-CONT 900003"))
+
+    def test_variable_screen_snapshots_and_optional_statusbar(self):
+        for mode in ("small-screen","large-screen","no-statusbar"):
+            with self.subTest(mode=mode):
+                result,events,pixel=self.run_case(mode)
+                self.assertEqual(result.returncode,0,result.stderr)
+                self.assertEqual(pixel,b"x")
+                self.assertIn("app-start",events)
+                self.assertIn("-CONT 900003",events)
+                if mode=="no-statusbar":self.assertNotIn("-STOP 900002",events)
+
+    def test_failed_capabilities_prevent_takeover(self):
+        for mode in ("unsupported-layout","unsupported-touch","bad-snapshot","duplicate-stride",
+                     "injected-width","short-snapshot","fbink-error","fbink-unknown","fbink-sunxi",
+                     "fbink-inverted","fbink-mismatch","no-volumd"):
+            with self.subTest(mode=mode):
+                result,events,pixel=self.run_case(mode)
+                self.assertEqual(result.returncode,1,result.stderr)
+                self.assertNotIn("app-start",events)
+                self.assertNotIn("-STOP 900001",events)
+                self.assertEqual(pixel,b"x")
+
+    def test_changed_framebuffer_is_not_overwritten_on_exit(self):
+        result,events,pixel=self.run_case("layout-changed")
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertEqual(pixel,b"!")
+        self.assertIn("-CONT 900003",events)
 
     def test_article_launch_preserves_target_through_service_discovery(self):
         result,events,pixel=self.run_case("article")

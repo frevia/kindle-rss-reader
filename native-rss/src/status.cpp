@@ -1,4 +1,5 @@
 #include "status.hpp"
+#include "process.hpp"
 #include <cctype>
 #include <cstdio>
 #include <ctime>
@@ -70,6 +71,19 @@ int capacity(const std::string& value){
     for(;i<value.size();++i)if(!std::isspace(static_cast<unsigned char>(value[i])))return -1;
     return result;
 }
+std::optional<int> lipc_integer(const std::string& value,int maximum){
+    if(value.empty()||value.size()>32||value.find('\0')!=std::string::npos)return {};
+    std::size_t end=0;int number=0;
+    for(;end<value.size()&&value[end]>='0'&&value[end]<='9';++end){number=number*10+(value[end]-'0');if(number>maximum)return {};}
+    if(!end)return {};
+    unsigned newlines=0;
+    for(std::size_t i=end;i<value.size();++i){
+        const auto c=static_cast<unsigned char>(value[i]);
+        if(c=='\n'&&++newlines>1)return {};
+        if(c!='\n'&&c!='\r'&&c!='\t'&&c!=' ')return {};
+    }
+    return number;
+}
 }
 
 bool ReaderStatus::operator==(const ReaderStatus& other) const{
@@ -87,11 +101,33 @@ bool reader_local_time(std::time_t now,std::tm& local,const std::string& root){
     return localtime_r(&now,&local)!=nullptr;
 }
 
-ReaderStatus read_reader_status(std::time_t now,const std::string& root){
+ReaderStatus read_reader_status(std::time_t now,const std::string& root,const std::string& lipc_program){
     ReaderStatus status;
-    status.battery=capacity(read_small(path(root,"sys/class/power_supply/max77696-battery/capacity")));
-    const auto supply=read_small(path(root,"sys/class/power_supply/max77696-battery/status"));
-    status.charging=supply=="Charging\n"||supply=="Charging"||supply=="Full\n"||supply=="Full";
+    std::optional<bool> sysfs_charging;
+    for(const auto* name:{"max77696-battery","max77796-battery","bd7181x_bat","bd71827_bat"}){
+        const auto battery=path(root,"sys/class/power_supply/")+name+"/";
+        if(status.battery<0)status.battery=capacity(read_small(battery+"capacity"));
+        // Oasis 2/3 expose charge state on the charger rather than the fuel gauge.
+        auto supply=read_small(battery+"status");
+        if(std::string(name)=="max77796-battery"){
+            const auto charger=read_small(path(root,"sys/class/power_supply/max77796-charger/status"));
+            if(!charger.empty())supply=charger;
+        }
+        const auto charging=read_small(battery+"charging");
+        const bool charge=supply=="Charging\n"||supply=="Charging"||supply=="Full\n"||supply=="Full"||charging=="1\n"||charging=="1";
+        const bool discharging=supply=="Discharging\n"||supply=="Discharging"||supply=="Not charging\n"||supply=="Not charging"||charging=="0\n"||charging=="0";
+        if(!sysfs_charging&&(charge||discharging))sysfs_charging=charge;
+        if(status.battery>=0&&sysfs_charging)break;
+    }
+    status.charging=sysfs_charging.value_or(false);
+    std::string lipc=lipc_program;
+#if defined(__linux__) && defined(__arm__) && !defined(__aarch64__)
+    if(lipc.empty()&&root=="/")lipc="/usr/bin/lipc-get-prop";
+#endif
+    if(!lipc.empty()){
+        try{if(const auto level=lipc_integer(capture_bounded({lipc,"-i","com.lab126.powerd","battLevel"},std::chrono::milliseconds(200),32),100))status.battery=*level;}catch(...){}
+        try{if(const auto charging=lipc_integer(capture_bounded({lipc,"-i","com.lab126.powerd","isCharging"},std::chrono::milliseconds(200),32),1))status.charging=*charging==1;}catch(...){}
+    }
     const auto network=read_small(path(root,"sys/class/net/wlan0/operstate"));
     status.wifi=network=="up\n"||network=="up";
     std::tm local{};

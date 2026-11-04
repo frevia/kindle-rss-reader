@@ -217,7 +217,7 @@ std::map<std::string,bool> extract(const fs::path& archive,const fs::path& desti
 std::map<std::string,bool> validate_stage(const fs::path& folder,const std::string& version) {
     const auto stage=folder/"stage";
     safe_path(folder,"stage/native-rss/UPDATE.json");safe_path(folder,"stage/native-rss/MANIFEST.json");
-    const auto metadata=query(read(stage/"native-rss/UPDATE.json"),"SELECT json_extract(?1,'$.version') WHERE json_valid(?1) AND json_type(?1,'$.format')='integer' AND json_extract(?1,'$.format')=1 AND json_extract(?1,'$.model')='KPW3'");
+    const auto metadata=query(read(stage/"native-rss/UPDATE.json"),"SELECT json_extract(?1,'$.version') WHERE json_valid(?1) AND json_type(?1,'$.format')='integer' AND json_extract(?1,'$.format')=1 AND json_extract(?1,'$.model')='Kindle'");
     require(metadata.size()==1&&metadata[0][0]==version,"此版本尚不支持在线升级，或安装包机型/版本不符");
     const auto rows=query(read(stage/"native-rss/MANIFEST.json"),"SELECT key,value,type FROM json_each(?1,'$.files')");
     std::map<std::string,bool> files;
@@ -258,7 +258,7 @@ UpdateRelease parse_update_release(const std::string& json,const std::string& cu
     require(rows.size()==1,"GitHub 更新信息无效，或不是正式发布版本");
     UpdateRelease update;update.version=rows[0][0];update.notes=rows[0][1];update.available=version_parts(update.version)>version_parts(current);
     if(update.notes.size()>=4096)update.notes+="\n更多内容请查看 GitHub Releases 的完整发布说明。";
-    update.asset_name="RSS-Reader-"+update.version+"-KPW3.zip";
+    update.asset_name="RSS-Reader-"+update.version+"-Kindle.zip";
     const auto assets=query(json,"SELECT json_extract(value,'$.name'),json_extract(value,'$.browser_download_url'),json_extract(value,'$.size'),json_type(value,'$.size') FROM json_each(?1,'$.assets')");
     for(const auto& row:assets) {
         if(row[0]==update.asset_name) {
@@ -268,7 +268,7 @@ UpdateRelease parse_update_release(const std::string& json,const std::string& cu
             require(update.checksums_url.empty()&&row[1]==repository+update.version+"/SHA256SUMS.txt","GitHub 校验文件地址无效");update.checksums_url=row[1];
         }
     }
-    require(!update.available||(!update.asset_url.empty()&&!update.checksums_url.empty()),"最新版缺少 KPW3 安装包或校验文件");return update;
+    require(!update.available||(!update.asset_url.empty()&&!update.checksums_url.empty()),"最新版缺少 Kindle 安装包或校验文件");return update;
 }
 UpdateRelease check_update(const std::atomic<bool>& cancel) {
     return parse_update_release(download_text("https://api.github.com/repos/frevia/kindle-rss-reader/releases/latest",cancel,2*1024*1024),app_version());

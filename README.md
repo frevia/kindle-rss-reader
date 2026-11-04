@@ -2,7 +2,7 @@
 
 在 Kindle 上订阅博客和新闻，连网下载后，就能离线阅读文章和图片。
 
-目前支持 **Kindle Paperwhite 3**，也常叫 **KPW3（2015 款）**。其他机型暂未验证。设备需要已经越狱，并完成越狱教程中的后续环境设置。
+已有真机验证设备为 **Kindle Paperwhite 3（KPW3，2015 款）**。当前源码新增按屏幕和触摸能力运行的 Kindle 兼容版，其他机型仍需实机验收，具体条件见[机型兼容说明](native-rss/docs/COMPATIBILITY.md)。设备需要已经越狱，并完成越狱教程中的后续环境设置。
 
 当前源码版本为 **v0.0.3**。以下文档对应此版本；变化与验证范围见 [v0.0.3 发布说明](native-rss/docs/RELEASE-v0.0.3.md)。仍使用 v0.0.2 时，请参阅[旧版本的使用指南](https://github.com/frevia/kindle-rss-reader/blob/v0.0.2/native-rss/docs/USAGE.md)。
 
@@ -20,7 +20,7 @@
 ## 开始使用
 
 1. 打开[最新版下载页面](https://github.com/frevia/kindle-rss-reader/releases/latest)。
-2. 在页面下方的 **Assets（下载文件）** 中，下载文件名以 **`-KPW3.zip`** 结尾的压缩包。
+2. 在页面下方的 **Assets（下载文件）** 中选择安装包。新的兼容包以 **`-Kindle.zip`** 结尾；历史 **`-KPW3.zip`** 只供 KPW3 使用。兼容代码尚未发布时，可按[开发参考](native-rss/docs/DEVELOPMENT.md)本地构建。
 3. 解压后，按[安装教程](native-rss/docs/INSTALL.md)把三个文件夹合并复制到 Kindle，再从书库或 KUAL 打开阅读器。
 4. 连上 Wi-Fi，按[使用指南](native-rss/docs/USAGE.md#添加第一个订阅)添加第一个订阅，下载文章后就能离线阅读。
 

@@ -1,5 +1,5 @@
 #!/bin/sh
-# Development launcher for the verified KPW3 layout; no device installation is implicit.
+# Capability-checked portrait session; no device installation is implicit.
 umask 077
 STATE=/var/local/native-rss
 APP=/mnt/us/native-rss/bin/kindle-rss
@@ -13,6 +13,10 @@ KILL=kill
 PASSCODE=/var/local/system/userpasswdenabled
 UPDATE=/mnt/us/native-rss/.update
 LAUNCH=/mnt/us/native-rss/launch.sh
+INITCTL=/sbin/initctl
+STATUSBAR_JOB=/etc/upstart/statusbar.conf
+UPSTART_DIR=/etc/upstart
+FIRMWARE=/etc/prettyversion.txt
 
 fail() { printf '%s\n' "Kindle RSS: $*" >&2; exit 1; }
 article=
@@ -23,7 +27,7 @@ if [ "$#" -ne 0 ]; then
     [ "${#article}" -le 16 ] && [ "$article" -le 9007199254740991 ] || fail '无效文章编号'
 fi
 [ ! -e "$PASSCODE" ] || fail '设备启用了密码锁，不能接管系统界面'
-for tool in timeout flock stat pidof awk dd mktemp mkfifo; do
+for tool in timeout flock stat pidof awk dd mktemp mkfifo head; do
     command -v "$tool" >/dev/null 2>&1 || fail "缺少工具 $tool"
 done
 for tool in "$GET" "$SET" "$REFRESH"; do
@@ -68,6 +72,10 @@ owner_born=$(awk '{print $22}' "/proc/$owner/stat") || fail '无法确认启动�
 case "$owner_born" in ''|*[!0-9]*) fail '无效启动器身份' ;; esac
 done_file=
 live_fifo=
+statusbar_expected=
+statusbar_name=
+statusbar_born=
+pillow_mode=
 
 owner_alive() {
     [ "$(awk '$3 != "Z" {print $22}' "/proc/$owner/stat" 2>/dev/null)" = "$owner_born" ]
@@ -81,6 +89,77 @@ identity() {
     awk '{print $22}' "$PROC/$1/stat"
 }
 same() { [ "$(identity "$1" "$2")" = "$3" ]; }
+record_process() {
+    pid=$1; comm=$2
+    case "$pid" in ''|*[!0-9]*) fail '无效进程号' ;; esac
+    case "$comm" in ''|*[!a-zA-Z0-9_.-]*) fail '无效进程名称' ;; esac
+    born=$(identity "$pid" "$comm") || fail "无法确认 $comm 身份"
+    case "$born" in ''|*[!0-9]*) fail '无效进程启动时间' ;; esac
+    process_state=$(awk '/^State:/{print $2}' "$PROC/$pid/status")
+    case "$process_state" in R|S|I) ;; *) fail "$comm 当前状态不适合接管" ;; esac
+    case " $records " in *" $pid:"*) return ;; esac
+    records="$records $pid:$comm:$born"
+}
+statusbar_pid() {
+    job_status=$(LC_ALL=C timeout 2 "$INITCTL" status statusbar) || return 1
+    case "$job_status" in
+        'statusbar stop/waiting') printf '0\n' ;;
+        'statusbar start/running, process '*)
+            job_pid=${job_status#'statusbar start/running, process '}
+            case "$job_pid" in ''|0*|*[!0-9]*) return 1 ;; esac
+            [ "${#job_pid}" -le 10 ] && [ "$job_pid" -gt 1 ] && [ "$job_pid" -le 2147483647 ] || return 1
+            printf '%s\n' "$job_pid"
+            ;;
+        *) return 1 ;;
+    esac
+}
+statusbar_unchanged() {
+    [ -n "$statusbar_expected" ] || return 0
+    [ "$(statusbar_pid)" = "$statusbar_expected" ] || return 1
+    [ "$statusbar_expected" = 0 ] || same "$statusbar_expected" "$statusbar_name" "$statusbar_born"
+}
+firmware_pillow_mode() {
+    [ -d "$UPSTART_DIR" ] || return 1
+    [ -r "$FIRMWARE" ] || return 1
+    firmware_text=$(head -c 1025 "$FIRMWARE") || return 1
+    [ "${#firmware_text}" -le 1024 ] || return 1
+    printf '%s\n' "$firmware_text" | awk '
+        $1 == "Kindle" {
+            count++; n=split($2, v, ".")
+            if(n<2 || n>5 || v[1]!="5") bad=1
+            for(i=1;i<=n;i++) if(v[i]!~/^[0-9]+$/ || length(v[i])>3 || (length(v[i])>1 && substr(v[i],1,1)=="0")) bad=1
+            mode=(v[2]+0<6 || (v[2]+0==6 && v[3]+0<5))?"soft":"hard"
+        }
+        END {if(count!=1 || bad)exit 1; print mode}'
+}
+pillow_change() {
+    case "$pillow_mode:$1" in
+        hard:disable|hard:enable) timeout 2 "$SET" com.lab126.pillow disableEnablePillow "$1" ;;
+        soft:disable) timeout 2 "$SET" com.lab126.pillow interrogatePillow '{"pillowId": "default_status_bar", "function": "nativeBridge.hideMe();"}' ;;
+        soft:enable) timeout 2 "$SET" com.lab126.pillow interrogatePillow '{"pillowId": "default_status_bar", "function": "nativeBridge.showMe();"}' ;;
+        *) return 1 ;;
+    esac
+}
+probe_value() {
+    printf '%s\n' "$probe" | awk -F= -v key="$1" '$1 == key {value=$2; count++} END {if(count != 1) exit 1; print value}'
+}
+probe_number() {
+    number=$(probe_value "$1") || return 1
+    case "$number" in ''|*[!0-9]*|0[0-9]*) return 1 ;; esac
+    [ "${#number}" -le 8 ] || return 1
+    printf '%s\n' "$number"
+}
+fbink_value() {
+    # FBInk emits shell assignments; parse only the numeric fields, never eval them.
+    printf '%s\n' "$fbink_probe" | awk -v key="$1" 'BEGIN {RS=";"; FS="="} $1 == key {value=$2; count++} END {if(count != 1) exit 1; print value}'
+}
+screen_signature() {
+    printf '%s\n' "$1" | awk -F= '$1 ~ /^(width|height|stride|bpp|xoffset|yoffset|virtual_height|memory_size|rotation|grayscale|driver)$/ {print}'
+}
+screen_unchanged() {
+    current_probe=$(timeout 5 "$APP" probe) || return 1
+    [ "$(screen_signature "$current_probe")" = "$original_screen" ]
+}
 stop_child() {
     [ -n "$child" ] || return
     "$KILL" -TERM "$child" 2>/dev/null || :
@@ -99,14 +178,18 @@ cleanup() {
     if [ -n "$CRE_CACHE" ]; then rm -rf "$CRE_CACHE" || restore_failed=1; fi
     # Never overwrite a screensaver after powerd has taken the screen.
     if [ -n "$snapshot" ] && [ -n "$stopped" ] && same "$wm_pid" awesome "$wm_born" && awake; then
-        dd if="$snapshot" of="$FB" bs=1088 count=1448 conv=notrunc 2>/dev/null || restore_failed=1
+        if screen_unchanged; then
+            dd if="$snapshot" of="$FB" bs="$stride" count="$snapshot_rows" conv=notrunc 2>/dev/null || restore_failed=1
+        else
+            printf '%s\n' 'screen_restore=skipped; framebuffer layout changed or unavailable'
+        fi
     fi
     for record in $stopped; do
         old_ifs=$IFS; IFS=:; set -- $record; IFS=$old_ifs
         case "$2" in volumd) continue ;; esac
         if same "$1" "$2" "$3"; then "$KILL" -CONT "$1" 2>/dev/null || restore_failed=1; fi
     done
-    if [ "$pillow" -eq 1 ]; then timeout 2 "$SET" com.lab126.pillow disableEnablePillow enable >/dev/null 2>&1 || restore_failed=1; fi
+    if [ "$pillow" -eq 1 ]; then pillow_change enable >/dev/null 2>&1 || restore_failed=1; fi
     if [ -n "$stopped" ] && same "$wm_pid" awesome "$wm_born" && awake; then
         timeout 3 "$SET" com.lab126.appmgrd start app://com.lab126.booklet.home >/dev/null 2>&1 || restore_failed=1
         if awake; then timeout 5 "$REFRESH" -q -s >/dev/null 2>&1 || restore_failed=1; fi
@@ -141,29 +224,59 @@ trap 'interrupted 130' INT
 trap 'interrupted 143' TERM
 
 awake || fail '请在 Kindle 唤醒时启动'
+pillow_mode=$(firmware_pillow_mode) || fail '无法确认 Upstart／Kindle 5 固件的浮层策略，请导出设备诊断报告'
+printf 'pillow_mode=%s\n' "$pillow_mode"
 probe=$(timeout 5 "$APP" probe) || fail '设备预检失败'
-for value in width=1072 height=1448 stride=1088 bpp=8 xoffset=0 yoffset=0 rotation=3 driver=mxc_epdc_fb layout=accepted; do
-    printf '%s\n' "$probe" | grep -qx "$value" || fail "屏幕参数不符：$value"
-done
+[ "$(probe_value layout)" = accepted ] || fail '不支持的屏幕布局，请导出设备诊断报告'
+[ "$(probe_value input)" = accepted ] || fail '未找到唯一受支持的触摸屏，请导出设备诊断报告'
+width=$(probe_number width) && height=$(probe_number height) && stride=$(probe_number stride) &&
+    xoffset=$(probe_number xoffset) && yoffset=$(probe_number yoffset) &&
+    snapshot_bytes=$(probe_number snapshot_bytes) || fail '无效屏幕参数'
+[ "$width" -ge 600 ] && [ "$width" -le 2560 ] && [ "$height" -ge 800 ] && [ "$height" -le 3400 ] &&
+    [ "$width" -le "$height" ] && [ "$stride" -ge "$width" ] && [ "$stride" -le 8192 ] &&
+    [ "$xoffset" -le "$((stride-width))" ] && [ "$yoffset" -le 65536 ] &&
+    [ "$(probe_value bpp)" = 8 ] || fail '屏幕参数超出兼容范围'
+snapshot_rows=$((yoffset+height))
+[ "$snapshot_bytes" -eq "$((stride*snapshot_rows))" ] && [ "$snapshot_bytes" -le 67108864 ] || fail '无效屏幕快照长度'
+original_screen=$(screen_signature "$probe")
+printf '%s\n' "$probe"
+fbink_probe=$(timeout 5 "$REFRESH" -q -e) || fail 'FBInk 无法识别设备，请检查共享工具版本'
+fbink_id=$(fbink_value deviceId) || fail 'FBInk 缺少机型识别信息'
+case "$fbink_id" in ''|0*|*[!0-9]*) fail 'FBInk 未识别此机型' ;; esac
+[ "${#fbink_id}" -le 5 ] && [ "$fbink_id" -le 65535 ] || fail '无效 FBInk 机型编号'
+[ "$(fbink_value isSunxi)" = 0 ] && [ "$(fbink_value invertedGrayscale)" = 0 ] &&
+    [ "$(fbink_value BPP)" = 8 ] && [ "$(fbink_value screenWidth)" = "$width" ] &&
+    [ "$(fbink_value screenHeight)" = "$height" ] && [ "$(fbink_value lineLength)" = "$stride" ] ||
+    fail 'FBInk 屏幕能力不匹配，请导出设备诊断报告'
 records=
 for service in awesome JunoStatusBarDriver volumd; do
-    pids=$(pidof "$service") || fail "未找到 $service"
+    if ! pids=$(pidof "$service"); then
+        [ "$service" != JunoStatusBarDriver ] || continue
+        fail "未找到 $service"
+    fi
     set -- $pids
     [ "$#" -eq 1 ] || fail "$service 进程数量异常"
     case "$1" in ''|*[!0-9]*) fail '无效进程号' ;; esac
     comm=$service
     [ "$service" != JunoStatusBarDriver ] || comm=JunoStatusBarDr
-    born=$(identity "$1" "$comm") || fail "无法确认 $service 身份"
-    case "$born" in ''|*[!0-9]*) fail '无效进程启动时间' ;; esac
-    state=$(awk '/^State:/{print $2}' "$PROC/$1/status")
-    case "$state" in R|S|I) ;; *) fail "$service 当前状态不适合接管" ;; esac
+    record_process "$1" "$comm"
     if [ "$service" = awesome ]; then wm_pid=$1; wm_born=$born; fi
-    records="$records $1:$comm:$born"
 done
+if [ -f "$STATUSBAR_JOB" ]; then
+    [ -x "$INITCTL" ] || fail '缺少独立状态栏查询工具'
+    statusbar_expected=$(statusbar_pid) || fail '无法确认独立状态栏状态'
+    if [ "$statusbar_expected" != 0 ]; then
+        IFS= read -r statusbar_name <"$PROC/$statusbar_expected/comm" || fail '无法读取独立状态栏进程身份'
+        record_process "$statusbar_expected" "$statusbar_name"
+        statusbar_born=$born
+    fi
+    printf 'statusbar_pid=%s\n' "$statusbar_expected"
+fi
 # The home bridge keeps heartbeats alive; session.lock suppresses content updates.
+screen_unchanged || fail '屏幕模式在预检后改变'
 snapshot=$(mktemp "$STATE/frame.XXXXXX") || fail '无法保存屏幕'
-dd if="$FB" of="$snapshot" bs=1088 count=1448 2>/dev/null || fail '保存屏幕失败'
-[ "$(wc -c <"$snapshot")" -eq 1575424 ] || fail '屏幕快照不完整'
+dd if="$FB" of="$snapshot" bs="$stride" count="$snapshot_rows" 2>/dev/null || fail '保存屏幕失败'
+[ "$(wc -c <"$snapshot")" -eq "$snapshot_bytes" ] || fail '屏幕快照不完整'
 awake || fail '设备已休眠'
 CRE_CACHE=$(mktemp -d /tmp/rss-cre-session.XXXXXX) || fail '无法创建新版排版缓存'
 export RSS_CRE_CACHE=$CRE_CACHE
@@ -189,11 +302,13 @@ exec 7<"$live_fifo" || fail '无法监听会话生命周期通道'
 ) &
 guardian=$!
 exec 7<&-
+statusbar_unchanged || fail '独立状态栏进程在接管前改变'
 pillow=1
-timeout 2 "$SET" com.lab126.pillow disableEnablePillow disable || fail '无法关闭系统浮层'
+pillow_change disable || fail '无法关闭系统浮层'
 for record in $records; do
     old_ifs=$IFS; IFS=:; set -- $record; IFS=$old_ifs
     same "$1" "$2" "$3" || fail '系统进程已改变'
+    if [ "$1" = "$statusbar_expected" ]; then statusbar_unchanged || fail '独立状态栏进程在接管前改变'; fi
     stopped="$record $stopped"
     "$KILL" -STOP "$1" || fail '无法暂停系统界面'
 done
@@ -208,6 +323,7 @@ while "$KILL" -0 "$child" 2>/dev/null; do
     "$KILL" -0 "$guardian" 2>/dev/null || fail '恢复监护进程已退出'
     [ "$(awk '/^State:/{print $2}' "/proc/$guardian/status" 2>/dev/null)" != Z ] || fail '恢复监护进程已退出'
     if ! awake; then stop_child; exit 0; fi
+    statusbar_unchanged || fail '独立状态栏进程已改变，停止阅读并恢复系统'
     sleep 1
 done
 wait "$child"; result=$?

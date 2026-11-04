@@ -21,7 +21,7 @@ void App::update_screen() {
     const int w=c_.width,h=c_.height;page_header("在线升级");
     const bool running=update_state_==UpdateState::Checking||update_state_==UpdateState::Downloading;
     const bool busy=sync_state_==SyncState::Running;
-    c_.text(32,240,"当前版本："+app_version()+" · KPW3",32);
+    c_.text(32,240,"当前版本："+app_version()+" · Kindle兼容版",32);
     if(!update_release_.version.empty())c_.text(32,304,"最新版本："+update_release_.version,32);
     int y=380;
     const auto message=update_message_.empty()?"从 GitHub Releases 获取正式版本。请先连接 Wi-Fi，升级前停用首页 RSS，并保留至少 400 MB 可用空间。":update_message_;

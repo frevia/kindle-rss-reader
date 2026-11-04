@@ -42,8 +42,8 @@ class Http(BaseHTTPRequestHandler):
         mode = self.server.mode
         if self.path.endswith("SHA256SUMS.txt"):
             digest = "0" * 64 if mode == "bad-sha" else self.server.digest
-            body = f"{digest}  RSS-Reader-{VERSION}-KPW3.zip\n".encode()
-        elif self.path.endswith("-KPW3.zip"):
+            body = f"{digest}  RSS-Reader-{VERSION}-Kindle.zip\n".encode()
+        elif self.path.endswith("-Kindle.zip"):
             self.send_response(302)
             self.send_header("Location", "http://github.com/unsafe" if mode == "downgrade" else
                              "https://evil.invalid/payload" if mode == "foreign-host" else
@@ -99,8 +99,8 @@ class UpdateNetworkTests(unittest.TestCase):
                 old = root / "native-rss/bin/kindle-rss"
                 old.write_bytes(b"old binary fixture")
                 release = {"tag_name": VERSION, "draft": False, "prerelease": False, "assets": [
-                    {"name": f"RSS-Reader-{VERSION}-KPW3.zip", "size": len(self.proxy.package),
-                     "browser_download_url": f"https://github.com/frevia/kindle-rss-reader/releases/download/{VERSION}/RSS-Reader-{VERSION}-KPW3.zip"},
+                    {"name": f"RSS-Reader-{VERSION}-Kindle.zip", "size": len(self.proxy.package),
+                     "browser_download_url": f"https://github.com/frevia/kindle-rss-reader/releases/download/{VERSION}/RSS-Reader-{VERSION}-Kindle.zip"},
                     {"name": "SHA256SUMS.txt", "size": 100,
                      "browser_download_url": f"https://github.com/frevia/kindle-rss-reader/releases/download/{VERSION}/SHA256SUMS.txt"}]}
                 metadata = root / "release.json"

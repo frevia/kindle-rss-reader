@@ -107,7 +107,7 @@ class PackageTests(unittest.TestCase):
             cmake=root/"CMakeLists.txt"
             cmake.write_text("project(kindle_rss VERSION 1.2.3 LANGUAGES CXX)\n",encoding="utf-8")
             with patch.object(pack,"ROOT",root):
-                self.assertEqual(pack.update_metadata(),{"format":1,"model":"KPW3","version":"v1.2.3"})
+                self.assertEqual(pack.update_metadata(),{"format":1,"model":"Kindle","version":"v1.2.3"})
                 cmake.write_text("project(kindle_rss LANGUAGES CXX)\n",encoding="utf-8")
                 with self.assertRaises(RuntimeError):pack.update_metadata()
 

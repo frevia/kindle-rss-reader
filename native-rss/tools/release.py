@@ -47,7 +47,7 @@ def verify_archives(device_path: Path, source_path: Path, tag: str):
             update = json.loads(device.read("native-rss/UPDATE.json"))
         except (KeyError, json.JSONDecodeError) as error:
             raise ValueError("安装包缺少有效的 UPDATE.json") from error
-        if update != {"format": 1, "model": "KPW3", "version": tag} or type(update["format"]) is not int:
+        if update != {"format": 1, "model": "Kindle", "version": tag} or type(update["format"]) is not int:
             raise ValueError("UPDATE.json 与发布机型/版本不一致")
         version = ElementTree.fromstring(device.read("extensions/native-rss/config.xml")).findtext("information/version")
         if version != tag[1:] or f"project(kindle_rss VERSION {tag[1:]} LANGUAGES CXX)" not in source.read("native-rss/CMakeLists.txt").decode():
@@ -68,7 +68,7 @@ def stage_release(output: Path, tag: str) -> Path:
         raise ValueError("tag must be a stable version such as v0.0.2")
 
     files = (
-        ("kindle-rss-kpw3-dev.zip", f"RSS-Reader-{tag}-KPW3.zip"),
+        ("kindle-rss-kindle-dev.zip", f"RSS-Reader-{tag}-Kindle.zip"),
         ("kindle-rss-source-dev.zip", f"RSS-Reader-{tag}-source.zip"),
         (source_bundle.BUNDLE_NAME, f"RSS-Reader-{tag}-third-party-sources.zip"),
     )
