@@ -4,10 +4,12 @@ import re
 import sys
 from pathlib import Path
 
+VERSION_TAG = re.compile(r"v[0-9]+\.[0-9]+\.[0-9]+(?:-beta\.[1-9][0-9]{0,5})?")
+
 
 def render(tag, commit):
-    if not re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+", tag) or not re.fullmatch(r"[0-9a-f]{40}", commit):
-        raise ValueError("Expected a stable release tag and full commit SHA")
+    if not VERSION_TAG.fullmatch(tag) or not re.fullmatch(r"[0-9a-f]{40}", commit):
+        raise ValueError("Expected a stable or beta release tag and full commit SHA")
     root = Path(__file__).resolve().parents[2]
     document = root / "native-rss/docs" / f"RELEASE-{tag}.md"
     def replace(match):
@@ -22,5 +24,5 @@ def render(tag, commit):
 
 if __name__ == "__main__":
     if len(sys.argv) != 3:
-        raise SystemExit("Usage: release_notes.py vMAJOR.MINOR.PATCH COMMIT")
+        raise SystemExit("Usage: release_notes.py vMAJOR.MINOR.PATCH[-beta.N] COMMIT")
     print(render(*sys.argv[1:]))

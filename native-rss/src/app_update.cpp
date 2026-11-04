@@ -4,11 +4,11 @@
 namespace rss {
 void App::update_started(bool downloading) {
     update_state_=downloading?UpdateState::Downloading:UpdateState::Checking;
-    update_message_=downloading?"正在下载更新":"正在检查 GitHub 正式版本";dirty=true;
+    update_message_=downloading?"正在下载更新":"正在检查 GitHub 更新";dirty=true;
 }
 void App::update_checked(const UpdateRelease& release) {
     update_release_=release;update_notes_page_=0;update_state_=release.available?UpdateState::Available:UpdateState::Current;
-    update_message_=release.available?"发现新版本，可下载后安装":"当前已是最新正式版本";dirty=true;
+    update_message_=release.available?"发现新版本，可下载后安装":"当前已是此通道最新版本";dirty=true;
 }
 void App::update_progress(const std::string& message) {update_message_=message;dirty=true;}
 void App::update_finished(bool cancelled,const std::string& error) {
@@ -24,7 +24,7 @@ void App::update_screen() {
     c_.text(32,240,"当前版本："+app_version()+" · Kindle兼容版",32);
     if(!update_release_.version.empty())c_.text(32,304,"最新版本："+update_release_.version,32);
     int y=380;
-    const auto message=update_message_.empty()?"从 GitHub Releases 获取正式版本。请先连接 Wi-Fi，升级前停用首页 RSS，并保留至少 400 MB 可用空间。":update_message_;
+    const auto message=update_message_.empty()?"从 GitHub Releases 获取更新；beta 版会包含后续 beta。请先连接 Wi-Fi，升级前停用首页 RSS，并保留至少 400 MB 可用空间。":update_message_;
     for(const auto& line:c_.wrap(message,28,w-64)){if(y>600)break;c_.text(32,y,line.text,28,85);y+=44;}
     c_.rule(32,640,w-64,205);
     c_.text(32,704,"更新说明",32);y=768;

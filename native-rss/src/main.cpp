@@ -325,7 +325,7 @@ int main(int argc,char** argv){
                 "  translate-web ID     英译中并缓存已下载的网页正文\n"
                 "  list                 列出本地文章\n"
                 "  probe                只读检查 Kindle 屏幕和输入设备\n"
-                "  check-update         只读检查 GitHub 最新正式版本\n"
+                "  check-update         只读检查 GitHub 当前通道新版本\n"
                 "  device               由会话启动器启动 Kindle 原生界面；--article ID 直达正文\n"
                 "  render FILE.pgm      渲染 1072×1448 列表；--article ID 渲染正文\n"
                 "  desktop              启动原生桌面模拟器\n";return 0;

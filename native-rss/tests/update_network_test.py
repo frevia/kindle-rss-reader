@@ -40,7 +40,9 @@ class Http(BaseHTTPRequestHandler):
     def do_GET(self):
         self.server.seen.append(self.path)
         mode = self.server.mode
-        if self.path.endswith("SHA256SUMS.txt"):
+        if self.path.startswith("/repos/frevia/kindle-rss-reader/releases"):
+            body = json.dumps(self.server.release_list if "?" in self.path else self.server.release_list[0]).encode()
+        elif self.path.endswith("SHA256SUMS.txt"):
             digest = "0" * 64 if mode == "bad-sha" else self.server.digest
             body = f"{digest}  RSS-Reader-{VERSION}-Kindle.zip\n".encode()
         elif self.path.endswith("-Kindle.zip"):
@@ -73,7 +75,7 @@ class UpdateNetworkTests(unittest.TestCase):
         cert, key = cls.base / "cert.pem", cls.base / "key.pem"
         subprocess.run(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1",
                         "-keyout", str(key), "-out", str(cert), "-subj", "/CN=github.com",
-                        "-addext", "subjectAltName=DNS:github.com,DNS:release-assets.githubusercontent.com"],
+                        "-addext", "subjectAltName=DNS:github.com,DNS:api.github.com,DNS:release-assets.githubusercontent.com"],
                        check=True, capture_output=True)
         cls.proxy = Proxy(("127.0.0.1", 0), Connect)
         cls.addClassCleanup(cls.proxy.server_close)
@@ -90,6 +92,24 @@ class UpdateNetworkTests(unittest.TestCase):
         cls.addClassCleanup(cls.proxy.shutdown)
         cls.env = dict(os.environ, HTTPS_PROXY=f"http://127.0.0.1:{cls.proxy.server_address[1]}",
                        HTTP_PROXY="", ALL_PROXY="", NO_PROXY="", RSS_CA_BUNDLE=str(cert))
+
+    def test_check_uses_the_installed_channel_and_selects_newest_version(self):
+        current = subprocess.check_output([DRIVER, "version"], text=True).strip()
+        beta = "-beta." in current
+        def release(tag, prerelease=False):
+            return {"tag_name": tag, "draft": False, "prerelease": prerelease, "assets": [
+                {"name": f"RSS-Reader-{tag}-Kindle.zip", "size": 123,
+                 "browser_download_url": f"https://github.com/frevia/kindle-rss-reader/releases/download/{tag}/RSS-Reader-{tag}-Kindle.zip"},
+                {"name": "SHA256SUMS.txt", "browser_download_url": f"https://github.com/frevia/kindle-rss-reader/releases/download/{tag}/SHA256SUMS.txt"}]}
+        self.proxy.release_list = [release("v998.0.0"), release("v999.0.0-beta.2", True),
+                                   release("v999.0.0-beta.10", True)]
+        self.proxy.mode = "normal"
+        self.proxy.seen.clear()
+        result = subprocess.run([DRIVER, "check"], env=self.env, capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), "v999.0.0-beta.10 1" if beta else "v998.0.0 1")
+        self.assertEqual(self.proxy.seen, ["/repos/frevia/kindle-rss-reader/releases?per_page=100" if beta else
+                                          "/repos/frevia/kindle-rss-reader/releases/latest"])
 
     def test_download_follows_only_github_https_and_checks_actual_archive(self):
         for mode in ("normal", "bad-sha", "downgrade", "foreign-host", "incomplete", "rate-limit"):

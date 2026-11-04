@@ -108,8 +108,16 @@ class PackageTests(unittest.TestCase):
             cmake.write_text("project(kindle_rss VERSION 1.2.3 LANGUAGES CXX)\n",encoding="utf-8")
             with patch.object(pack,"ROOT",root):
                 self.assertEqual(pack.update_metadata(),{"format":1,"model":"Kindle","version":"v1.2.3"})
+                cmake.write_text('project(kindle_rss VERSION 0.0.4 LANGUAGES CXX)\nset(RSS_VERSION_SUFFIX "-beta.2")\n',encoding="utf-8")
+                self.assertEqual(pack.project_version(cmake.read_text()),"v0.0.4-beta.2")
+                self.assertEqual(pack.update_metadata(),{"format":1,"model":"Kindle","version":"v0.0.4-beta.2"})
                 cmake.write_text("project(kindle_rss LANGUAGES CXX)\n",encoding="utf-8")
                 with self.assertRaises(RuntimeError):pack.update_metadata()
+                for suffix in ("-beta.0", "-beta.01", "-beta.1000000", "-rc1", "-beta.1;message(FATAL_ERROR)"):
+                    cmake.write_text(f'project(kindle_rss VERSION 0.0.4 LANGUAGES CXX)\nset(RSS_VERSION_SUFFIX "{suffix}")\n',encoding="utf-8")
+                    with self.subTest(suffix=suffix), self.assertRaises(RuntimeError):pack.project_version(cmake.read_text())
+                cmake.write_text('project(kindle_rss VERSION 0.0.4 LANGUAGES CXX)\nset(RSS_VERSION_SUFFIX -beta.1)\n',encoding="utf-8")
+                with self.assertRaises(RuntimeError):pack.project_version(cmake.read_text())
 
     def test_zip_is_repeatable_and_preserves_executable_mode(self):
         with tempfile.TemporaryDirectory() as folder:

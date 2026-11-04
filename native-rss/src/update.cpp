@@ -44,9 +44,9 @@ std::vector<std::vector<std::string>> query(const std::string& json, const char*
     }
     require(result==SQLITE_DONE,"更新清单 JSON 无效");return rows;
 }
-std::array<unsigned,3> version_parts(const std::string& version) {
-    require(version.size()>=6&&version.size()<=24&&version[0]=='v',"更新版本号无效");
-    std::array<unsigned,3> parts{};std::size_t offset=1;
+std::array<unsigned,4> version_parts(const std::string& version) {
+    require(version.size()>=6&&version.size()<=40&&version[0]=='v',"更新版本号无效");
+    std::array<unsigned,4> parts{0,0,0,1000000};std::size_t offset=1;
     for(unsigned i=0;i<3;++i) {
         const auto begin=offset;
         while(offset<version.size()&&version[offset]>='0'&&version[offset]<='9') {
@@ -55,7 +55,15 @@ std::array<unsigned,3> version_parts(const std::string& version) {
         require(offset>begin&&(offset-begin==1||version[begin]!='0'),"更新版本号无效");
         if(i<2)require(offset<version.size()&&version[offset++]=='.',"更新版本号无效");
     }
-    require(offset==version.size(),"仅支持正式版本更新");return parts;
+    if(offset<version.size()) {
+        require(version.compare(offset,6,"-beta.")==0,"更新版本号无效");offset+=6;
+        const auto begin=offset;parts[3]=0;
+        while(offset<version.size()&&version[offset]>='0'&&version[offset]<='9') {
+            require(offset-begin<6,"更新版本号无效");parts[3]=parts[3]*10+static_cast<unsigned>(version[offset++]-'0');
+        }
+        require(offset>begin&&version[begin]!='0',"更新版本号无效");
+    }
+    require(offset==version.size(),"更新版本号无效");return parts;
 }
 std::string read(const fs::path& path,std::size_t limit=2*1024*1024) {
     std::ifstream in(path,std::ios::binary);require(static_cast<bool>(in),"无法读取升级文件");
@@ -254,9 +262,13 @@ std::vector<Record> journal(const fs::path& folder) {
 }
 std::string app_version() {return "v" RSS_VERSION;}
 UpdateRelease parse_update_release(const std::string& json,const std::string& current) {
-    const auto rows=query(json,"SELECT json_extract(?1,'$.tag_name'),substr(coalesce(json_extract(?1,'$.body'),''),1,4096) WHERE json_valid(?1) AND json_type(?1,'$.tag_name')='text' AND json_type(?1,'$.draft')='false' AND json_type(?1,'$.prerelease')='false' AND json_type(?1,'$.assets')='array'");
-    require(rows.size()==1,"GitHub 更新信息无效，或不是正式发布版本");
-    UpdateRelease update;update.version=rows[0][0];update.notes=rows[0][1];update.available=version_parts(update.version)>version_parts(current);
+    const auto rows=query(json,"SELECT json_extract(?1,'$.tag_name'),substr(coalesce(json_extract(?1,'$.body'),''),1,4096),json_type(?1,'$.prerelease') WHERE json_valid(?1) AND json_type(?1,'$.tag_name')='text' AND json_type(?1,'$.draft')='false' AND json_type(?1,'$.prerelease') IN ('true','false') AND json_type(?1,'$.assets')='array'");
+    require(rows.size()==1,"GitHub 更新信息无效，或仍是草稿");
+    UpdateRelease update;update.version=rows[0][0];update.notes=rows[0][1];
+    const auto target=version_parts(update.version),installed=version_parts(current);
+    const bool beta=target[3]!=1000000;
+    require((rows[0][2]=="true")==beta&&(!beta||installed[3]!=1000000),"当前更新通道不接受此预发布版本");
+    update.available=target>installed;
     if(update.notes.size()>=4096)update.notes+="\n更多内容请查看 GitHub Releases 的完整发布说明。";
     update.asset_name="RSS-Reader-"+update.version+"-Kindle.zip";
     const auto assets=query(json,"SELECT json_extract(value,'$.name'),json_extract(value,'$.browser_download_url'),json_extract(value,'$.size'),json_type(value,'$.size') FROM json_each(?1,'$.assets')");
@@ -270,11 +282,26 @@ UpdateRelease parse_update_release(const std::string& json,const std::string& cu
     }
     require(!update.available||(!update.asset_url.empty()&&!update.checksums_url.empty()),"最新版缺少 Kindle 安装包或校验文件");return update;
 }
+UpdateRelease parse_update_releases(const std::string& json,const std::string& current) {
+    version_parts(current);
+    require(query(json,"SELECT 1 WHERE json_valid(?1) AND json_type(?1)='array'").size()==1,"GitHub 更新列表无效");
+    UpdateRelease latest;latest.version=current;
+    for(const auto& row:query(json,"SELECT value FROM json_each(?1) WHERE type='object'")) {
+        UpdateRelease candidate;
+        try {candidate=parse_update_release(row[0],current);}
+        catch(const std::exception&) {continue;}
+        if(candidate.available&&version_parts(candidate.version)>version_parts(latest.version))latest=std::move(candidate);
+    }
+    return latest;
+}
 UpdateRelease check_update(const std::atomic<bool>& cancel) {
+    if(version_parts(app_version())[3]!=1000000)
+        return parse_update_releases(download_text("https://api.github.com/repos/frevia/kindle-rss-reader/releases?per_page=100",cancel,2*1024*1024),app_version());
     return parse_update_release(download_text("https://api.github.com/repos/frevia/kindle-rss-reader/releases/latest",cancel,2*1024*1024),app_version());
 }
 void stage_update(const fs::path& archive,const fs::path& root,const std::string& version,const std::string& digest,const std::atomic<bool>& cancel) {
-    version_parts(version);require(version_parts(version)>version_parts(app_version()),"只能安装更新的正式版本");
+    const auto target=version_parts(version),current=version_parts(app_version());
+    require((target[3]==1000000||current[3]!=1000000)&&target>current,"只能安装当前通道的新版本");
     require(digest_valid(digest)&&fs::file_size(archive)<=package_limit&&hash(archive)==digest,"安装包 SHA256 校验失败");
     const auto folder=update_folder(root);require(!fs::exists(folder/"journal"),"上次升级尚未恢复，请先重启阅读器");
     safe_path(root,"native-rss/.update/stage");fs::remove_all(folder/"stage");fs::create_directories(folder/"stage");

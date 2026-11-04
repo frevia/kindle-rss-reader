@@ -28,6 +28,25 @@ void parse_tests() {
     assert(rss::parse_update_release(release("v0.10.0"), "v0.9.0").available);
     assert(!rss::parse_update_release(release("v0.9.0"), "v0.9.0").available);
     assert(!rss::parse_update_release(release("v0.8.9"), "v0.9.0").available);
+    assert(rss::parse_update_release(release("v0.0.4-beta.2",false,true), "v0.0.4-beta.1").available);
+    assert(rss::parse_update_release(release("v0.0.4-beta.10",false,true), "v0.0.4-beta.9").available);
+    assert(!rss::parse_update_release(release("v0.0.4-beta.1",false,true), "v0.0.4-beta.2").available);
+    assert(!rss::parse_update_release(release("v0.0.4-beta.2",false,true), "v0.0.4-beta.2").available);
+    assert(rss::parse_update_release(release("v0.0.4"), "v0.0.4-beta.2").available);
+    rejects(release("v0.0.4-beta.2",false,true), "v0.0.3");
+    rejects(release("v0.0.4-beta.2"), "v0.0.4-beta.1");
+    rejects(release("v0.0.4",false,true), "v0.0.4-beta.1");
+    for(const auto* tag:{"v0.0.4-beta.0","v0.0.4-beta.01","v0.0.4-beta.","v0.0.4-beta.1000000","v0.0.4-beta.2/escape","v0.0.4-rc.1"})
+        rejects(release(tag,false,true), "v0.0.4-beta.1");
+    const auto list="["+release("v0.0.4-beta.2",false,true)+","+release("v0.0.4-beta.10",false,true)+","+
+        release("v0.0.5-beta.1",true,true)+","+release("v0.0.4-beta.9",false,true)+","+release("v0.0.3")+"]";
+    assert(rss::parse_update_releases(list,"v0.0.4-beta.1").version=="v0.0.4-beta.10");
+    assert(!rss::parse_update_releases(list,"v0.0.4-beta.10").available);
+    assert(!rss::parse_update_releases(list,"v0.0.3").available);
+    assert(rss::parse_update_releases("["+release("v0.0.4-beta.10",false,true)+","+release("v0.0.4")+"]","v0.0.4-beta.1").version=="v0.0.4");
+    bool invalid_list=false;
+    try {(void)rss::parse_update_releases("{}","v0.0.4-beta.1");}catch(const std::exception&){invalid_list=true;}
+    assert(invalid_list);
     const auto mixed = std::string("{\"tag_name\":\"v0.10.0\",\"draft\":false,\"prerelease\":false,\"assets\":[") +
         "{\"name\":\"RSS-Reader-v0.10.0-KPW3.zip\",\"browser_download_url\":\"https://github.com/frevia/kindle-rss-reader/releases/download/v0.10.0/RSS-Reader-v0.10.0-KPW3.zip\",\"size\":123}," +
         "{\"name\":\"RSS-Reader-v0.10.0-Kindle.zip\",\"browser_download_url\":\"https://github.com/frevia/kindle-rss-reader/releases/download/v0.10.0/RSS-Reader-v0.10.0-Kindle.zip\",\"size\":124}," +
@@ -52,6 +71,11 @@ std::string arg(char** argv, int index) { return argv[index]; }
 int main(int argc, char** argv) {
     try {
         if (argc == 1) { parse_tests(); return 0; }
+        if(argc==2&&arg(argv,1)=="version") {std::cout<<rss::app_version()<<"\n";return 0;}
+        if(argc==2&&arg(argv,1)=="check") {
+            const std::atomic<bool> cancel{false};const auto result=rss::check_update(cancel);
+            std::cout<<result.version<<" "<<result.available<<"\n";return 0;
+        }
         if ((argc == 6 || argc == 7) && arg(argv, 1) == "stage") {
             if (argc == 7 && arg(argv, 6) != "cancel") throw std::runtime_error("invalid update_test arguments");
             std::atomic<bool> cancel{argc == 7};

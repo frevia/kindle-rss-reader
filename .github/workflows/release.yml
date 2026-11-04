@@ -34,13 +34,14 @@ jobs:
       - name: Check release version and build host
         run: |
           python3 - <<'PY'
-          import os, platform, re
+          import os, platform, sys
           from pathlib import Path
           from xml.etree import ElementTree
+          sys.path.insert(0, "native-rss/tools")
+          import package
           tag = os.environ["RELEASE_TAG"]
-          assert re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+", tag), "Invalid release tag"
+          assert package.project_version(Path("native-rss/CMakeLists.txt").read_text()) == tag, "CMake version does not match release tag"
           assert platform.system() == "Darwin" and platform.machine() == "arm64", "Apple Silicon runner required"
-          assert f"project(kindle_rss VERSION {tag[1:]} LANGUAGES CXX)" in Path("native-rss/CMakeLists.txt").read_text()
           assert ElementTree.parse("native-rss/device/kual/config.xml").findtext("information/version") == tag[1:]
           PY
 
@@ -128,12 +129,16 @@ jobs:
           RELEASE_COMMIT: ${{ github.sha }}
         run: |
           python3 native-rss/tools/release_notes.py "$RELEASE_TAG" "$RELEASE_COMMIT" > "$RUNNER_TEMP/release-notes.md"
+          PRERELEASE=false
+          if [[ "$RELEASE_TAG" == *-beta.* ]]; then PRERELEASE=true; fi
           if gh release view "$RELEASE_TAG" --json isDraft > "$RUNNER_TEMP/release.json" 2>/dev/null; then
             python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))["isDraft"] is True, "Refusing to overwrite a published release"' "$RUNNER_TEMP/release.json"
-            gh release edit "$RELEASE_TAG" --target "$RELEASE_COMMIT" \
+            gh release edit "$RELEASE_TAG" --target "$RELEASE_COMMIT" --prerelease="$PRERELEASE" \
               --title "RSS Reader $RELEASE_TAG" --notes-file "$RUNNER_TEMP/release-notes.md"
           else
-            gh release create "$RELEASE_TAG" --verify-tag --target "$RELEASE_COMMIT" --draft \
+            PRERELEASE_FLAG=()
+            if [[ "$PRERELEASE" == true ]]; then PRERELEASE_FLAG=(--prerelease); fi
+            gh release create "$RELEASE_TAG" --verify-tag --target "$RELEASE_COMMIT" --draft "${PRERELEASE_FLAG[@]}" \
               --title "RSS Reader $RELEASE_TAG" --notes-file "$RUNNER_TEMP/release-notes.md"
           fi
           gh release upload "$RELEASE_TAG" --clobber \

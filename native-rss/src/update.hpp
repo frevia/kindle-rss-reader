@@ -13,6 +13,7 @@ struct UpdateRelease {
 };
 std::string app_version();
 UpdateRelease parse_update_release(const std::string& json, const std::string& current);
+UpdateRelease parse_update_releases(const std::string& json, const std::string& current);
 UpdateRelease check_update(const std::atomic<bool>& cancel);
 using UpdateProgress = std::function<void(const std::string&)>;
 void prepare_update(const UpdateRelease& release, const std::filesystem::path& root,

@@ -25,6 +25,14 @@ class ReleaseTests(unittest.TestCase):
         with self.assertRaises(ValueError): release_notes.render("../escape", sha)
         with self.assertRaises(ValueError): release_notes.render(TAG, "main")
 
+    def test_notes_accept_beta_and_reject_malformed_suffixes(self):
+        beta = "v0.0.4-beta.2"
+        with patch.object(release_notes.Path, "read_text", autospec=True, return_value="# Beta notes") as read:
+            self.assertEqual(release_notes.render(beta, "a" * 40), "# Beta notes")
+            self.assertEqual(read.call_args.args[0].name, f"RELEASE-{beta}.md")
+        for tag in ("v0.0.4-beta.0", "v0.0.4-beta.01", "v0.0.4-beta.1000000", "v0.0.4-rc1"):
+            with self.subTest(tag=tag), self.assertRaises(ValueError): release_notes.render(tag, "a" * 40)
+
     def setUp(self):
         self.folder = tempfile.TemporaryDirectory()
         self.addCleanup(self.folder.cleanup)
@@ -89,6 +97,22 @@ class ReleaseTests(unittest.TestCase):
         self.build["inputs"] = self.inputs; self.write_archives()
         with self.assertRaisesRegex(ValueError, "版本"): release.stage_release(self.output, "v0.0.4")
 
+    def test_beta_tag_requires_matching_source_and_update_versions(self):
+        tag = "v0.0.4-beta.2"
+        self.sources["native-rss/CMakeLists.txt"] = (b'project(kindle_rss VERSION 0.0.4 LANGUAGES CXX)\nset(RSS_VERSION_SUFFIX "-beta.2")\n', False)
+        self.files["extensions/native-rss/config.xml"] = b"<extension><information><version>0.0.4-beta.2</version></information></extension>"
+        self.files["native-rss/UPDATE.json"] = b'{"format":1,"model":"Kindle","version":"v0.0.4-beta.2"}\n'
+        self.write_archives()
+        with patch.object(release.source_bundle, "verify_bundle"):
+            self.assertEqual(release.stage_release(self.output, tag), self.output / f"release-{tag}")
+        for suffix in ("-beta.0", "-beta.01", "-rc1"):
+            with self.subTest(suffix=suffix):
+                with self.assertRaises(ValueError): release.stage_release(self.output, "v0.0.4" + suffix)
+        self.sources["native-rss/CMakeLists.txt"] = (b'project(kindle_rss VERSION 0.0.4 LANGUAGES CXX)\nset(RSS_VERSION_SUFFIX "-beta.1")\n', False)
+        self.write_archives()
+        with self.assertRaisesRegex(ValueError, "CMake/KUAL"):
+            release.stage_release(self.output, tag)
+
     def test_invalid_update_metadata_blocks_release(self):
         for data in (b'{"format":1,"model":"KPW3","version":"v0.0.3"}',
                      b'{"format":1,"model":"KPW2","version":"v0.0.3"}',
@@ -120,11 +144,21 @@ class ReleaseTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "程序与构建"): release.stage_release(self.output, TAG)
 
     def test_invalid_tag_rejected_before_packaging(self):
-        for tag in ("", "0.0.3", "v0.0.3-rc1", "v1.2", "v1.2.3/escape", "v1.2.3 "):
+        for tag in ("", "0.0.3", "v0.0.3-rc1", "v0.0.3-beta.0", "v0.0.3-beta.01", "v1.2", "v1.2.3/escape", "v1.2.3 "):
             with patch.object(release.package, "main") as build:
                 with self.assertRaises(SystemExit): release.main([tag])
                 build.assert_not_called()
             with self.assertRaises(ValueError): release.stage_release(self.output, tag)
+
+    def test_release_cli_keeps_beta_tag_out_of_package_parser(self):
+        tag = "v0.0.4-beta.1"
+        with patch.object(sys, "argv", ["release.py", tag]), \
+                patch.object(release.package, "main", side_effect=lambda: self.assertEqual(sys.argv, ["package.py"])), \
+                patch.object(release.source_bundle, "build_bundle"), \
+                patch.object(release, "stage_release") as stage:
+            release.main()
+            stage.assert_called_once_with(Path(release.package.ROOT) / "output", tag)
+            self.assertEqual(sys.argv, ["release.py", tag])
 
     def test_release_cli_does_not_pass_tag_to_package_parser(self):
         with patch.object(sys, "argv", ["release.py", TAG]), \

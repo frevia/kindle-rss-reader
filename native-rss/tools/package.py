@@ -18,12 +18,27 @@ def verify_build(binary, manifest, inputs):
     verify_elf(binary)
 
 
+def project_version(cmake):
+    projects = re.findall(r"(?m)^\s*project\(kindle_rss VERSION ([0-9]+\.[0-9]+\.[0-9]+) LANGUAGES CXX\)\s*$", cmake)
+    if len(projects) != 1:
+        raise RuntimeError("无法从 CMakeLists.txt 读取项目版本")
+    declarations = re.findall(r"(?m)^\s*set\(RSS_VERSION_SUFFIX\b.*$", cmake)
+    if len(declarations) > 1:
+        raise RuntimeError("无法从 CMakeLists.txt 读取项目版本后缀")
+    suffix = ""
+    if declarations:
+        match = re.fullmatch(r'\s*set\(RSS_VERSION_SUFFIX\s+"([^"]*)"\)\s*', declarations[0])
+        if not match:
+            raise RuntimeError("无法从 CMakeLists.txt 读取项目版本后缀")
+        suffix = match.group(1)
+    if suffix and not re.fullmatch(r"-beta\.[1-9][0-9]{0,5}", suffix):
+        raise RuntimeError("无法从 CMakeLists.txt 读取项目版本后缀")
+    return "v" + projects[0] + suffix
+
+
 def update_metadata():
     cmake = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8")
-    match = re.search(r"(?m)^\s*project\(kindle_rss VERSION ([0-9]+\.[0-9]+\.[0-9]+) LANGUAGES CXX\)\s*$", cmake)
-    if not match:
-        raise RuntimeError("无法从 CMakeLists.txt 读取项目版本")
-    return {"format": 1, "model": "Kindle", "version": "v" + match.group(1)}
+    return {"format": 1, "model": "Kindle", "version": project_version(cmake)}
 
 
 def write_zip(path, files):

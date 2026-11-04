@@ -4,7 +4,7 @@
 
 已有真机验证设备为 **Kindle Paperwhite 3（KPW3，2015 款）**。当前源码新增按屏幕和触摸能力运行的 Kindle 兼容版，其他机型仍需实机验收，具体条件见[机型兼容说明](native-rss/docs/COMPATIBILITY.md)。设备需要已经越狱，并完成越狱教程中的后续环境设置。
 
-当前源码的版本号仍为 **v0.0.3**，但已包含该版发布后新增的功能。文档以当前源码为准，并将尚未进入已发布安装包的功能标为“源码开发版”；新增变化见[未发布更新记录](CHANGELOG.md#未发布)，已发布版本的功能与验证范围见 [v0.0.3 发布说明](native-rss/docs/RELEASE-v0.0.3.md)。仍使用 v0.0.2 时，请参阅[旧版本的使用指南](https://github.com/frevia/kindle-rss-reader/blob/v0.0.2/native-rss/docs/USAGE.md)。
+当前源码为 **v0.0.4-beta.1** 升级测试版，包含 v0.0.3 发布后新增的功能。文档以当前源码为准，并将尚未进入已发布安装包的功能标为“源码开发版”；新增变化见[未发布更新记录](CHANGELOG.md#未发布)，已发布版本的功能与验证范围见 [v0.0.3 发布说明](native-rss/docs/RELEASE-v0.0.3.md)。仍使用 v0.0.2 时，请参阅[旧版本的使用指南](https://github.com/frevia/kindle-rss-reader/blob/v0.0.2/native-rss/docs/USAGE.md)。
 
 ## 可以用它做什么
 
@@ -21,7 +21,7 @@
 
 - [自动同步](native-rss/docs/USAGE.md#自动同步源码开发版)：默认开启，在打开阅读器和使用期间按 30 分钟间隔检查订阅，不唤醒休眠设备。
 - [文章翻译与长按选词翻译](native-rss/docs/USAGE.md#文章翻译源码开发版)：英文转简体中文，支持原文、译文、双语及离线缓存；可配置 Qwen、SiliconFlow、智谱或自定义 OpenAI 兼容服务，需自行提供 API Key，内容会发往所选服务并可能计费。
-- [GitHub 在线升级](native-rss/docs/INSTALL.md#在线升级源码开发版)：手动检查正式版、下载校验并安装重启；首次启用需 USB 安装支持此功能的版本。
+- [GitHub 在线升级](native-rss/docs/INSTALL.md#在线升级源码开发版)：手动检查当前通道更新、下载校验并安装重启；首次启用需 USB 安装支持此功能的版本。
 - [Kindle 兼容版](native-rss/docs/COMPATIBILITY.md)：按屏幕、触摸与系统能力检查其他 ARMv7 Kindle；其他机型仍待真机验收，首页适配范围不变。
 
 ## 开始使用

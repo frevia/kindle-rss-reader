@@ -14,6 +14,8 @@ import package
 import build_reader
 import source_bundle
 
+VERSION_TAG = re.compile(r"v[0-9]+\.[0-9]+\.[0-9]+(?:-beta\.[1-9][0-9]{0,5})?")
+
 
 def verify_archives(device_path: Path, source_path: Path, tag: str):
     expected_reader = build_reader.verify_reader_license()
@@ -50,7 +52,7 @@ def verify_archives(device_path: Path, source_path: Path, tag: str):
         if update != {"format": 1, "model": "Kindle", "version": tag} or type(update["format"]) is not int:
             raise ValueError("UPDATE.json 与发布机型/版本不一致")
         version = ElementTree.fromstring(device.read("extensions/native-rss/config.xml")).findtext("information/version")
-        if version != tag[1:] or f"project(kindle_rss VERSION {tag[1:]} LANGUAGES CXX)" not in source.read("native-rss/CMakeLists.txt").decode():
+        if version != tag[1:] or package.project_version(source.read("native-rss/CMakeLists.txt").decode()) != tag:
             raise ValueError("发布标签与 CMake/KUAL 版本不一致")
         expected_sources = package.source_files(package.ROOT)
         expected_sources.update({name: (device.read(name), False) for name in checksums if name.startswith("native-rss/licenses/")})
@@ -64,8 +66,8 @@ def verify_archives(device_path: Path, source_path: Path, tag: str):
 
 
 def stage_release(output: Path, tag: str) -> Path:
-    if not re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+", tag):
-        raise ValueError("tag must be a stable version such as v0.0.2")
+    if not VERSION_TAG.fullmatch(tag):
+        raise ValueError("tag must be a stable or beta version such as v0.0.2 or v0.0.4-beta.1")
 
     files = (
         ("kindle-rss-kindle-dev.zip", f"RSS-Reader-{tag}-Kindle.zip"),
@@ -93,8 +95,8 @@ def stage_release(output: Path, tag: str) -> Path:
 
 def main(arguments=None):
     arguments = sys.argv[1:] if arguments is None else arguments
-    if len(arguments) != 1 or not re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+", arguments[0]):
-        raise SystemExit("Usage: release.py vMAJOR.MINOR.PATCH")
+    if len(arguments) != 1 or not VERSION_TAG.fullmatch(arguments[0]):
+        raise SystemExit("Usage: release.py vMAJOR.MINOR.PATCH[-beta.N]")
     tag = arguments[0]
     # The release tag belongs to this CLI, not package.py's option parser.
     arguments_before = sys.argv
