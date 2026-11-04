@@ -1,6 +1,6 @@
 # Kindle 机型兼容
 
-当前源码的兼容版使用同一份静态 ARMv7 程序，按设备实际能力检查屏幕、输入和系统会话。已有设备验证记录来自 KPW3／5.16.2.1.1；本轮改变了刷新路径，仍需重新实机验收。其他机型的纯函数、事件回放和会话模拟通过不等于真机支持认证。
+兼容代码已随 **v0.0.4-beta.1／beta.2** 发布，[beta.2 安装包](https://github.com/frevia/kindle-rss-reader/releases/tag/v0.0.4-beta.2)可直接用于普通兼容试装，无需自行构建。兼容版使用同一份静态 ARMv7 程序，按设备实际能力检查屏幕、输入和系统会话。已有设备验证记录来自 KPW3／5.16.2.1.1；本轮改变了刷新路径，仍需重新实机验收。其他机型的纯函数、事件回放和会话模拟通过不等于真机支持认证。
 
 ## 哪些设备可以参与测试
 
@@ -22,9 +22,9 @@
 
 正常退出已有阅读器，连接电脑，备份整个 `native-rss` 文件夹；首次安装也请备份重要书籍和文件。已有首页适配时先按[首页说明](HOME.md#启用停用和卸载)停用，测试期间保持系统正常竖屏并关闭设备密码锁。
 
-只使用本项目的 **`-Kindle.zip`** 兼容包，或按[开发参考](DEVELOPMENT.md)构建的 **`kindle-rss-kindle-dev.zip`**。记录完整文件名和下载来源；开发包文件名、版本号可能相同，还需记录维护者提供的构建标识或自行构建时的提交号。
+普通兼容试装下载 [beta.2](https://github.com/frevia/kindle-rss-reader/releases/tag/v0.0.4-beta.2) 中的 **`RSS-Reader-v0.0.4-beta.2-Kindle.zip`**。只有专门验证 beta.1 → beta.2 在线升级时才先装 [beta.1](https://github.com/frevia/kindle-rss-reader/releases/tag/v0.0.4-beta.1)，步骤见[在线升级测试](INSTALL.md#在线升级测试)。记录完整文件名和下载来源；自行构建的 `kindle-rss-kindle-dev.zip` 还需记录提交号。
 
-先到[最新版下载页面](https://github.com/frevia/kindle-rss-reader/releases/latest)确认附件。如果没有兼容包，不要改用 `-KPW3.zip`：先通过[问题反馈](https://github.com/frevia/kindle-rss-reader/issues)联系维护者询问测试包，或自行构建。历史 KPW3 专用包改名也不会获得兼容能力。
+注意：[正式版最新版入口](https://github.com/frevia/kindle-rss-reader/releases/latest)仍为 v0.0.3，不包含上述 beta。只使用本项目的 `-Kindle.zip` 兼容包；历史 `-KPW3.zip` 改名也不会获得兼容能力。
 
 ### 2. 复制文件，先导出诊断
 
@@ -157,6 +157,6 @@ Basic 2019 的部分面板使用带 tracking ID、没有标准 MT slot 的 Snow 
 
 ## 实现参考
 
-参考本地微信读书安装包的职责划分，未复制其封装的程序或脚本。刷新参数遵循 [FBInk CLI](https://github.com/NiLuJe/FBInk/blob/master/CLI.md)，输入协议遵循 [Linux 多点触摸协议](https://docs.kernel.org/input/multi-touch-protocol.html)，电源节点对照 [KOReader Kindle 设备实现](https://github.com/koreader/koreader/blob/3d40440e7f07a156dfee6cffc50400654d2336da/frontend/device/kindle/device.lua)。各项目的硬件支持范围不等于本项目的实机验收范围。
+刷新参数遵循 [FBInk CLI](https://github.com/NiLuJe/FBInk/blob/master/CLI.md)，输入协议遵循 [Linux 多点触摸协议](https://docs.kernel.org/input/multi-touch-protocol.html)，电源节点对照 [KOReader Kindle 设备实现](https://github.com/koreader/koreader/blob/3d40440e7f07a156dfee6cffc50400654d2336da/frontend/device/kindle/device.lua)。各项目的硬件支持范围不等于本项目的实机验收范围。
 
 电源属性与固件分界对照同一固定版本的 [KOReader powerd](https://github.com/koreader/koreader/blob/3d40440e7f07a156dfee6cffc50400654d2336da/frontend/device/kindle/powerd.lua) 和 [Kindle 启动脚本](https://github.com/koreader/koreader/blob/3d40440e7f07a156dfee6cffc50400654d2336da/platform/kindle/koreader.sh)。

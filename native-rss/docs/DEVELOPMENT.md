@@ -4,7 +4,7 @@
 
 面向 Kindle 的独立原生 RSS 阅读器，当前源码新增按设备能力检查的兼容版，范围见 [COMPATIBILITY.md](COMPATIBILITY.md)。C++17、CREngine 正文排版与 FreeType 灰度渲染、SQLite 离线存储、libxml2 订阅解析和 libcurl 联网；桌面使用 SDL 展示相同的渲染结果。不是 KOReader 插件，也不是网页套壳。
 
-**当前是开发验证版，尚不是真机验收完成的 Kindle 成品。** ARM 静态构建已安装到 KPW3；开发包提供中文字体和证书。单次启动退出、休眠、应用及启动器强杀恢复已有真机证据，拼音搜索选词经用户确认。离线连续翻页、USB 退出、OPML、阅读位置、字号与收藏已通过用户实机验证；长期使用仍待验收。完整范围见[实施计划](PLAN.md)，设备证据见 [DEVICE.md](DEVICE.md)。
+**当前为已发布的 v0.0.4-beta.2 兼容测试版，尚未完成整体验收。** 可直接使用 [beta 安装包](https://github.com/frevia/kindle-rss-reader/releases/tag/v0.0.4-beta.2)，包内提供中文字体和证书。ARM 静态构建已有 KPW3 安装记录；单次启动退出、休眠、应用及启动器强杀恢复已有真机证据，拼音搜索选词经用户确认。离线连续翻页、USB 退出、OPML、阅读位置、字号与收藏已有用户实机验证；本轮兼容改动和长期使用仍待验收。完整范围见[实施计划](PLAN.md)，设备证据见 [DEVICE.md](DEVICE.md)。
 
 ## 安装到 Kindle
 
@@ -81,11 +81,11 @@ rtk proxy python3 native-rss/tools/package.py
 
 ## GitHub Release
 
-### 在线升级协议（源码开发版）
+### 在线升级协议
 
-`src/update.cpp` 使用已有 libcurl、SQLite JSON、OpenSSL SHA256 与 zlib，手动查询固定公开仓库的 `/releases/latest`，仅接受数值更大的 `vMAJOR.MINOR.PATCH` 正式版本。按文件名选择 Kindle 兼容 ZIP 与 `SHA256SUMS.txt`；不发送 GitHub 令牌，初始资产地址必须属于本仓库对应标签。每次跳转重新校验 HTTPS 与 GitHub 域名，禁止降级 HTTP 或跳出 GitHub 服务。API、校验文本、ZIP 分别限制为 2 MiB、64 KiB、128 MiB；解压后最多 256 MiB / 1024 文件。联网走 UI 单后台任务和取消信号，不与订阅同步或翻译并行。
+`src/update.cpp` 使用已有 libcurl、SQLite JSON、OpenSSL SHA256 与 zlib。正式版手动查询固定公开仓库的 `/releases/latest`，只接受数值更大的 `vMAJOR.MINOR.PATCH` 正式版本；`vMAJOR.MINOR.PATCH-beta.N` 客户端查询 `/releases?per_page=100`，从最近 100 条发布中选择更高的 beta 或正式版。同一基础版本按 beta 序号递增，正式版高于所有 beta；拒绝草稿、同版本、降级和与标签不匹配的预发布标记，不安装主分支提交。按文件名选择 Kindle 兼容 ZIP 与 `SHA256SUMS.txt`；不发送 GitHub 令牌，初始资产地址必须属于本仓库对应标签。每次跳转重新校验 HTTPS 与 GitHub 域名，禁止降级 HTTP 或跳出 GitHub 服务。API、校验文本、ZIP 分别限制为 2 MiB、64 KiB、128 MiB；解压后最多 256 MiB / 1024 文件。联网走 UI 单后台任务和取消信号，不与订阅同步或翻译并行。
 
-`package.py` 将 `native-rss/UPDATE.json`（`format: 1`、`model: Kindle`、CMake 对应 `version: vX.Y.Z`）纳入逐文件 MANIFEST。`release.py` 校验元数据与标签一致，安装附件使用 `RSS-Reader-vX.Y.Z-Kindle.zip`，历史 KPW3 专用开发版需经 USB 迁移一次，兼容版不会在线回退到旧专用包。升级器仅解压本打包器生成的普通 DEFLATE ZIP 条目，拒绝 ZIP64、加密、数据描述符、额外字段、重复或越界路径、个人数据路径及目标符号链接，并核对逐文件哈希与实际文件集合。未来更改归档特性或协议时需要先升级客户端，不应将不兼容的包公开为最新版。
+`package.py` 将 `native-rss/UPDATE.json`（`format: 1`、`model: Kindle`、CMake 对应版本，含 beta 后缀）纳入逐文件 MANIFEST。`release.py` 校验元数据与标签一致，安装附件使用 `RSS-Reader-<版本标签>-Kindle.zip`，例如 `RSS-Reader-v0.0.4-beta.2-Kindle.zip`。历史 KPW3 专用开发版需经 USB 迁移一次，兼容版不会在线回退到旧专用包。升级器仅解压本打包器生成的普通 DEFLATE ZIP 条目，拒绝 ZIP64、加密、数据描述符、额外字段、重复或越界路径、个人数据路径及目标符号链接，并核对逐文件哈希与实际文件集合。未来更改归档特性或协议时需要先升级客户端，不应将不兼容的包公开为最新版。
 
 下载暂存于 `native-rss/.update`；安装前通过 SQLite backup API 保存一致性数据库副本。阅读器以专用退出码 42 交接到旧程序副本 `runner`：启动器等待数据库关闭，在恢复监护与暂停 volumd 的保护下执行 `update-apply`。安装先完整备份现有文件并持久化 journal，再逐文件以 rename 替换；不原地覆盖运行中的文件，不整目录替换 data/documents/extensions。新的启动器恢复系统界面后重启，程序首次成功显示设备画面才提交 journal。安装出错立即回退，安装中断或新程序启动失败则在下次启动、打开数据库之前通过旧 runner 恢复。此机制不提供数据库迁移功能，也不证明硬件掉电时文件系统仍完整；外部备份和真机验收仍必要。
 
@@ -93,11 +93,11 @@ rtk proxy python3 native-rss/tools/package.py
 
 ### 发布步骤
 
-当前版本说明见 [v0.0.3](RELEASE-v0.0.3.md)。更新 CMake、KUAL 版本号及对应发布文档后提交，再推送 `v数字.数字.数字` 标签，触发[发布工作流](../../.github/workflows/release.yml)。安装文档始终链接最新版。
+当前 beta 版本说明见 [beta.1](RELEASE-v0.0.4-beta.1.md) 与 [beta.2](RELEASE-v0.0.4-beta.2.md)，正式版记录见 [v0.0.3](RELEASE-v0.0.3.md)。更新 CMake 基础版本、`RSS_VERSION_SUFFIX`、KUAL 版本号及对应发布文档后提交，再推送 `v数字.数字.数字` 或 `v数字.数字.数字-beta.序号` 标签，触发[发布工作流](../../.github/workflows/release.yml)。安装文档分别链接正式版最新版和 beta 标签页，不能用 `/releases/latest` 代替 beta 下载入口。
 
 工作流使用 Apple Silicon macOS runner、固定 Zig 哈希，运行宿主 CTest、重编译 ARM，再运行 `tools/release.py`。后者生成安装包、项目源码、第三方对应源码和 `SHA256SUMS.txt`。第三方归档按构建锁验证，项目源码必须与二进制的构建输入一致；仅修改 `public_release_ready` 布尔值无法通过检查。
 
-通过检查后创建或更新同名 Release 草稿，上传四个附件；已公开的版本不会被覆盖。发布说明由 `tools/release_notes.py` 读取对应版本文档并将相对链接转换为固定提交链接。下载附件、核对校验值并完成 KPW3 安装包验证后，再将草稿公开并标为最新版。工作流不会自动部署设备或提前公开附件。
+通过检查后创建或更新同名 Release 草稿，上传四个附件；beta 标签设置预发布标记，已公开的版本不会被覆盖。发布说明由 `tools/release_notes.py` 读取对应版本文档并将相对链接转换为固定提交链接。下载附件、核对校验值并完成 KPW3 安装包验证后，再手动公开草稿；beta 保持预发布，正式版发布时再按需要标为最新版。工作流不会自动部署设备或提前公开附件。
 
 已发布附件若仅修订文档，需保留原程序、非文档源码和 `BUILD.json`，在 `native-rss/DOCUMENTATION.json` 中记录应用提交与文档修订提交，并重算安装清单及附件校验值。发布说明同时标注文档更新，不能把文档修订称为重新编译。GitHub 自动生成的源码归档仍对应原版本标签，后补的文档以自定义源码包及其文档修订记录为准。
 
@@ -127,7 +127,7 @@ GUI 的导入按钮读取数据库同目录下的 `feeds.opml`；导出写入 `s
 
 列表左下角「菜单」向上展开应用菜单，菜单顶部显示 `RSS Reader`，提供订阅、设置、同步与退出；同步不再占用顶部右侧，点击菜单中的同步仍直接启动任务，运行中进入只显示现有进度。首页时间靠左，与范围标题使用同一左边距；带返回按钮的二级页面时间保持居中，阅读页时间保留在底部左侧，Wi-Fi 和电量靠右。
 
-顶部时间与电量使用独立的界面字体：设备已有 `/mnt/us/fonts/AlibabaPuHuiTi-3-55-Regular.ttf` 时直接读取，用于对齐微信读书的状态栏；缺失或加载失败时回退到应用字体，不影响启动。该可选字体不随安装包分发，正文仍使用原来的字体。状态栏由本应用绘制并读取系统实时状态；启动器仍暂停原生状态栏，避免争用 framebuffer。
+顶部时间与电量使用独立的界面字体：设备已有 `/mnt/us/fonts/AlibabaPuHuiTi-3-55-Regular.ttf` 时直接读取；缺失或加载失败时回退到应用字体，不影响启动。该可选字体不随安装包分发，正文仍使用原来的字体。状态栏由本应用绘制并读取系统实时状态；启动器仍暂停原生状态栏，避免争用 framebuffer。
 
 ## 界面约定
 
@@ -200,7 +200,7 @@ rtk proxy native-rss/build/rss-performance native-rss/vendor/runtime/reader.ttf 
 
 通过 Wi-Fi SSH 调试时，USBNetwork 应配置 `USE_WIFI="true"`、`USE_WIFI_SSHD_ONLY="true"`，避免启用 SSH 时把 USB 切为网卡模式。退出阅读器后若只能充电，先核对会话日志、`volumd` 进程状态与 `useUsbForNetwork`；`useUsbForNetwork=1` 且加载 `g_ether` 表示 USBNetwork 模式，不能据此断言阅读器未恢复服务。切回 USBMS 后应为 `useUsbForNetwork=0`、加载 `g_file_storage`，再通过实际拔插和主机磁盘挂载确认。不要让阅读器启动器强制覆盖用户的 USBNetwork 模式。
 
-这一节供定位启动失败时核对，不需要让安装用户逐项执行或记住命令。先按真实调用链区分入口问题与运行环境问题：KUAL 菜单和 `reader-scriptlet.sh` 最终都调用 `launch.sh`，后者只在选择书库入口时需要 SH_Integration。`launch.sh` 不调用或检查 Hotfix、Scriptlets、微信读书或商店；它单独检查并调用 FBInk。Universal Hotfix 可以提供 Scriptlets 和 FBInk，但不是唯一来源，不应无条件要求安装或重装。用户侧按[安装教程](INSTALL.md)复制并打开应用，只有入口缺失或启动失败时才进入[启动问题排查](TROUBLESHOOTING.md)，按对应现象检查环境或导出检查文件。
+这一节供定位启动失败时核对，不需要让安装用户逐项执行或记住命令。先按真实调用链区分入口问题与运行环境问题：KUAL 菜单和 `reader-scriptlet.sh` 最终都调用 `launch.sh`，后者只在选择书库入口时需要 SH_Integration。`launch.sh` 不调用或检查 Hotfix、Scriptlets 或商店；它单独检查并调用 FBInk。Universal Hotfix 可以提供 Scriptlets 和 FBInk，但不是唯一来源，不应无条件要求安装或重装。用户侧按[安装教程](INSTALL.md)复制并打开应用，只有入口缺失或启动失败时才进入[启动问题排查](TROUBLESHOOTING.md)，按对应现象检查环境或导出检查文件。
 
 启动器在 guardian fork 前创建 `/tmp/rss-cre-session.*` 私有目录并导出 `RSS_CRE_CACHE`。退出时先关闭阅读器并删除本会话缓存，再恢复服务及USB；启动器被杀时由独立监护进程执行同样的清理。原会话锁、数据库路径及系统恢复保护继续使用，不需要额外测试入口。
 
@@ -214,10 +214,10 @@ rtk proxy native-rss/build/rss-performance native-rss/vendor/runtime/reader.ttf 
 
 `device/diagnose.sh` 导出部分工具路径、设备参数和启动日志，但不会自动补装组件，也不会逐项覆盖启动器的全部检查。协助用户时先根据报告确认原因，再提供适合其设备的补装步骤。FBInk 的上游来源见[第三方组件说明](../../THIRD_PARTY_NOTICES.md)，程序本身不包含在当前安装包中。
 
-### 本应用与微信读书安装包的边界
+### 随包资源与共享启动工具
 
-- RSS Reader 通过自己的 C++ 程序直接处理文章和屏幕，不调用微信读书运行时、Mesquito 的 `apps` 入口或微信读书的 `weread` 目录。正文所需字体与证书随 RSS 安装包提供；顶部状态栏可复用设备 `/mnt/us/fonts` 中已有的界面字体，缺失时自动回退，无需安装微信读书。
-- Scriptlets 是可选的共享书库启动能力；两者的 `.sh` 入口都会使用它，但这不等于应用本体共享插件。KUAL 入口不经过 SH_Integration。
+- 正文所需字体与证书随 RSS 安装包提供；顶部状态栏可复用设备 `/mnt/us/fonts` 中已有的界面字体，缺失时自动回退。
+- Scriptlets 是可选的共享书库启动能力；书库 `.sh` 入口通过 SH_Integration 启动，KUAL 入口不经过它。
 - `# DontUseFBInk` 只禁止 SH_Integration 把脚本输出额外绘制到屏幕，不能据此认为 RSS 不需要 FBInk：`launch.sh` 仍在恢复系统画面时执行它。
 
 ## 设备调试空间与写入失败恢复（2026-10-30）

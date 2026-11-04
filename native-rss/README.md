@@ -2,10 +2,10 @@
 
 想把阅读器装到 Kindle 上，从这里开始：
 
-1. [安装教程](docs/INSTALL.md)：下载最新版、复制文件、打开阅读器，以及升级或卸载。
-2. [使用指南](docs/USAGE.md)：添加订阅、下载文章、阅读、分组和备份；源码开发版的自动同步、文章与选区翻译也在这里。
+1. [安装教程](docs/INSTALL.md)：选择正式版或 beta、复制文件、打开阅读器，以及升级或卸载。
+2. [使用指南](docs/USAGE.md)：添加订阅、下载文章、阅读、分组和备份；beta 的自动同步、文章与选区翻译也在这里。
 
-文档以当前源码为准；标为“源码开发版”的新增功能尚未进入已发布的 v0.0.3 安装包，见[未发布更新记录](../CHANGELOG.md#未发布)。[在线升级](docs/INSTALL.md#在线升级源码开发版)首次启用仍需 USB 安装；新兼容包的设备条件与实测范围见[机型兼容说明](docs/COMPATIBILITY.md)。
+文档以已发布的 **v0.0.4 beta** 为准：[beta.2 下载](https://github.com/frevia/kindle-rss-reader/releases/tag/v0.0.4-beta.2)。正式版仍为 v0.0.3，正式版最新版入口不包含 beta。普通兼容试装可直接安装 beta.2；验证[在线升级](docs/INSTALL.md#在线升级测试)时先通过 USB 安装 beta.1，再升级到 beta.2。功能变化见[更新记录](../CHANGELOG.md)，设备条件与实测范围见[机型兼容说明](docs/COMPATIBILITY.md)。
 
 原生首页的可选 RSS 卡片见[首页适配说明](docs/HOME.md)，普通安装默认关闭。
 
