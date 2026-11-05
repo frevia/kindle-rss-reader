@@ -158,6 +158,7 @@ void App::draw(){
     else if(screen_==Screen::Sync){list_screen();list_visible=true;sync_screen();}
     else if(screen_==Screen::Cache)management_screen();
     else if(screen_==Screen::Settings)settings_screen();
+    else if(screen_==Screen::About)about_screen();
     else if(screen_==Screen::Update)update_screen();
     else if(screen_==Screen::Discovery)discovery_screen();
     else if(screen_==Screen::Directories)directories_screen();
@@ -769,33 +770,41 @@ void App::app_menu(){
 }
 void App::settings_screen(){
     const int w=c_.width;page_header("设置");
+    int y=224;
+    const auto setting=[&](const std::string& title,const std::string& description,bool enabled,std::function<void()> toggle){
+        button({32,y,w-64,88},title,toggle,false,32,Icon::None,true,Align::Left);
+        const Rect state{w-212,y+8,180,72};frame(c_,state);
+        button(state,enabled?"已开启":"已关闭",toggle,enabled,26);
+        int baseline=y+112;
+        for(const auto& line:c_.wrap(description,24,w-64)){
+            c_.text(32,baseline,line.text,24,85);baseline+=36;
+        }
+        y=baseline+24;c_.rule(32,y,w-64,205);y+=20;
+    };
     const bool enabled=store_.setting("home_visible")=="1";
-    const auto toggle=[this,enabled]{store_.set_setting("home_visible",enabled?"0":"1");};
-    button({32,270,w-316,112},"在 Kindle 首页显示 RSS订阅",toggle,false,32,Icon::None,true,Align::Left);
-    button({w-252,282,220,88},enabled?"已开启":"已关闭",toggle,enabled,28);
-    int y=444;
-    for(const auto& line:c_.wrap("退出阅读器返回 Kindle 首页后生效。关闭后收起 RSS 区域，订阅和阅读记录会保留。",24,w-64)){
-        c_.text(32,y,line.text,24,85);y+=36;
-    }
-    c_.rule(32,536,w-64,205);
+    setting("首页 RSS","退出阅读器返回 Kindle 首页后生效；订阅和阅读记录保留。",enabled,
+            [this,enabled]{store_.set_setting("home_visible",enabled?"0":"1");});
     const bool auto_enabled=store_.setting("auto_sync")!="0";
-    const auto auto_toggle=[this,auto_enabled]{store_.set_setting("auto_sync",auto_enabled?"0":"1");};
-    button({32,576,w-316,112},"自动同步订阅",auto_toggle,false,32,Icon::None,true,Align::Left);
-    button({w-252,588,220,88},auto_enabled?"已开启":"已关闭",auto_toggle,auto_enabled,28);
-    y=744;
-    for(const auto& line:c_.wrap("开启后打开阅读器时检查订阅更新，并在使用中每 30 分钟同步。仅 Wi-Fi 可用时运行；不会唤醒休眠中的 Kindle，也不会自动翻译。",24,w-64)){
-        c_.text(32,y,line.text,24,85);y+=36;
-    }
-    c_.rule(32,920,w-64,205);
-    button({32,940,w-64,88},"在线升级 · "+app_version(),[this]{screen_=Screen::Update;},false,30,Icon::None,true,Align::Left);
-    c_.text(32,1080,"关于与许可",32);
-    y=1132;
+    setting("自动同步订阅","打开阅读器时检查更新，每 30 分钟同步。\n仅在 Wi-Fi 可用时运行；不唤醒设备，不自动翻译。",auto_enabled,
+            [this,auto_enabled]{store_.set_setting("auto_sync",auto_enabled?"0":"1");});
+    hits_.push_back({{32,y,w-64,104},[this]{screen_=Screen::Update;}});
+    c_.text(32,y+62,"在线升级",32);
+    const auto version=app_version();c_.text(w-96-c_.measure(version,26),y+60,version,26,85);
+    c_.icon(Icon::Next,{w-68,y+38,28,28});y+=104;c_.rule(32,y,w-64,205);
+    hits_.push_back({{32,y,w-64,104},[this]{screen_=Screen::About;}});
+    c_.text(32,y+62,"关于与许可",32);c_.icon(Icon::Next,{w-68,y+38,28,28});
+    c_.rule(32,y+104,w-64,205);
+}
+void App::about_screen(){
+    const int w=c_.width;page_header("关于与许可");
+    c_.text(32,246,"RSS Reader · "+app_version(),32);
+    int y=326;
     for(const auto& line:c_.wrap(
-            "RSS Reader · © 2026 frevia 及贡献者\n"
-            "本安装程序按 GNU GPLv3 发布，允许依照许可复制、修改和再分发，不提供任何担保。\n"
-            "完整条款：Kindle 磁盘 native-rss/COPYING；第三方许可见 native-rss/licenses。\n"
-            "源码：github.com/frevia/kindle-rss-reader/releases",24,w-64)){
-        c_.text(32,y,line.text,24,85);y+=36;
+            "© 2026 frevia 及贡献者\n\n"
+            "本安装程序按 GNU GPLv3 发布。\n允许依照许可复制、修改和再分发，不提供任何担保。\n\n"
+            "完整条款：Kindle 磁盘 native-rss/COPYING；第三方许可见 native-rss/licenses。\n\n"
+            "源码：github.com/frevia/kindle-rss-reader/releases",26,w-64)){
+        c_.text(32,y,line.text,26,85);y+=40;
     }
 }
 void App::subscriptions_home_screen(){
@@ -1343,7 +1352,7 @@ void App::back(){
     else if(screen_==Screen::DirectoryWebsite||screen_==Screen::DirectoryDetail)screen_=Screen::Directories;
     else if(screen_==Screen::Cache)screen_=Screen::Sync;
     else if(screen_==Screen::Settings)screen_=Screen::List;
-    else if(screen_==Screen::Update)screen_=Screen::Settings;
+    else if(screen_==Screen::Update||screen_==Screen::About)screen_=Screen::Settings;
     else if(screen_==Screen::Sync){screen_=Screen::List;if(sync_state_!=SyncState::Running){status_.clear();reload();}}
     else if(source_list_)screen_=Screen::Subscriptions;
     dirty=true;

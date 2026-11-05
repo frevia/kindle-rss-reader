@@ -18,7 +18,7 @@ void draw_update_installation(Canvas& canvas, const std::string& message, int el
 class App {
 public:
     enum class ReaderPanel { None, Type, Images, Info, Content, Translation, Selection };
-    enum class Screen { List, SubscriptionHome, Subscriptions, GroupPicker, Groups, GroupEdit, Opml, Sync, Cache, Settings, Update,
+    enum class Screen { List, SubscriptionHome, Subscriptions, GroupPicker, Groups, GroupEdit, Opml, Sync, Cache, Settings, About, Update,
                         Discovery, Directories, DirectoryEdit, DirectoryTopics, DirectoryWebsite, DirectoryDetail, DirectoryScope };
     enum class UpdateState { Idle, Checking, Available, Current, Downloading, Ready, Installing, Failed };
     enum class SyncState { Idle, Running, Complete, Cancelled, Failed };
@@ -181,6 +181,7 @@ private:
     void sync_screen();
     void app_menu();
     void settings_screen();
+    void about_screen();
     void update_screen();
     void open_subscriptions();
     void open_discovery();

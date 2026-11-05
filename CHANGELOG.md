@@ -1,6 +1,11 @@
 # 更新记录
 
-下面保留每次发布时的变化，方便回查。兼容测试使用 [v0.0.4-beta.4](https://github.com/frevia/kindle-rss-reader/releases/tag/v0.0.4-beta.4)；[正式版最新版入口](https://github.com/frevia/kindle-rss-reader/releases/latest)不包含 beta。
+下面保留每次发布时的变化，方便回查。兼容测试使用 [v0.0.4-beta.5](https://github.com/frevia/kindle-rss-reader/releases/tag/v0.0.4-beta.5)；[正式版最新版入口](https://github.com/frevia/kindle-rss-reader/releases/latest)不包含 beta。
+
+## v0.0.4-beta.5 · 2026-11-05
+
+- 整理设置页排版：统一开关状态与整行点击区域，收紧说明和留白，在线升级右侧显示版本号，完整许可说明移入独立的“关于与许可”页面。
+- 修复安装进度页在 FAT 字体替换后触发 SIGBUS：安装前把实际使用的字体复制到已有私有会话缓存，通过 `RSS_FONT` 交给安装器，待安装进程结束后统一清理。字体缺失或复制失败时停止安装。真机已复现 FAT 映射替换退出 135、`/tmp` 同样操作成功；beta.4 官方附件尚未包含此修复，本版同时包含字体与会话锁修复，旧版应优先 USB 升级。补齐修复后，KPW3 已完成原始 beta.4 包的真实在线下载、校验、安装、自动重启与退出重开，数据和配置核对一致；7 项针对性回归测试通过。
 
 ## v0.0.4-beta.4 · 2026-11-05
 
@@ -10,7 +15,7 @@
 
 ## v0.0.4-beta.3 · 2026-11-05
 
-已发布的第三个 beta，完整功能见 [beta.3 说明](native-rss/docs/RELEASE-v0.0.4-beta.3.md)。此版及更早 beta 的启动器存在升级后回滚问题，建议按 [beta.4 安装说明](native-rss/docs/INSTALL.md#旧版升级前修复启动器)通过 USB 迁移；历史附件保持不变。
+已发布的第三个 beta，完整功能见 [beta.3 说明](native-rss/docs/RELEASE-v0.0.4-beta.3.md)。此版及更早 beta 的启动器存在升级后回滚问题，建议按 [beta.5 安装说明](native-rss/docs/INSTALL.md#旧版升级前修复启动器)通过 USB 迁移；历史附件保持不变。
 
 - 在线升级点击「安装并重启」立即显示进度：后台备份阅读数据，退出阅读器后继续显示程序备份、安装及已用时间；安装期间防止重复操作，失败保留原版并沿用回滚保护。检查和慢速下载约每两秒反馈等待或传输进度；尚待 Kindle 真机验收。
 - 重设计订阅页面为任务首页：我的订阅、发现、源库、分组和导入导出集中导航；列表底部只保留翻页，表单统一顶部保存，OPML 详情可查看原始地址。

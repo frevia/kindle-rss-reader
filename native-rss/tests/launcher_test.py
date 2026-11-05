@@ -125,6 +125,16 @@ elif name=="runner":
     if args==["update-apply"]:
         assert "app-start" in events and "-CONT 900003" not in events
         assert pathlib.Path((root/"cache-path").read_text()).exists()
+        if mode in ("update-font-replaced","update-font-custom"):
+            font=pathlib.Path(os.environ["RSS_FONT"])
+            cache=pathlib.Path((root/"cache-path").read_text())
+            assert font.is_relative_to(cache) and font.is_file()
+            expected=b"font-custom" if mode=="update-font-custom" else b"font-before"
+            assert font.read_bytes()==expected
+            if mode=="update-font-replaced":
+                (root/"font.ttf").write_bytes(b"font-after")
+                assert font.read_bytes()==expected
+            log("update-font-stable")
         log("update-apply")
         if mode=="update-failed":sys.exit(1)
     elif args==["update-recover"]:
@@ -179,7 +189,8 @@ elif name=="app":
         log("app-start")
         if mode in ("statusbar-running","statusbar-without-juno","launcher-killed-statusbar"):
             assert "-STOP 900006" in (root/"events").read_text()
-        if mode in ("update-install","update-failed","update-inherited-lock","update-unlock-failed"):sys.exit(42)
+        if mode in ("update-install","update-failed","update-inherited-lock","update-unlock-failed",
+                    "update-font-replaced","update-font-missing","update-font-custom"):sys.exit(42)
         if mode.startswith("browser"):sys.exit(43)
         if mode in ("launcher-killed", "launcher-killed-home", "launcher-killed-statusbar", "launcher-killed-soft"):
             owner=int(os.environ["RSS_LAUNCHER_PID"])
@@ -209,6 +220,8 @@ class LauncherTests(unittest.TestCase):
             elif mode=="state-symlink":
                 (root/"real-state").mkdir();(root/"state").rmdir();(root/"state").symlink_to(root/"real-state",target_is_directory=True)
             (root/"state/session.log").write_text("previous session fixture\n")
+            (root/"font.ttf").write_bytes(b"font-before")
+            (root/"font-custom.ttf").write_bytes(b"font-custom")
             if mode=="log-symlink":
                 (root/"protected").write_text("untouched")
                 (root/"state/session.log").unlink()
@@ -264,6 +277,7 @@ class LauncherTests(unittest.TestCase):
             (root/"prettyversion").write_text(firmware)
             if mode=="firmware-missing":(root/"prettyversion").unlink()
             values={"STATE":root/"state","APP":root/"bin/app","DB":root/"rss.sqlite","FB":root/"fb",
+                    "FONT":root/"font.ttf",
                     "PROC":root/"proc","GET":root/"bin/get","SET":root/"bin/set","REFRESH":root/"bin/refresh","KILL":root/"bin/kill","PASSCODE":root/"passcode","UPDATE":root/"update","LAUNCH":root/"restart.sh",
                     "INITCTL":root/"bin/initctl","STATUSBAR_JOB":root/"statusbar.conf",
                     "UPSTART_DIR":root/"upstart","FIRMWARE":root/"prettyversion","FBINK_ALTERNATES":root/"bin/refresh-fallback"}
@@ -275,12 +289,15 @@ class LauncherTests(unittest.TestCase):
             for i,line in enumerate(script):
                 key=line.split("=",1)[0]
                 if key in values:script[i]=key+"='"+str(values.pop(key))+"'"
+            if mode=="update-font-missing":(root/"font.ttf").unlink()
             source="\n".join(script)+"\n"
             # macOS has no /proc; the production guardian uses Linux start time and zombie state.
             source=re.sub(r'^owner_born=.*$', 'owner_born=123',source,flags=re.M)
             source=re.sub(r'owner_alive\(\) \{.*?\n\}', 'owner_alive() { "$KILL" -0 "$owner" 2>/dev/null; }',source,flags=re.S)
             launch=root/"launch.sh";launch.write_text(source)
             env=dict(os.environ,FIXTURE=folder,SCENARIO=mode,PATH=str(root/"bin")+os.pathsep+os.environ["PATH"])
+            env.pop("RSS_FONT",None)
+            if mode=="update-font-custom":env["RSS_FONT"]=str(root/"font-custom.ttf")
             if mode.startswith("launcher-killed"):
                 process=subprocess.Popen(["/bin/sh",str(launch)],env=env,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
                 try:
@@ -311,6 +328,7 @@ class LauncherTests(unittest.TestCase):
                 self.assertEqual((root/"state/session.previous.log").read_text(),"previous session fixture\n")
                 log=(root/"state/session.log").read_text()
                 self.assertIn("session_start",log)
+                if mode=="update-font-missing":self.assertIn("无法复制升级字体，安装已停止",log)
                 if mode!="update-recover":self.assertIn("session_end",log)
                 if mode=="cache-cleanup-error":self.assertIn("系统界面恢复不完整",log)
             if mode=="log-symlink":self.assertEqual((root/"protected").read_text(),"untouched")
@@ -513,6 +531,33 @@ class LauncherTests(unittest.TestCase):
         self.assertEqual(pixel,b"x")
         self.assertIn("update-apply",events)
         self.assertNotIn("restart",events)
+
+    def test_update_uses_stable_font_while_replacing_install_source(self):
+        result,events,pixel=self.run_case("update-font-replaced")
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertEqual(pixel,b"x")
+        self.assertIn("update-font-stable",events)
+        self.assertLess(events.index("update-font-stable"),events.index("update-apply"))
+        self.assertLess(events.index("update-apply"),events.index("cache-rm"))
+        self.assertLess(events.index("cache-rm"),events.index("-CONT 900003"))
+        self.assertIn("restart",events)
+
+    def test_update_stops_if_progress_font_copy_fails(self):
+        result,events,pixel=self.run_case("update-font-missing")
+        self.assertEqual(result.returncode,1,result.stderr)
+        self.assertEqual(pixel,b"x")
+        self.assertIn("app-start",events)
+        self.assertNotIn("update-apply",events)
+        self.assertNotIn("restart",events)
+        self.assertIn("-CONT 900003",events)
+        self.assertLess(events.index("app-start"),events.index("-CONT 900003"))
+
+    def test_update_copies_selected_custom_font(self):
+        result,events,pixel=self.run_case("update-font-custom")
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertEqual(pixel,b"x")
+        self.assertIn("update-font-stable",events)
+        self.assertIn("restart",events)
 
     def test_interrupted_update_is_recovered_before_opening_device_or_database(self):
         result,events,pixel=self.run_case("update-recover")

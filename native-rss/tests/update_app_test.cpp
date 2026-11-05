@@ -12,7 +12,7 @@ int main() {
         std::filesystem::create_directories(folder);canvas.write_pgm((std::filesystem::path(folder)/name).string());
     }};
     tap(100,1392);tap(140,1070);assert(app.screen()==rss::App::Screen::Settings);shot("update-settings.pgm");
-    tap(300,984);assert(app.screen()==rss::App::Screen::Update);shot("update-idle.pgm");
+    tap(990,696);assert(app.screen()==rss::App::Screen::Update);shot("update-idle.pgm");
     tap(140,1380);assert(app.take_request()=="check-update"&&app.update_state()==rss::App::UpdateState::Checking);
     tap(140,1380);assert(app.take_request()=="cancel-update");app.update_finished(true);assert(app.update_state()==rss::App::UpdateState::Idle);
     rss::UpdateRelease release;release.version="v0.0.4";release.available=true;
@@ -28,7 +28,7 @@ int main() {
     app.back();assert(app.screen()==rss::App::Screen::Settings);
     app.back();assert(app.screen()==rss::App::Screen::List);
     app.set_reader_status({100,false,true,"12:00"});app.maybe_auto_sync(2000000000);assert(app.take_request().empty());
-    tap(100,1392);tap(140,1070);tap(300,984);app.update_finished(false,"安装包 SHA256 校验失败");shot("update-failed.pgm");
+    tap(100,1392);tap(140,1070);tap(300,696);app.update_finished(false,"安装包 SHA256 校验失败");shot("update-failed.pgm");
     assert(!app.quit&&app.update_state()==rss::App::UpdateState::Failed);
     tap(900,1380);assert(app.take_request().empty());
     app.update_checked(release);app.update_started(true);app.update_finished(false);shot("update-ready.pgm");

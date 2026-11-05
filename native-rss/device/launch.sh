@@ -3,6 +3,7 @@
 umask 077
 STATE=/var/local/native-rss
 APP=/mnt/us/native-rss/bin/kindle-rss
+FONT=/mnt/us/native-rss/fonts/reader.ttf
 DB=/mnt/us/native-rss/data/rss.sqlite
 FB=/dev/fb0
 PROC=/proc
@@ -349,10 +350,13 @@ child=
 if [ "$result" -eq 43 ]; then open_browser=1; result=0; fi
 if [ "$result" -eq 42 ]; then
     [ -x "$UPDATE/runner" ] && [ ! -L "$UPDATE/runner" ] || fail '升级安装程序缺失'
+    # FAT replacement invalidates the old font mmap; keep the installer font in its session cache.
+    update_font=$(mktemp "$CRE_CACHE/update-font.XXXXXX") || fail '无法创建升级字体副本'
+    cp "${RSS_FONT-$FONT}" "$update_font" || fail '无法复制升级字体，安装已停止'
     # The old shell keeps its open script inode; replacements use rename, never in-place writes.
     # Keep volumd paused and the guardian alive until every installation write has finished.
     launching=1
-    RSS_UPDATE_GUARD=1 RSS_LAUNCHER_PID=$owner "$UPDATE/runner" update-apply 9>&- &
+    RSS_FONT="$update_font" RSS_UPDATE_GUARD=1 RSS_LAUNCHER_PID=$owner "$UPDATE/runner" update-apply 9>&- &
     child=$!
     launching=0
     while "$KILL" -0 "$child" 2>/dev/null; do

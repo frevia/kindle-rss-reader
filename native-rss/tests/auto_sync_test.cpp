@@ -65,7 +65,7 @@ int main(){
         rss::App app(store,canvas);wifi(app);app.draw();app.tap(100,1392);app.draw();app.tap(140,1070);assert(app.screen()==rss::App::Screen::Settings);
         assert(store.setting("auto_sync").empty());
         app.draw();if(const auto* folder=std::getenv("RSS_TEST_SNAPSHOTS")){std::filesystem::create_directories(folder);canvas.write_pgm((std::filesystem::path(folder)/"settings-auto-sync-on.pgm").string());}
-        app.tap(950,630);assert(store.setting("auto_sync")=="0");app.draw();
+        app.tap(950,460);assert(store.setting("auto_sync")=="0");app.draw();
         if(const auto* folder=std::getenv("RSS_TEST_SNAPSHOTS"))canvas.write_pgm((std::filesystem::path(folder)/"settings-auto-sync-off.pgm").string());
         app.back();rss::App reopened(store,canvas);wifi(reopened);reopened.maybe_auto_sync(1);assert(reopened.take_request().empty());
     }
