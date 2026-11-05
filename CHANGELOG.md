@@ -1,10 +1,16 @@
 # 更新记录
 
-下面保留每次发布时的变化，方便回查。兼容测试使用 [v0.0.4-beta.2](https://github.com/frevia/kindle-rss-reader/releases/tag/v0.0.4-beta.2)；[正式版最新版入口](https://github.com/frevia/kindle-rss-reader/releases/latest)不包含 beta。
+下面保留每次发布时的变化，方便回查。兼容测试使用 [v0.0.4-beta.4](https://github.com/frevia/kindle-rss-reader/releases/tag/v0.0.4-beta.4)；[正式版最新版入口](https://github.com/frevia/kindle-rss-reader/releases/latest)不包含 beta。
+
+## v0.0.4-beta.4 · 2026-11-05
+
+修复升级重启时的会话锁交接，保留 beta.3 的其他功能；安装与旧客户端迁移限制见 [beta.4 发布说明](native-rss/docs/RELEASE-v0.0.4-beta.4.md)。
+
+- 修复 Kindle 在线升级安装成功后仍回滚：BusyBox `timeout` 的短暂残留监控进程会继承会话锁，导致新版启动时报“阅读器已经运行”。系统恢复成功后、重启前显式解锁，解锁失败则停止重启并保留回滚保护。旧版客户端需先通过 USB 或 SSH 更新启动器，仅更新目标安装包无法修复正在运行的旧启动器。
 
 ## v0.0.4-beta.3 · 2026-11-05
 
-本次构建目标，先生成 Release 草稿，尚未公开；完整安装与验收说明见 [beta.3 说明](native-rss/docs/RELEASE-v0.0.4-beta.3.md)。公开后，beta.1／beta.2 可在线升级到本版。
+已发布的第三个 beta，完整功能见 [beta.3 说明](native-rss/docs/RELEASE-v0.0.4-beta.3.md)。此版及更早 beta 的启动器存在升级后回滚问题，建议按 [beta.4 安装说明](native-rss/docs/INSTALL.md#旧版升级前修复启动器)通过 USB 迁移；历史附件保持不变。
 
 - 在线升级点击「安装并重启」立即显示进度：后台备份阅读数据，退出阅读器后继续显示程序备份、安装及已用时间；安装期间防止重复操作，失败保留原版并沿用回滚保护。检查和慢速下载约每两秒反馈等待或传输进度；尚待 Kindle 真机验收。
 - 重设计订阅页面为任务首页：我的订阅、发现、源库、分组和导入导出集中导航；列表底部只保留翻页，表单统一顶部保存，OPML 详情可查看原始地址。

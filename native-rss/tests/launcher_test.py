@@ -46,9 +46,38 @@ elif name=="rm":
     for arg in (item for item in args if not item.startswith("-")):
         shutil.rmtree(arg,ignore_errors=True) if pathlib.Path(arg).is_dir() else pathlib.Path(arg).unlink(missing_ok=True)
 elif name=="flock":
-    try:fcntl.flock(9,fcntl.LOCK_EX|fcntl.LOCK_NB)
-    except OSError:sys.exit(1)
+    if args in (['-u','9'],['-u9']):
+        if mode=="update-unlock-failed":sys.exit(1)
+        fcntl.flock(9,fcntl.LOCK_UN)
+    else:
+        try:fcntl.flock(9,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        except OSError:sys.exit(1)
+elif name=="restart":
+    lock=(root/"state/session.lock").open("a")
+    try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+    except OSError:
+        (root/"restart-attempt").touch()
+        log("restart-lock-blocked")
+        sys.exit(1)
+    if mode=="update-inherited-lock":assert not (root/"watchdog-exited").exists()
+    (root/"restart-attempt").touch()
+    if mode=="update-inherited-lock":
+        end=time.monotonic()+2
+        while not (root/"watchdog-exited").exists() and time.monotonic()<end:time.sleep(.01)
+        assert (root/"watchdog-exited").exists()
+        log("watchdog-exited")
+    log("restart")
 elif name=="timeout":
+    if mode=="update-inherited-lock" and pathlib.Path(args[1]).name=="refresh" and args[2:]==["-q","-s"]:
+        code='import os,pathlib,time; r=pathlib.Path(os.environ["FIXTURE"]); assert os.fstat(9).st_ino==(r/"state/session.lock").stat().st_ino; (r/"watchdog-ready").touch()\n'
+        code+='end=time.monotonic()+3\nwhile not (r/"restart-attempt").exists() and time.monotonic()<end: time.sleep(.01)\n'
+        code+='(r/"watchdog-exited").touch()\n'
+        child=subprocess.Popen([sys.executable,"-c",code],pass_fds=(9,),stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+        (root/"watchdog-pid").write_text(str(child.pid))
+        end=time.monotonic()+2
+        while not (root/"watchdog-ready").exists() and time.monotonic()<end:time.sleep(.01)
+        assert (root/"watchdog-ready").exists()
+        log("watchdog-ready")
     try:sys.exit(subprocess.run(args[1:],timeout=float(args[0])).returncode)
     except subprocess.TimeoutExpired:sys.exit(124)
 elif name=="pidof":
@@ -150,7 +179,7 @@ elif name=="app":
         log("app-start")
         if mode in ("statusbar-running","statusbar-without-juno","launcher-killed-statusbar"):
             assert "-STOP 900006" in (root/"events").read_text()
-        if mode in ("update-install","update-failed"):sys.exit(42)
+        if mode in ("update-install","update-failed","update-inherited-lock","update-unlock-failed"):sys.exit(42)
         if mode.startswith("browser"):sys.exit(43)
         if mode in ("launcher-killed", "launcher-killed-home", "launcher-killed-statusbar", "launcher-killed-soft"):
             owner=int(os.environ["RSS_LAUNCHER_PID"])
@@ -219,7 +248,10 @@ class LauncherTests(unittest.TestCase):
             if mode=="update-recover":
                 (root/"update/journal").write_text("interrupted update")
                 (root/"bin/app").unlink()  # Recovery must work even if the new program cannot execute.
-            (root/"restart.sh").write_text('echo restart >> "$FIXTURE/events"\n')
+            if mode=="update-inherited-lock":
+                restart=root/"bin/restart";restart.write_text("#!"+sys.executable+"\n"+FAKE);restart.chmod(0o755)
+                (root/"restart.sh").write_text('exec "$FIXTURE/bin/restart"\n')
+            else:(root/"restart.sh").write_text('echo restart >> "$FIXTURE/events"\n')
             if mode!="firmware-sysv":(root/"upstart").mkdir()
             version={"firmware-5.6.4":"5.6.4","firmware-5.6.5":"5.6.5","firmware-5.6.5.1":"5.6.5.1",
                      "firmware-5.6":"5.6","firmware-5.7.2":"5.7.2","firmware-5.12.4":"5.12.4",
@@ -270,6 +302,10 @@ class LauncherTests(unittest.TestCase):
             else:
                 result=subprocess.run(["/bin/sh",str(launch)]+(["--article","42"] if mode=="article" else []),env=env,capture_output=True,text=True,timeout=15)
             events=(root/"events").read_text().splitlines() if (root/"events").exists() else []
+            if mode=="update-inherited-lock":
+                end=time.monotonic()+4
+                while not (root/"watchdog-exited").exists() and time.monotonic()<end:time.sleep(.01)
+                self.assertTrue((root/"watchdog-exited").exists(),"inherited-lock watchdog did not exit")
             self.assertFalse(list((root/"state").glob("frame.*")))
             if mode not in ("passcode","log-symlink","state-nonroot","state-unsafe","state-symlink","state-chmod-error") and not (mode=="state-2770" and result.returncode!=0):
                 self.assertEqual((root/"state/session.previous.log").read_text(),"previous session fixture\n")
@@ -459,6 +495,24 @@ class LauncherTests(unittest.TestCase):
                 self.assertLess(events.index("update-apply"),events.index("cache-rm"))
                 self.assertLess(events.index("update-apply"),events.index("-CONT 900003"))
                 self.assertEqual("restart" in events,mode=="update-install")
+
+    def test_successful_update_releases_lock_before_restart(self):
+        result,events,pixel=self.run_case("update-inherited-lock")
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertEqual(pixel,b"x")
+        self.assertIn("watchdog-exited",events)
+        self.assertIn("watchdog-ready",events)
+        self.assertIn("restart",events)
+        self.assertNotIn("restart-lock-blocked",events)
+        self.assertLess(events.index("update-apply"),events.index("restart"))
+        self.assertLess(events.index("-CONT 900003"),events.index("restart"))
+
+    def test_failed_update_lock_release_does_not_restart(self):
+        result,events,pixel=self.run_case("update-unlock-failed")
+        self.assertEqual(result.returncode,1,result.stderr)
+        self.assertEqual(pixel,b"x")
+        self.assertIn("update-apply",events)
+        self.assertNotIn("restart",events)
 
     def test_interrupted_update_is_recovered_before_opening_device_or_database(self):
         result,events,pixel=self.run_case("update-recover")

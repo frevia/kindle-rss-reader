@@ -4,9 +4,15 @@
 
 ## 找不到自动同步、翻译或在线升级
 
-这些功能已随 v0.0.4 beta 发布，正式版 v0.0.3 尚不包含。请在 [beta.2 页面](https://github.com/frevia/kindle-rss-reader/releases/tag/v0.0.4-beta.2)下载 `RSS-Reader-v0.0.4-beta.2-Kindle.zip`，按[安装教程](INSTALL.md)通过 USB 安装并保留个人数据。`/releases/latest` 仍指向正式版，不会跳到 beta。
+这些功能已随 v0.0.4 beta 发布，正式版 v0.0.3 尚不包含。请在 [beta.4 页面](https://github.com/frevia/kindle-rss-reader/releases/tag/v0.0.4-beta.4)下载 `RSS-Reader-v0.0.4-beta.4-Kindle.zip`，按[安装教程](INSTALL.md)通过 USB 安装并保留个人数据。`/releases/latest` 仍指向正式版，不会跳到 beta。
 
-支持在线升级的正式版只检查更高正式版本，beta 会检查本仓库最近 100 条发布中的后续 beta 和正式版；都不会安装草稿、主分支提交或同版本开发包。已安装 beta.2 且没有更高版本时，显示当前已是最新版本属于正常情况。beta.3 先构建为 Release 草稿，尚未公开；需要验证 beta.2 → beta.3 时，先安装 beta.2，等 beta.3 公开后按[在线升级测试](INSTALL.md#在线升级测试)操作。
+支持在线升级的正式版只检查更高正式版本，beta 会检查后续 beta 和正式版；都不会安装草稿、主分支提交或同版本开发包。beta.1～beta.3 建议直接 USB 安装 beta.4，或先修复启动器再在线升级，见[安装说明](INSTALL.md#旧版升级前修复启动器)。
+
+## 升级后显示“上次升级未完成”
+
+若完整提示为“上次升级未完成，已恢复升级前的程序与阅读数据”，表示回滚已执行，需先在设置确认当前版本。beta.1～beta.3 存在已确认的锁交接故障：安装成功后，新启动器仍可能因旧 timeout 监控进程持锁而提示“阅读器已经运行”，随后回滚；beta.4 的启动器已修复。
+
+正常退出并备份整个 `native-rss`，按[旧版迁移说明](INSTALL.md#旧版升级前修复启动器)通过 USB 升级到 beta.4，或先修复旧启动器再重开测试。不要删除 `.update`、数据库或 SQLite 日志来跳过保护。若修复后仍失败，立即[导出诊断](INSTALL.md#日志反馈)，并记录升级前后版本与失败阶段；休眠、系统进程变化和网络超时仍须分别排查。
 
 ## 自动同步没有立即开始
 

@@ -47,12 +47,14 @@ class Http(BaseHTTPRequestHandler):
             digest = "0" * 64 if mode == "bad-sha" else self.server.digest
             body = f"{digest}  RSS-Reader-{VERSION}-Kindle.zip\n".encode()
         elif self.path.endswith("-Kindle.zip"):
+            body = b"redirect body must not contaminate the ZIP"
             self.send_response(302)
             self.send_header("Location", "http://github.com/unsafe" if mode == "downgrade" else
                              "https://evil.invalid/payload" if mode == "foreign-host" else
                              "https://release-assets.githubusercontent.com/fixture.zip")
+            self.send_header("Content-Length", str(len(body)))
             self.end_headers()
-            self.wfile.write(b"redirect body must not contaminate the ZIP")
+            self.wfile.write(body)
             return
         elif self.path == "/fixture.zip":
             body = self.server.package

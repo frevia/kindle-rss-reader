@@ -222,6 +222,8 @@ cleanup() {
     if [ "$restore_failed" -ne 0 ]; then printf '%s\n' 'Kindle RSS: 系统界面恢复不完整，请查看日志' >&2; result=1; fi
     printf 'session_end exit=%s restore_failed=%s\n' "$result" "$restore_failed"
     if [ "$recovering" -eq 0 ] && [ "$restore_failed" -eq 0 ] && [ "$install_update" -eq 2 ]; then
+        # BusyBox timeout watchdogs may still hold an inherited copy of this lock.
+        flock -u 9 || fail '无法释放升级会话锁，请重新打开阅读器'
         RSS_UPDATE_BOOT=1 exec /bin/sh "$LAUNCH" 8>&- 9>&-
     fi
     if [ "$recovering" -eq 0 ] && [ "$restore_failed" -eq 0 ] && [ "$result" -eq 0 ] && [ "$open_browser" -eq 1 ] && awake; then

@@ -1,6 +1,6 @@
 # Kindle 机型兼容
 
-兼容代码已随 **v0.0.4-beta.1／beta.2** 发布，[beta.2 安装包](https://github.com/frevia/kindle-rss-reader/releases/tag/v0.0.4-beta.2)可直接用于普通兼容试装，无需自行构建。兼容版使用同一份静态 ARMv7 程序，按设备实际能力检查屏幕、输入和系统会话。已有设备验证记录来自 KPW3／5.16.2.1.1；本轮改变了刷新路径，仍需重新实机验收。其他机型的纯函数、事件回放和会话模拟通过不等于真机支持认证。
+兼容代码已随 **v0.0.4 beta** 发布，[beta.4 安装包](https://github.com/frevia/kindle-rss-reader/releases/tag/v0.0.4-beta.4)可直接用于普通兼容试装，无需自行构建。兼容版使用同一份静态 ARMv7 程序，按设备实际能力检查屏幕、输入和系统会话。已有设备验证记录来自 KPW3／5.16.2.1.1；本轮改变了刷新路径，仍需重新实机验收。其他机型的纯函数、事件回放和会话模拟通过不等于真机支持认证。
 
 ## 哪些设备可以参与测试
 
@@ -22,7 +22,7 @@
 
 正常退出已有阅读器，连接电脑，备份整个 `native-rss` 文件夹；首次安装也请备份重要书籍和文件。已有首页适配时先按[首页说明](HOME.md#启用停用和卸载)停用，测试期间保持系统正常竖屏并关闭设备密码锁。
 
-普通兼容试装下载 [beta.2](https://github.com/frevia/kindle-rss-reader/releases/tag/v0.0.4-beta.2) 中的 **`RSS-Reader-v0.0.4-beta.2-Kindle.zip`**。beta.3 先构建为 Release 草稿，公开后可直接 USB 安装；验证 beta.2 → beta.3 时先装 beta.2，步骤见[在线升级测试](INSTALL.md#在线升级测试)。记录完整文件名和下载来源；自行构建的 `kindle-rss-kindle-dev.zip` 还需记录提交号。
+普通兼容试装下载 [beta.4](https://github.com/frevia/kindle-rss-reader/releases/tag/v0.0.4-beta.4) 中的 **`RSS-Reader-v0.0.4-beta.4-Kindle.zip`**，旧 beta 推荐直接 USB 升级。需要从 beta.3 在线升级时，须先[修复旧启动器](INSTALL.md#旧版升级前修复启动器)并重新打开阅读器，再按[在线升级测试](INSTALL.md#在线升级测试)操作。记录完整文件名和下载来源；自行构建的 `kindle-rss-kindle-dev.zip` 还需记录提交号。
 
 注意：[正式版最新版入口](https://github.com/frevia/kindle-rss-reader/releases/latest)仍为 v0.0.3，不包含上述 beta。只使用本项目的 `-Kindle.zip` 兼容包；历史 `-KPW3.zip` 改名也不会获得兼容能力。
 

@@ -4,7 +4,7 @@
 
 面向 Kindle 的独立原生 RSS 阅读器，当前源码新增按设备能力检查的兼容版，范围见 [COMPATIBILITY.md](COMPATIBILITY.md)。C++17、CREngine 正文排版与 FreeType 灰度渲染、SQLite 离线存储、libxml2 订阅解析和 libcurl 联网；桌面使用 SDL 展示相同的渲染结果。不是 KOReader 插件，也不是网页套壳。
 
-**当前源码为 v0.0.4-beta.3，先构建 Release 草稿，尚未公开或完成整体验收。** beta.3 纳入 OPML 源库、订阅任务首页及升级进度反馈，见 [beta.3 说明](RELEASE-v0.0.4-beta.3.md)。已公开的 beta.2 可直接使用 [beta 安装包](https://github.com/frevia/kindle-rss-reader/releases/tag/v0.0.4-beta.2)，包内提供中文字体和证书。ARM 静态构建已有 KPW3 安装记录；单次启动退出、休眠、应用及启动器强杀恢复已有真机证据，拼音搜索选词经用户确认。离线连续翻页、USB 退出、OPML、阅读位置、字号与收藏已有用户实机验证；本轮兼容改动和长期使用仍待验收。完整范围见[实施计划](PLAN.md)，设备证据见 [DEVICE.md](DEVICE.md)。
+**当前版本为 v0.0.4-beta.4，尚未完成整体验收。** 本版保留 OPML 源库、订阅任务首页及升级进度反馈，并修复 BusyBox timeout 监控进程继承锁导致的升级回滚。见 [beta.4 说明](RELEASE-v0.0.4-beta.4.md)和[旧版启动器迁移](INSTALL.md#旧版升级前修复启动器)。[beta 安装包](https://github.com/frevia/kindle-rss-reader/releases/tag/v0.0.4-beta.4)提供中文字体和证书。KPW3 已有锁故障复现、热修后 beta.3 启动与数据库逐字节一致的证据；本版安装包、其他机型、休眠和断电恢复的验证范围分别记录，不能用历史实测代替。完整范围见[实施计划](PLAN.md)，历史设备证据见 [DEVICE.md](DEVICE.md)。
 
 ## 安装到 Kindle
 
@@ -85,15 +85,15 @@ rtk proxy python3 native-rss/tools/package.py
 
 `src/update.cpp` 使用已有 libcurl、SQLite JSON、OpenSSL SHA256 与 zlib。正式版手动查询固定公开仓库的 `/releases/latest`，只接受数值更大的 `vMAJOR.MINOR.PATCH` 正式版本；`vMAJOR.MINOR.PATCH-beta.N` 客户端查询 `/releases?per_page=100`，从最近 100 条发布中选择更高的 beta 或正式版。同一基础版本按 beta 序号递增，正式版高于所有 beta；拒绝草稿、同版本、降级和与标签不匹配的预发布标记，不安装主分支提交。按文件名选择 Kindle 兼容 ZIP 与 `SHA256SUMS.txt`；不发送 GitHub 令牌，初始资产地址必须属于本仓库对应标签。每次跳转重新校验 HTTPS 与 GitHub 域名，禁止降级 HTTP 或跳出 GitHub 服务。API、校验文本、ZIP 分别限制为 2 MiB、64 KiB、128 MiB；解压后最多 256 MiB / 1024 文件。联网走 UI 单后台任务和取消信号，不与订阅同步或翻译并行。
 
-`package.py` 将 `native-rss/UPDATE.json`（`format: 1`、`model: Kindle`、CMake 对应版本，含 beta 后缀）纳入逐文件 MANIFEST。`release.py` 校验元数据与标签一致，安装附件使用 `RSS-Reader-<版本标签>-Kindle.zip`，例如 `RSS-Reader-v0.0.4-beta.3-Kindle.zip`。历史 KPW3 专用开发版需经 USB 迁移一次，兼容版不会在线回退到旧专用包。升级器仅解压本打包器生成的普通 DEFLATE ZIP 条目，拒绝 ZIP64、加密、数据描述符、额外字段、重复或越界路径、个人数据路径及目标符号链接，并核对逐文件哈希与实际文件集合。未来更改归档特性或协议时需要先升级客户端，不应将不兼容的包公开为最新版。
+`package.py` 将 `native-rss/UPDATE.json`（`format: 1`、`model: Kindle`、CMake 对应版本，含 beta 后缀）纳入逐文件 MANIFEST。`release.py` 校验元数据与标签一致，安装附件使用 `RSS-Reader-<版本标签>-Kindle.zip`，例如 `RSS-Reader-v0.0.4-beta.4-Kindle.zip`。历史 KPW3 专用开发版需经 USB 迁移一次，兼容版不会在线回退到旧专用包。升级器仅解压本打包器生成的普通 DEFLATE ZIP 条目，拒绝 ZIP64、加密、数据描述符、额外字段、重复或越界路径、个人数据路径及目标符号链接，并核对逐文件哈希与实际文件集合。未来更改归档特性或协议时需要先升级客户端，不应将不兼容的包公开为最新版。
 
-下载暂存于 `native-rss/.update`；安装前通过 SQLite backup API 保存一致性数据库副本。阅读器以专用退出码 42 交接到旧程序副本 `runner`：启动器等待数据库关闭，在恢复监护与暂停 volumd 的保护下执行 `update-apply`。安装先完整备份现有文件并持久化 journal，再逐文件以 rename 替换；不原地覆盖运行中的文件，不整目录替换 data/documents/extensions。新的启动器恢复系统界面后重启，程序首次成功显示设备画面才提交 journal。安装出错立即回退，安装中断或新程序启动失败则在下次启动、打开数据库之前通过旧 runner 恢复。此机制不提供数据库迁移功能，也不证明硬件掉电时文件系统仍完整；外部备份和真机验收仍必要。
+下载暂存于 `native-rss/.update`；安装前通过 SQLite backup API 保存一致性数据库副本。阅读器以专用退出码 42 交接到旧程序副本 `runner`：启动器等待数据库关闭，在恢复监护与暂停 volumd 的保护下执行 `update-apply`。安装先完整备份现有文件并持久化 journal，再逐文件以 rename 替换；不原地覆盖运行中的文件，不整目录替换 data/documents/extensions。新的启动器恢复系统界面后重启，程序首次成功显示设备画面才提交 journal。成功安装并完成系统恢复后先显式 `flock -u 9`，再关闭描述符并 exec 新启动器；BusyBox timeout 的监控子进程可能仍持有继承的 FD，仅关闭父进程的 FD 不足以释放锁。旧客户端应先更新启动器并重开，目标包不能修复旧进程。安装出错立即回退，安装中断或新程序启动失败则在下次启动、打开数据库之前通过旧 runner 恢复。此机制不提供数据库迁移功能，也不证明硬件掉电时文件系统仍完整；外部备份和真机验收仍必要。
 
 `kindle-rss check-update` 可只读检查真实 GitHub；`update-apply` / `update-recover` 是启动器内部命令，要求启动器保护环境，前者绑定 Linux 父进程生命周期。`update`、`update_archive`、`update_network`、`update_app` 与 `launcher` 覆盖版本、真实 ZIP、临时目录安装回退、SQLite、模拟 GitHub TLS 下载与跳转、取消和 1072×1448 界面状态。网络测试使用临时自签证书和本机代理，不接触真实 Release 附件；`RSS_TEST_SNAPSHOTS` 可输出升级界面 PGM。测试不安装或操作 Kindle。
 
 ### 发布步骤
 
-当前构建说明见 [beta.3](RELEASE-v0.0.4-beta.3.md)，已发布 beta 记录见 [beta.1](RELEASE-v0.0.4-beta.1.md) 与 [beta.2](RELEASE-v0.0.4-beta.2.md)，正式版记录见 [v0.0.3](RELEASE-v0.0.3.md)。更新 CMake 基础版本、`RSS_VERSION_SUFFIX`、KUAL 版本号及对应发布文档后提交，再推送 `v数字.数字.数字` 或 `v数字.数字.数字-beta.序号` 标签，触发[发布工作流](../../.github/workflows/release.yml)。安装文档分别链接正式版最新版和 beta 标签页，不能用 `/releases/latest` 代替 beta 下载入口。
+当前发布说明见 [beta.4](RELEASE-v0.0.4-beta.4.md)，历史记录见 [beta.1](RELEASE-v0.0.4-beta.1.md)、[beta.2](RELEASE-v0.0.4-beta.2.md) 与 [beta.3](RELEASE-v0.0.4-beta.3.md)，正式版记录见 [v0.0.3](RELEASE-v0.0.3.md)。更新 CMake 基础版本、`RSS_VERSION_SUFFIX`、KUAL 版本号及对应发布文档后提交，再推送 `v数字.数字.数字` 或 `v数字.数字.数字-beta.序号` 标签，触发[发布工作流](../../.github/workflows/release.yml)。安装文档分别链接正式版最新版和 beta 标签页，不能用 `/releases/latest` 代替 beta 下载入口。
 
 工作流使用 Apple Silicon macOS runner、固定 Zig 哈希，运行宿主 CTest、重编译 ARM，再运行 `tools/release.py`。后者生成安装包、项目源码、第三方对应源码和 `SHA256SUMS.txt`。第三方归档按构建锁验证，项目源码必须与二进制的构建输入一致；仅修改 `public_release_ready` 布尔值无法通过检查。
 
@@ -117,11 +117,11 @@ rtk proxy native-rss/build/kindle-rss --db native-rss/output/rss.sqlite desktop
 
 GUI 的导入按钮读取数据库同目录下的 `feeds.opml`；导出写入 `subscriptions.opml`。CLI 的 `import` 和 `export` 可指定其他路径。OPML 仅含订阅与分组，不包含阅读状态或正文。
 
-点击首页左下角「菜单」展开「订阅 / 设置 / 同步 / 退出」。订阅页按分组展示来源，点击来源名称阅读该源文章，点击右侧「编辑」修改名称、RSS 地址或分组；名称可留空，同步成功后自动读取博客名称。修改仅在「保存更改」时写入，放弃或返回会丢弃草稿。同步中的订阅地址需要先取消同步再修改。取消订阅需要确认，只保留收藏文章；后台已开始的下载不会恢复已取消订阅的文章。
+点击首页左下角「菜单」展开「订阅 / 设置 / 同步 / 退出」。从订阅管理进入「我的订阅」，按分组展示来源，点击来源名称阅读该源文章，点击右侧「编辑」修改名称、RSS 地址或分组；名称可留空，同步成功后自动读取博客名称。修改仅在右上角「保存」时写入，放弃或返回会丢弃草稿。同步中的订阅地址需要先取消同步再修改。取消订阅需要确认，只保留收藏文章；后台已开始的下载不会恢复已取消订阅的文章。
 
 首页大标题旁的下拉箭头可切换阅读范围，按名称或完整路径查找分组；父分组包含子分组，例如「科技」包含「科技/编程」，不包含「科技新闻」。列表显示来源、所属分组和日期，收藏只显示标题左侧的实心星标。未读、全部、收藏和文章搜索保留当前阅读范围；「退出搜索」或提交空关键词退出搜索。
 
-订阅页底部「管理分组」可新增、重命名、移动或删除多级分组。点击「子分组」在当前组内创建；新增和编辑时选择「上级分组」，选择「顶层（无上级）」可移回根目录。更换上级会移动整棵子树，保存前仅修改草稿；上级选择支持按完整路径查找，并排除自身及后代。空分组会保留，重名目标不覆盖；删除分组及其子分组时把组内订阅移到「未分组」，保留文章、收藏和阅读状态。底部「OPML」专门导入/导出订阅及空分组。「缓存管理」从同步弹窗进入，可确认清理 30 天前的已读文章，保留收藏、未读及正在阅读的文章。清理会删除这些文章及状态；订阅源仍提供的文章可能在下次同步后重新出现。原生软键盘支持拼音选字和词组，桌面仍可使用系统输入法。
+订阅管理首页的「管理分组」可新增、重命名、移动或删除多级分组。点击「子分组」在当前组内创建；新增和编辑时选择「上级分组」，选择「顶层（无上级）」可移回根目录。更换上级会移动整棵子树，保存前仅修改草稿；上级选择支持按完整路径查找，并排除自身及后代。空分组会保留，重名目标不覆盖；删除分组及其子分组时把组内订阅移到「未分组」，保留文章、收藏和阅读状态。订阅管理首页的「导入与导出」用于迁移订阅及空分组。「缓存管理」从同步弹窗进入，可确认清理 30 天前的已读文章，保留收藏、未读及正在阅读的文章。清理会删除这些文章及状态；订阅源仍提供的文章可能在下次同步后重新出现。原生软键盘支持拼音选字和词组，桌面仍可使用系统输入法。
 
 `--font /absolute/path/font.ttf` 或 `RSS_FONT` 可以指定字体。macOS 默认使用本机系统字体，仅本机读取，不随项目分发。
 
