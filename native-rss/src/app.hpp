@@ -7,18 +7,20 @@
 #include "selection.hpp"
 #include "update.hpp"
 #include "directory.hpp"
+#include <chrono>
 #include <functional>
 #include <map>
 #include <memory>
 #include <set>
 
 namespace rss {
+void draw_update_installation(Canvas& canvas, const std::string& message, int elapsed_seconds);
 class App {
 public:
     enum class ReaderPanel { None, Type, Images, Info, Content, Translation, Selection };
     enum class Screen { List, SubscriptionHome, Subscriptions, GroupPicker, Groups, GroupEdit, Opml, Sync, Cache, Settings, Update,
                         Discovery, Directories, DirectoryEdit, DirectoryTopics, DirectoryWebsite, DirectoryDetail, DirectoryScope };
-    enum class UpdateState { Idle, Checking, Available, Current, Downloading, Ready, Failed };
+    enum class UpdateState { Idle, Checking, Available, Current, Downloading, Ready, Installing, Failed };
     enum class SyncState { Idle, Running, Complete, Cancelled, Failed };
     App(Store& store, Canvas& canvas, std::int64_t initial_article = 0, const std::string& status_font = {});
     void draw();
@@ -42,6 +44,7 @@ public:
     void sync_progress(int completed, int total, int failed, const std::string& message);
     void sync_finished(bool cancelled, const std::string& error = "");
     void update_started(bool downloading);
+    void update_installing();
     void update_checked(const UpdateRelease& release);
     void update_progress(const std::string& message);
     void update_finished(bool cancelled, const std::string& error = "");
@@ -107,6 +110,7 @@ private:
     UpdateState update_state_ = UpdateState::Idle;
     UpdateRelease update_release_;
     std::string update_message_;
+    std::chrono::steady_clock::time_point update_install_started_{};
     std::size_t update_notes_page_ = 0;
     std::optional<ReaderSelection> selection_;
     struct SelectionDrag { TouchPoint anchor; bool first; };

@@ -951,7 +951,7 @@ void App::opml_screen(){
 }
 void App::sync_started(bool translating,bool automatic){translating_=translating;automatic_sync_=automatic;if(!automatic)status_.clear();sync_page_=0;sync_state_=SyncState::Running;sync_completed_=sync_failed_=0;sync_total_=translating?0:static_cast<int>(feeds_.size());sync_message_=translating?"正在准备翻译文章":"正在连接订阅源";if(screen_==Screen::Sync||reader_panel_==ReaderPanel::Translation)dirty=true;}
 void App::maybe_auto_sync(std::time_t now){
-    if(now<=0||quit||!reader_status_.wifi||screen_!=Screen::List||!error_.empty()||!confirmation_.empty()||!input_mode_.empty()||managing_||brand_menu_||selection_||directory_running_||sync_state_==SyncState::Running||update_state_==UpdateState::Checking||update_state_==UpdateState::Downloading||!request_.empty()||store_.setting("auto_sync")=="0")return;
+    if(now<=0||quit||!reader_status_.wifi||screen_!=Screen::List||!error_.empty()||!confirmation_.empty()||!input_mode_.empty()||managing_||brand_menu_||selection_||directory_running_||sync_state_==SyncState::Running||update_state_==UpdateState::Checking||update_state_==UpdateState::Downloading||update_state_==UpdateState::Installing||!request_.empty()||store_.setting("auto_sync")=="0")return;
     if(std::none_of(feeds_.begin(),feeds_.end(),[](const Feed& f){return f.id>0&&!f.url.empty();}))return;
     constexpr std::int64_t interval=1800;std::int64_t latest=0;
     const auto attempted=store_.setting("auto_sync_last_attempt");
@@ -1228,11 +1228,13 @@ void App::submit(){
     dirty=true;
 }
 void App::tap(int x,int y){
+    if(update_state_==UpdateState::Installing)return;
     for(auto it=hits_.rbegin();it!=hits_.rend();++it)if(it->rect.contains(x,y)){
         last_tap_x_=x;auto action=it->action;action();dirty=true;return;
     }
 }
 void App::touch(const TouchGesture& gesture){
+    if(update_state_==UpdateState::Installing)return;
     if(gesture.phase==TouchPhase::Cancel){if(selection_){clear_selection();dirty=true;}return;}
     const auto& low=gesture.minimum;const auto& high=gesture.maximum;
     const auto inside=[&](TouchPoint p){return p.x>=low.x&&p.x<=high.x&&p.y>=low.y&&p.y<=high.y;};
@@ -1315,6 +1317,7 @@ void App::previous(){
     dirty=true;
 }
 void App::back(){
+    if(update_state_==UpdateState::Installing)return;
     if(!error_.empty())error_.clear();
     else if(!confirmation_.empty())confirmation_.clear();
     else if(brand_menu_)brand_menu_=false;

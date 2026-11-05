@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import unittest
 
 from update_test import VERSION, make_zip, payload
@@ -63,6 +64,16 @@ class Http(BaseHTTPRequestHandler):
         self.send_response(429 if mode == "rate-limit" else 200)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
+        if mode in ("slow-check", "cancel-check") and self.path.startswith("/repos/"):
+            self.wfile.write(body[:1])
+            self.wfile.flush()
+            time.sleep(8 if mode == "cancel-check" else 3)
+            body = body[1:]
+        if mode == "slow" and self.path == "/fixture.zip":
+            self.wfile.write(body[:512])
+            self.wfile.flush()
+            time.sleep(3)
+            body = body[512:]
         self.wfile.write(body)
 
 
@@ -111,8 +122,27 @@ class UpdateNetworkTests(unittest.TestCase):
         self.assertEqual(self.proxy.seen, ["/repos/frevia/kindle-rss-reader/releases?per_page=100" if beta else
                                           "/repos/frevia/kindle-rss-reader/releases/latest"])
 
+    def test_check_reports_progress_while_response_is_delayed(self):
+        current = subprocess.check_output([DRIVER, "version"], text=True).strip()
+        self.proxy.release_list = [{"tag_name": "v999.0.0", "draft": False, "prerelease": False, "assets": []}]
+        self.proxy.mode = "slow-check"
+        result = subprocess.run([DRIVER, "check"], env=self.env, capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("检查更新", result.stderr)
+        self.assertIn("已等待", result.stderr)
+
+    def test_check_can_cancel_while_waiting_for_response(self):
+        self.proxy.release_list = []
+        self.proxy.mode = "cancel-check"
+        started = time.monotonic()
+        result = subprocess.run([DRIVER, "check", "cancel", "1800"], env=self.env,
+                                capture_output=True, text=True, timeout=5)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("更新已取消", result.stderr)
+        self.assertLess(time.monotonic() - started, 3)
+
     def test_download_follows_only_github_https_and_checks_actual_archive(self):
-        for mode in ("normal", "bad-sha", "downgrade", "foreign-host", "incomplete", "rate-limit"):
+        for mode in ("slow", "normal", "bad-sha", "downgrade", "foreign-host", "incomplete", "rate-limit"):
             with self.subTest(mode=mode), tempfile.TemporaryDirectory() as temporary:
                 root = Path(temporary)
                 (root / "native-rss/bin").mkdir(parents=True)
@@ -129,12 +159,14 @@ class UpdateNetworkTests(unittest.TestCase):
                 self.proxy.seen.clear()
                 result = subprocess.run([DRIVER, "prepare", str(root), str(metadata)], env=self.env,
                                         capture_output=True, text=True, timeout=30)
-                self.assertEqual(result.returncode == 0, mode == "normal", result.stderr)
+                self.assertEqual(result.returncode == 0, mode in ("normal", "slow"), result.stderr)
+                if mode == "slow":
+                    self.assertIn("512", result.stderr, "small slow downloads must report bytes before reaching 1 MB")
                 folder = root / "native-rss/.update"
-                self.assertEqual((folder / "ready").exists(), mode == "normal")
+                self.assertEqual((folder / "ready").exists(), mode in ("normal", "slow"))
                 self.assertEqual(old.read_bytes(), b"old binary fixture")
                 self.assertFalse((folder / "package.zip").exists())
-                if mode == "normal":
+                if mode in ("normal", "slow"):
                     self.assertEqual((folder / "runner").read_bytes(), old.read_bytes())
                     self.assertIn("/fixture.zip", self.proxy.seen)
                 elif mode in ("downgrade", "foreign-host"):

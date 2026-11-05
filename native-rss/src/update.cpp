@@ -11,6 +11,7 @@
 #include <set>
 #include <sstream>
 #include <stdexcept>
+#include <chrono>
 #include <vector>
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -125,7 +126,8 @@ bool allowed(const std::string& name) {
 }
 struct Transfer {
     std::ofstream* file=nullptr;std::string body;std::uint64_t count=0,limit=0;bool failed=false;
-    const std::atomic<bool>* cancel=nullptr;UpdateProgress progress;std::uint64_t reported=0;
+    const std::atomic<bool>* cancel=nullptr;UpdateProgress progress;std::uint64_t expected=0;
+    std::string phase;std::chrono::steady_clock::time_point started=std::chrono::steady_clock::now(),last_report=started,last_data=started;
 };
 std::size_t receive(char* data,std::size_t size,std::size_t count,void* opaque) noexcept {
     auto& t=*static_cast<Transfer*>(opaque);const auto length=size*count;
@@ -134,11 +136,34 @@ std::size_t receive(char* data,std::size_t size,std::size_t count,void* opaque) 
         if(t.file){t.file->write(data,static_cast<std::streamsize>(length));if(!*t.file){t.failed=true;return 0;}}
         else t.body.append(data,length);
         t.count+=length;
-        if(t.progress&&(t.count-t.reported>=1024*1024)){t.reported=t.count;t.progress("已下载 "+std::to_string(t.count/(1024*1024))+" MB");}
+        t.last_data=std::chrono::steady_clock::now();
         return length;
     }catch(...){t.failed=true;return 0;}
 }
-int cancelled(void* opaque,curl_off_t,curl_off_t,curl_off_t,curl_off_t) {return static_cast<const std::atomic<bool>*>(opaque)->load()?1:0;}
+std::string size_text(std::uint64_t size) {
+    if(size<1024)return std::to_string(size)+" bytes";
+    if(size<1024*1024)return std::to_string(size/1024)+" KB";
+    return std::to_string(size/(1024*1024))+" MB";
+}
+int transfer_progress(void* opaque,curl_off_t,curl_off_t,curl_off_t,curl_off_t) noexcept {
+    auto& t=*static_cast<Transfer*>(opaque);
+    try {
+        if(t.cancel->load())return 1;
+        const auto now=std::chrono::steady_clock::now();
+        if(t.progress&&now-t.last_report>=std::chrono::seconds(2)) {
+            const auto waited=std::chrono::duration_cast<std::chrono::seconds>(now-t.started).count();
+            if(t.count==0)t.progress(t.phase+"，已等待 "+std::to_string(waited)+" 秒");
+            else {
+                auto message=t.phase+" "+size_text(t.count);
+                if(t.expected)message+=" / "+size_text(t.expected)+" ("+std::to_string(t.count*100/t.expected)+"%)";
+                if(now-t.last_data>=std::chrono::seconds(2))message+="，已等待 "+std::to_string(waited)+" 秒";
+                t.progress(message);
+            }
+            t.last_report=now;
+        }
+        return 0;
+    }catch(...) {t.failed=true;return 1;}
+}
 bool github_url(const std::string& url) {
     std::unique_ptr<CURLU,decltype(&curl_url_cleanup)> parsed(curl_url(),curl_url_cleanup);
     if(!parsed||url.size()>8192||url.find_first_of("\r\n")!=std::string::npos||curl_url_set(parsed.get(),CURLUPART_URL,url.c_str(),0)!=CURLUE_OK)return false;
@@ -161,7 +186,7 @@ std::string download(std::string url,Transfer& transfer) {
         if(const auto ca=std::getenv("RSS_CA_BUNDLE");ca&&*ca)set(CURLOPT_CAINFO,ca);
         else if(fs::exists("/mnt/us/native-rss/certs/ca-bundle.pem"))set(CURLOPT_CAINFO,"/mnt/us/native-rss/certs/ca-bundle.pem");
         set(CURLOPT_WRITEFUNCTION,receive);set(CURLOPT_WRITEDATA,&transfer);
-        set(CURLOPT_NOPROGRESS,0L);set(CURLOPT_XFERINFOFUNCTION,cancelled);set(CURLOPT_XFERINFODATA,transfer.cancel);
+        set(CURLOPT_NOPROGRESS,0L);set(CURLOPT_XFERINFOFUNCTION,transfer_progress);set(CURLOPT_XFERINFODATA,&transfer);
         const auto result=curl_easy_perform(curl.get());
         require(!transfer.cancel->load(),"更新已取消");require(!transfer.failed,"更新下载超出大小限制或磁盘写入失败");
         require(result==CURLE_OK,std::string("连接 GitHub 失败：")+curl_easy_strerror(result));
@@ -172,7 +197,8 @@ std::string download(std::string url,Transfer& transfer) {
             char* next=nullptr;curl_easy_getinfo(curl.get(),CURLINFO_REDIRECT_URL,&next);
             require(next&&*next,"GitHub 返回无效跳转");url=next;
             // Redirect bodies must not become part of an archive or JSON document.
-            transfer.count=0;transfer.body.clear();transfer.reported=0;
+            transfer.count=0;transfer.body.clear();
+            transfer.started=transfer.last_report=transfer.last_data=std::chrono::steady_clock::now();
             if(transfer.file){transfer.file->seekp(0);require(static_cast<bool>(*transfer.file),"无法重置下载文件");}
             continue;
         }
@@ -180,8 +206,8 @@ std::string download(std::string url,Transfer& transfer) {
     }
     fail("GitHub 跳转次数过多");
 }
-std::string download_text(const std::string& url,const std::atomic<bool>& cancel,std::uint64_t limit) {
-    Transfer transfer;transfer.limit=limit;transfer.cancel=&cancel;return download(url,transfer);
+std::string download_text(const std::string& url,const std::atomic<bool>& cancel,std::uint64_t limit,const UpdateProgress& progress,const std::string& phase) {
+    Transfer transfer;transfer.limit=limit;transfer.cancel=&cancel;transfer.progress=progress;transfer.phase=phase;return download(url,transfer);
 }
 std::uint32_t little(const unsigned char* p,unsigned count) {std::uint32_t n=0;for(unsigned i=0;i<count;++i)n|=static_cast<std::uint32_t>(p[i])<<(i*8);return n;}
 std::map<std::string,bool> extract(const fs::path& archive,const fs::path& destination,const std::atomic<bool>& cancel) {
@@ -294,10 +320,10 @@ UpdateRelease parse_update_releases(const std::string& json,const std::string& c
     }
     return latest;
 }
-UpdateRelease check_update(const std::atomic<bool>& cancel) {
+UpdateRelease check_update(const std::atomic<bool>& cancel,const UpdateProgress& progress) {
     if(version_parts(app_version())[3]!=1000000)
-        return parse_update_releases(download_text("https://api.github.com/repos/frevia/kindle-rss-reader/releases?per_page=100",cancel,2*1024*1024),app_version());
-    return parse_update_release(download_text("https://api.github.com/repos/frevia/kindle-rss-reader/releases/latest",cancel,2*1024*1024),app_version());
+        return parse_update_releases(download_text("https://api.github.com/repos/frevia/kindle-rss-reader/releases?per_page=100",cancel,2*1024*1024,progress,"正在检查更新"),app_version());
+    return parse_update_release(download_text("https://api.github.com/repos/frevia/kindle-rss-reader/releases/latest",cancel,2*1024*1024,progress,"正在检查更新"),app_version());
 }
 void stage_update(const fs::path& archive,const fs::path& root,const std::string& version,const std::string& digest,const std::atomic<bool>& cancel) {
     const auto target=version_parts(version),current=version_parts(app_version());
@@ -321,14 +347,14 @@ void prepare_update(const UpdateRelease& release,const fs::path& root,const std:
     fs::create_directories(folder);fs::remove(folder/"ready");
     fs::remove_all(folder/"stage");
     require(fs::space(root).available>package_limit+expanded_limit+16*1024*1024,"空间不足，请至少保留 400 MB 可用空间");
-    progress("正在获取 SHA256 校验文件");const auto checksums=download_text(release.checksums_url,cancel,65536);
+    progress("正在获取 SHA256 校验文件");const auto checksums=download_text(release.checksums_url,cancel,65536,progress,"正在获取 SHA256 校验文件");
     std::istringstream lines(checksums);std::string line,digest;
     while(std::getline(lines,line))if(line.size()>66&&line.substr(66)==release.asset_name) {
         require(digest.empty()&&line.substr(64,2)=="  "&&digest_valid(line.substr(0,64)),"校验文件无效");digest=line.substr(0,64);
     }
     require(!digest.empty(),"发布校验文件缺少安装包");
     safe_path(root,"native-rss/.update/package.zip");std::ofstream out(folder/"package.zip",std::ios::binary|std::ios::trunc);
-    require(static_cast<bool>(out),"无法创建更新下载文件");Transfer transfer;transfer.file=&out;transfer.limit=release.size;transfer.cancel=&cancel;transfer.progress=progress;
+    require(static_cast<bool>(out),"无法创建更新下载文件");Transfer transfer;transfer.file=&out;transfer.limit=release.size;transfer.cancel=&cancel;transfer.progress=progress;transfer.phase="正在下载更新";transfer.expected=release.size;
     try {
         progress("正在下载更新，可随时取消");download(release.asset_url,transfer);out.close();
         require(static_cast<bool>(out)&&transfer.count==release.size&&fs::file_size(folder/"package.zip")==release.size,"安装包下载不完整");
@@ -337,7 +363,7 @@ void prepare_update(const UpdateRelease& release,const fs::path& root,const std:
         fs::permissions(folder/"runner",fs::perms::owner_all);::sync();fs::remove(folder/"package.zip");
     }catch(...){out.close();fs::remove(folder/"package.zip");fs::remove(folder/"ready");throw;}
 }
-void backup_update_database(const fs::path& root) {
+void backup_update_database(const fs::path& root,const UpdateProgress& progress) {
     const auto folder=update_folder(root);require(fs::exists(folder/"ready"),"更新尚未下载完成");
     safe_path(root,"native-rss/data/rss.sqlite");safe_path(root,"native-rss/.update/database.sqlite");
     sqlite3 *source=nullptr,*target=nullptr;
@@ -347,16 +373,30 @@ void backup_update_database(const fs::path& root) {
     const int created=sqlite3_open((folder/"database.sqlite").c_str(),&target);
     std::unique_ptr<sqlite3,decltype(&sqlite3_close)> to(target,sqlite3_close);require(created==SQLITE_OK,"无法创建升级前数据库备份");
     auto* backup=sqlite3_backup_init(to.get(),"main",from.get(),"main");require(backup!=nullptr,"无法备份阅读数据库");
-    const int copied=sqlite3_backup_step(backup,-1),finished=sqlite3_backup_finish(backup);
-    require(copied==SQLITE_DONE&&finished==SQLITE_OK,"阅读数据库备份失败，升级已停止");to.reset();durable(folder/"database.sqlite");
+    int copied=SQLITE_OK,finished=SQLITE_OK;auto last=std::chrono::steady_clock::now();
+    try {
+        do {
+            copied=sqlite3_backup_step(backup,128);
+            const auto now=std::chrono::steady_clock::now();
+            if(progress&&(copied==SQLITE_DONE||now-last>=std::chrono::seconds(2))) {
+                const int total=sqlite3_backup_pagecount(backup),remaining=sqlite3_backup_remaining(backup);
+                progress("正在备份阅读数据 · "+std::to_string(total-remaining)+" / "+std::to_string(total)+" 页");last=now;
+            }
+        } while(copied==SQLITE_OK);
+    } catch(...) {sqlite3_backup_finish(backup);throw;}
+    finished=sqlite3_backup_finish(backup);
+    require(copied==SQLITE_DONE&&finished==SQLITE_OK,"阅读数据库备份失败，升级已停止");to.reset();
+    if(progress)progress("正在将阅读数据备份写入磁盘");durable(folder/"database.sqlite");
 }
-void apply_update(const fs::path& root) {
+void apply_update(const fs::path& root,const UpdateProgress& progress) {
     require(!fs::exists("/var/local/native-rss/home/enabled"),"请先停用首页 RSS 再升级");
     const auto folder=update_folder(root);require(!fs::exists(folder/"journal"),"存在未完成的升级，请先恢复");
+    if(progress)progress("正在验证待安装文件");
     const auto version=read(folder/"ready",32);const auto files=validate_stage(folder,version);
     require(version_parts(version)>version_parts(app_version()),"只能升级到新版本");
     safe_path(root,"native-rss/.update/backup");fs::remove_all(folder/"backup");fs::create_directories(folder/"backup");
     std::uint64_t needed=16*1024*1024;
+    std::size_t done=0;
     for(const auto& item:files) {
         safe_path(root,item.first);if(fs::exists(root/item.first))needed+=fs::file_size(root/item.first);
         needed+=fs::file_size(folder/"stage"/item.first);
@@ -367,16 +407,21 @@ void apply_update(const fs::path& root) {
         const auto path=root/item.first;require(!fs::exists(path)||fs::is_regular_file(path),"升级目标不是普通文件");const bool existed=fs::exists(path);
         if(existed)durable_copy(path,folder/"backup"/item.first);
         log+=(existed?"1 ":"0 ")+item.first+"\n";
+        if(progress)progress("正在备份旧程序 "+std::to_string(++done)+" / "+std::to_string(files.size()));
     }
     safe_path(root,"native-rss/.update/journal.tmp");write(folder/"journal.tmp",log);fs::rename(folder/"journal.tmp",folder/"journal");::sync();
     try {
+        done=0;
         for(const auto& item:files) {
             safe_path(root,item.first);const auto target=root/item.first;const auto temporary=fs::path(target.string()+".rss-update-new");
             safe_path(root,temporary.lexically_relative(root));durable_copy(folder/"stage"/item.first,temporary);
             fs::permissions(temporary,static_cast<fs::perms>(item.second?0755:0644));
             fs::rename(temporary,target);
+            if(progress)progress("正在安装新程序 "+std::to_string(++done)+" / "+std::to_string(files.size()));
         }
+        if(progress)progress("正在同步升级文件");
         ::sync();
+        if(progress)progress("升级文件已同步");
     }catch(...){recover_update(root);throw;}
 }
 bool recover_update(const fs::path& root) {

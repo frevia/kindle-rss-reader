@@ -114,6 +114,27 @@ class UpdateTests(unittest.TestCase):
         self.assertEqual((self.root / "native-rss/data/rss.sqlite").read_bytes(), database)
         self.assertEqual((self.ready_dir() / "ready").read_text(), VERSION)
 
+    def test_database_backup_copies_multiple_steps_and_releases_handles_after_progress_failure(self):
+        self.stage()
+        with sqlite3.connect(self.root / "native-rss/data/rss.sqlite") as db:
+            db.execute("CREATE TABLE large (value BLOB)")
+            db.executemany("INSERT INTO large VALUES (?)", [(bytes(4096),)] * 300)
+        self.run_driver("backup-fail-progress", self.root, ok=False)
+        result = self.run_driver("backup", self.root)
+        self.assertIn("正在备份阅读数据", result.stderr)
+        with sqlite3.connect(self.ready_dir() / "database.sqlite") as db:
+            self.assertEqual(db.execute("SELECT count(*) FROM large").fetchone()[0], 300)
+            self.assertEqual(db.execute("SELECT value FROM saved").fetchone()[0], "before update")
+
+    def test_locked_database_stops_backup_instead_of_waiting_forever(self):
+        self.stage()
+        with sqlite3.connect(self.root / "native-rss/data/rss.sqlite") as db:
+            db.execute("BEGIN EXCLUSIVE")
+            result = subprocess.run([self.driver, "backup", str(self.root)], text=True,
+                                    capture_output=True, timeout=3)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("备份失败", result.stderr)
+
     def test_apply_installs_update_and_preserves_private_files(self):
         self.stage()
         self.run_driver("apply", self.root)

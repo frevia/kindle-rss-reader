@@ -1,11 +1,13 @@
 #include "update.hpp"
 #include <atomic>
 #include <cassert>
+#include <chrono>
 #include <iostream>
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <thread>
 
 namespace {
 std::string release(const std::string& tag, bool draft = false, bool prerelease = false,
@@ -72,8 +74,15 @@ int main(int argc, char** argv) {
     try {
         if (argc == 1) { parse_tests(); return 0; }
         if(argc==2&&arg(argv,1)=="version") {std::cout<<rss::app_version()<<"\n";return 0;}
-        if(argc==2&&arg(argv,1)=="check") {
-            const std::atomic<bool> cancel{false};const auto result=rss::check_update(cancel);
+        if((argc==2||argc==3||argc==4)&&arg(argv,1)=="check") {
+            if(argc>=3&&arg(argv,2)!="cancel")throw std::runtime_error("invalid update_test arguments");
+            const int cancel_after=argc==4?std::stoi(arg(argv,3)):2000;
+            std::atomic<bool> cancel{false};std::thread canceller;
+            if(argc>=3)canceller=std::thread([&cancel,cancel_after]{std::this_thread::sleep_for(std::chrono::milliseconds(cancel_after));cancel=true;});
+            rss::UpdateRelease result;
+            try {result=rss::check_update(cancel,[](const std::string& message){std::cerr<<message<<std::endl;});}
+            catch(...) {if(canceller.joinable())canceller.join();throw;}
+            if(canceller.joinable())canceller.join();
             std::cout<<result.version<<" "<<result.available<<"\n";return 0;
         }
         if ((argc == 6 || argc == 7) && arg(argv, 1) == "stage") {
@@ -83,11 +92,15 @@ int main(int argc, char** argv) {
         } else if (argc == 4 && arg(argv, 1) == "prepare") {
             std::ifstream input(arg(argv,3));std::ostringstream json;json<<input.rdbuf();
             const std::atomic<bool> cancel{false};
-            rss::prepare_update(rss::parse_update_release(json.str(),rss::app_version()),arg(argv,2),cancel,[](const std::string&){});
+            rss::prepare_update(rss::parse_update_release(json.str(),rss::app_version()),arg(argv,2),cancel,[](const std::string& message){std::cerr<<message<<std::endl;});
         } else if (argc == 3 && arg(argv, 1) == "apply") rss::apply_update(arg(argv, 2));
         else if (argc == 3 && arg(argv, 1) == "recover") std::cout << (rss::recover_update(arg(argv, 2)) ? "1\n" : "0\n");
         else if (argc == 3 && arg(argv, 1) == "commit") rss::commit_update(arg(argv, 2));
-        else if (argc == 3 && arg(argv, 1) == "backup") rss::backup_update_database(arg(argv, 2));
+        else if (argc == 3 && (arg(argv, 1) == "backup" || arg(argv, 1) == "backup-fail-progress"))
+            rss::backup_update_database(arg(argv, 2),[&](const std::string& message){
+                if(arg(argv,1)=="backup-fail-progress")throw std::runtime_error("fixture progress failure");
+                std::cerr<<message<<std::endl;
+            });
         else throw std::runtime_error("invalid update_test arguments");
         return 0;
     } catch (const std::exception& error) {

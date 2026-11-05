@@ -62,7 +62,7 @@ void App::directory_finished(bool cancelled,const std::string& error){
 }
 void App::request_directory_refresh(){
     if(directory_running_)return;
-    if(sync_state_==SyncState::Running||update_state_==UpdateState::Checking||update_state_==UpdateState::Downloading)
+    if(sync_state_==SyncState::Running||update_state_==UpdateState::Checking||update_state_==UpdateState::Downloading||update_state_==UpdateState::Installing)
         throw std::runtime_error("请先等待当前同步、翻译或更新任务完成。");
     directory_started();request_="refresh-directory:"+directory_scope_;
 }
@@ -219,7 +219,7 @@ void App::directory_website_screen(){
     c_.text(32,h-260,"将离开阅读器，交由系统浏览器打开。",24,85);
     c_.rule(32,h-144,w-64,205);
     button({32,h-136,w-64,112},"打开浏览器",[this,url=it->url]{
-        if(directory_running_||sync_state_==SyncState::Running||update_state_==UpdateState::Checking||update_state_==UpdateState::Downloading)throw std::runtime_error("请先等待当前后台任务完成。");
+        if(directory_running_||sync_state_==SyncState::Running||update_state_==UpdateState::Checking||update_state_==UpdateState::Downloading||update_state_==UpdateState::Installing)throw std::runtime_error("请先等待当前后台任务完成。");
         store_.set_setting("directory_browser_url",url);open_website=url;quit=true;
     },true,30);
 }

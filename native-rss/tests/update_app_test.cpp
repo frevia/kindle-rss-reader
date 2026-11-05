@@ -34,7 +34,18 @@ int main() {
     app.update_checked(release);app.update_started(true);app.update_finished(false);shot("update-ready.pgm");
     assert(app.update_state()==rss::App::UpdateState::Ready&&!app.quit);
     app.sync_started();tap(900,1380);assert(app.take_request().empty());app.sync_finished(true);
+    app.draw();const auto before_install=canvas.pixels;
     tap(900,1380);assert(app.take_request()=="install-update"&&!app.quit);
+    app.draw();assert(canvas.pixels!=before_install);shot("update-installing.pgm");
+    assert(app.update_state()==rss::App::UpdateState::Installing);
+    tap(900,1380);tap(140,1380);app.back();
+    assert(app.screen()==rss::App::Screen::Update&&app.take_request().empty()&&!app.quit);
+    app.update_progress("正在备份阅读数据 · 40%");shot("update-backup.pgm");
+    rss::draw_update_installation(canvas,"正在同步升级文件",2);const auto waiting=canvas.pixels;
+    rss::draw_update_installation(canvas,"正在同步升级文件",4);assert(canvas.pixels!=waiting);
+    app.update_finished(false,"无法备份阅读数据库，升级已停止");
+    assert(app.update_state()==rss::App::UpdateState::Failed&&!app.quit&&!app.install_update);
+    app.draw();tap(140,1380);assert(app.take_request()=="check-update");
     app.update_started(false);release.available=false;app.update_checked(release);assert(app.update_state()==rss::App::UpdateState::Current);
     tap(900,1380);assert(app.take_request().empty());shot("update-current.pgm");
 }
