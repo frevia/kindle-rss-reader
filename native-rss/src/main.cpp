@@ -3,6 +3,7 @@
 #include "net.hpp"
 #include "device.hpp"
 #include "process.hpp"
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstdlib>
@@ -16,6 +17,7 @@
 #include <stdexcept>
 #include <sys/stat.h>
 #include <csignal>
+#include <thread>
 #include <unistd.h>
 #ifdef RSS_DESKTOP
 #include <SDL.h>
@@ -74,6 +76,22 @@ void write_export(rss::Store& store,const std::string& path){
     out<<rss::export_opml(store.feeds(),store.groups());out.close();if(!out)throw std::runtime_error("导出文件写入失败");
     std::filesystem::rename(temp,path);
 }
+void open_system_browser(const std::string& url,bool kindle){
+    if(kindle){
+        rss::run_bounded({"/usr/bin/lipc-set-prop","com.lab126.appmgrd","start","app://com.lab126.browser"},std::chrono::seconds(3));
+        // The browser registers its LIPC service after appmgrd starts it.
+        for(int attempt=0;attempt<5;++attempt){
+            try{rss::run_bounded({"/usr/bin/lipc-set-prop","com.lab126.browser","gotoURL",url},std::chrono::seconds(1));return;}
+            catch(const std::exception&){if(attempt==4)throw;std::this_thread::sleep_for(std::chrono::milliseconds(250));}
+        }
+    }else{
+#ifdef __APPLE__
+        rss::run_bounded({"/usr/bin/open",url},std::chrono::seconds(5));
+#else
+        rss::run_bounded({"/usr/bin/xdg-open",url},std::chrono::seconds(5));
+#endif
+    }
+}
 class UiTasks {
 public:
     UiTasks(rss::Store& store,rss::App& app,const std::string& db):store_(store),app_(app),db_(db){
@@ -86,6 +104,8 @@ public:
                 app_.notify(read_file(result.string()));std::filesystem::remove(result);
             }
         }
+        const auto browser_error=store_.setting("directory_browser_error");
+        if(!browser_error.empty()){app_.notify(browser_error);store_.set_setting("directory_browser_error","");}
     }
     ~UiTasks(){cancel_=true;if(worker_.valid())worker_.wait();}
     void tick(){
@@ -98,7 +118,26 @@ public:
             catch(const std::exception& e){auto_due_=now+std::chrono::minutes(30);std::cerr<<"RSS Reader: automatic sync deferred: "<<e.what()<<'\n';}
         }
         const auto folder=std::filesystem::path(db_).parent_path();
-        if(request=="check-update"||request=="download-update") {
+        if(request.rfind("refresh-directory:",0)==0){
+            if(worker_.valid()){app_.directory_finished(false,"请先等待当前后台任务完成");return;}
+            try{
+                const auto scope=request.substr(18);std::vector<std::string> ids;
+                for(const auto& directory:rss::directory_catalogs(store_))if(directory.kind==rss::DirectoryKind::Opml&&(scope.empty()||directory.id==scope))ids.push_back(directory.id);
+                if(ids.empty())throw std::runtime_error("没有可下载的 OPML 源库");
+                cancel_=false;directory_task_=true;app_.directory_started();
+                worker_=std::async(std::launch::async,[this,ids]{
+                    rss::Store background(db_);std::string errors;
+                    for(const auto& id:ids){
+                        if(cancel_)break;
+                        try{rss::refresh_directory(background,id,cancel_);}
+                        catch(const std::exception& e){if(cancel_)break;if(!errors.empty())errors+="；";errors+=id+"："+e.what();}
+                    }
+                    if(!errors.empty())throw std::runtime_error(errors);
+                });
+            }catch(const std::exception& e){directory_task_=false;app_.directory_finished(false,e.what());}
+        }else if(request=="cancel-directory"){
+            if(directory_task_)cancel_=true;
+        }else if(request=="check-update"||request=="download-update") {
             if(worker_.valid()){app_.update_finished(false,"请先等待当前同步、翻译或更新任务完成");return;}
             try {
                 const bool downloading=request=="download-update";
@@ -120,9 +159,9 @@ public:
             if(std::filesystem::exists("/var/local/native-rss/home/enabled"))throw std::runtime_error("请先在 KUAL 停用首页 RSS");
             rss::backup_update_database("/mnt/us");app_.install_update=true;app_.quit=true;
         }else if(request=="sync"||request=="retry-sync"||request=="auto-sync"||request=="translate-selection"||request.rfind("fulltext:",0)==0||request.rfind("translate:",0)==0){
-            if(update_task_!=UpdateTask::None) {
+            if(update_task_!=UpdateTask::None||directory_task_) {
                 if(const auto selection=app_.take_selection_request())app_.selection_finished(*selection,"",false,"请先等待在线升级任务完成");
-                app_.sync_finished(false,"请先等待在线升级任务完成");return;
+                app_.sync_finished(false,"请先等待源库下载或在线升级任务完成");return;
             }
             if(!worker_.valid()){
                 const bool selecting=request=="translate-selection",article_translation=request.rfind("translate:",0)==0;
@@ -155,6 +194,7 @@ public:
                 }
             }
         }else if(request=="cancel-sync"){
+            if(directory_task_||update_task_!=UpdateTask::None){app_.sync_finished(true);return;}
             cancel_=true;if(!worker_.valid())app_.sync_finished(true);else app_.notify("正在取消同步…");
         }else if(request=="import"){
             import_opml(store_,(folder/"feeds.opml").string());app_.reload();app_.notify(store_.setting("auto_sync")=="0"?"订阅已导入，点击同步获取文章":"订阅已导入，将按自动同步周期更新，也可手动同步");
@@ -182,7 +222,8 @@ private:
             // Worker state is committed even when its status page is not visible.
             {std::lock_guard<std::mutex> lock(mutex_);progress=std::move(progress_);progress_.reset();}
             if(progress)this->progress(*progress);
-            if(update_task_!=UpdateTask::None) {
+            if(directory_task_){directory_task_=false;app_.directory_finished(cancel_,failure);}
+            else if(update_task_!=UpdateTask::None) {
                 if(update_task_==UpdateTask::Check&&failure.empty()&&!cancel_)app_.update_checked(update_result_);
                 else app_.update_finished(cancel_,failure);
                 update_task_=UpdateTask::None;
@@ -195,6 +236,7 @@ private:
     std::optional<rss::SelectionJob> selection_job_;
     enum class UpdateTask { None, Check, Download };
     UpdateTask update_task_=UpdateTask::None;
+    bool directory_task_=false;
     rss::UpdateRelease update_result_;
     std::string selection_result_;
     std::atomic<bool> cancel_{false};std::future<void> worker_;std::mutex mutex_;std::optional<rss::SyncProgress> progress_;
@@ -206,7 +248,7 @@ int device(rss::Store& store,rss::Canvas& canvas,const std::string& db,std::int6
     if(!guard||std::string(guard)!="1")throw std::runtime_error("设备模式必须由屏幕会话启动器运行");
     stop_device=0;
     const auto term=std::signal(SIGTERM,stop_device_handler),interrupt=std::signal(SIGINT,stop_device_handler),hangup=std::signal(SIGHUP,stop_device_handler);
-    bool install=false;
+    bool install=false,browser=false;
     try{
         rss::KindleDevice hardware;rss::App app(store,canvas,article,status_font_path());UiTasks tasks(store,app,db);
         auto last_activity=std::chrono::steady_clock::now()-std::chrono::seconds(5);
@@ -228,9 +270,10 @@ int device(rss::Store& store,rss::Canvas& canvas,const std::string& db,std::int6
         }
         // The supervising launcher restores the screen after checking the power state.
         install=app.install_update;
+        browser=!app.open_website.empty();
     }catch(...){std::signal(SIGTERM,term);std::signal(SIGINT,interrupt);std::signal(SIGHUP,hangup);throw;}
     std::signal(SIGTERM,term);std::signal(SIGINT,interrupt);std::signal(SIGHUP,hangup);
-    return install?42:0;
+    return install?42:browser?43:0;
 }
 #ifdef RSS_DESKTOP
 void desktop(rss::Store& store,rss::Canvas& canvas,const std::string& db,std::int64_t article){
@@ -291,6 +334,9 @@ void desktop(rss::Store& store,rss::Canvas& canvas,const std::string& db,std::in
         }
     }catch(...){SDL_DestroyTexture(texture);SDL_DestroyRenderer(renderer);SDL_DestroyWindow(window);SDL_Quit();throw;}
     SDL_StopTextInput();SDL_DestroyTexture(texture);SDL_DestroyRenderer(renderer);SDL_DestroyWindow(window);SDL_Quit();
+    if(!app.open_website.empty()){
+        store.set_setting("directory_browser_url","");open_system_browser(app.open_website,false);
+    }
 }
 #endif
 }
@@ -359,7 +405,16 @@ int main(int argc,char** argv){
         }
         const auto parent=std::filesystem::path(db).parent_path();if(!parent.empty())std::filesystem::create_directories(parent);
         rss::Store store(db);
-        if(command=="demo")demo(store);
+        if(command=="open-directory-website"){
+            const auto guard=std::getenv("RSS_BROWSER_GUARD");
+            if(!guard||std::string(guard)!="1"||!arg.empty())throw std::runtime_error("浏览器交接必须在设备启动器恢复系统界面后运行");
+            const auto url=store.setting("directory_browser_url");const auto directories=rss::directory_catalogs(store);
+            if(url.empty()||std::none_of(directories.begin(),directories.end(),[&](const rss::Directory& d){return d.kind==rss::DirectoryKind::Website&&d.url==url;}))throw std::runtime_error("网站入口已移除或地址无效");
+            store.set_setting("directory_browser_url","");
+            try{open_system_browser(url,true);}
+            catch(const std::exception&){store.set_setting("directory_browser_error","系统浏览器未能打开网站，请在源库页查看地址。");throw;}
+        }
+        else if(command=="demo")demo(store);
         else if(command=="import"){if(arg.empty())throw std::runtime_error("需要 OPML 路径");import_opml(store,arg);}
         else if(command=="export"){if(arg.empty())throw std::runtime_error("需要导出路径");write_export(store,arg);}
         else if(command=="add"){

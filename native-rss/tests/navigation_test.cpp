@@ -20,7 +20,7 @@ int main(){
     const auto touch=[&](int x,int y){app.draw();app.tap(x,y);};
     const auto shot=[&](const char* name){app.draw();if(auto dir=std::getenv("RSS_TEST_SNAPSHOTS")){std::filesystem::create_directories(dir);canvas.write_pgm((std::filesystem::path(dir)/(std::string("navigation-")+name+".pgm")).string());}};
     const auto picker_row=[&](const std::string& group,bool all){auto g=store.groups();auto it=std::find(g.begin(),g.end(),group);assert(it!=g.end());return (!app.query().empty()?260:172)+88+static_cast<int>((it-g.begin()+(all?1:0))%6)*88+44;};
-    const auto subscriptions=[&]{touch(100,1392);assert(app.menu_open());touch(140,966);assert(app.screen()==rss::App::Screen::Subscriptions);};
+    const auto subscriptions=[&]{touch(100,1392);assert(app.menu_open());touch(140,966);assert(app.screen()==rss::App::Screen::SubscriptionHome);};
     shot("home");
     // The compact menu remains reachable without adding a second home title.
     touch(100,1392);assert(app.menu_open());touch(100,1392);assert(!app.menu_open());
@@ -60,23 +60,31 @@ int main(){
     app.sync_progress(6,6,0,"更新完成");app.sync_finished(false);assert(app.screen()==rss::App::Screen::Cache);shot("cache");app.back();assert(app.screen()==rss::App::Screen::Sync&&app.sync_state()==rss::App::SyncState::Complete);shot("sync-complete");app.back();
     touch(100,1392);touch(140,1174);assert(app.take_request()=="sync");store.sync_result(feeds[1],"连接超时","","",0);app.sync_progress(6,6,1,"有订阅失败");app.sync_finished(false);assert(app.sync_state()==rss::App::SyncState::Failed);
     touch(200,440);shot("edit-failed");touch(100,50);assert(app.screen()==rss::App::Screen::Sync);
-    touch(200,440);touch(200,330);for(int i=0;i<4;++i)app.backspace();app.text_input("开源修订");app.submit();assert(store.feeds()[1].title=="开源观察");touch(950,1380);assert(store.feeds()[1].title=="开源修订"&&app.screen()==rss::App::Screen::Sync);shot("retry-after-edit");
+    touch(200,440);touch(200,330);for(int i=0;i<4;++i)app.backspace();app.text_input("开源修订");app.submit();assert(store.feeds()[1].title=="开源观察");touch(950,136);assert(store.feeds()[1].title=="开源修订"&&app.screen()==rss::App::Screen::Sync);shot("retry-after-edit");
     touch(200,1124);assert(app.take_request()=="retry-sync");store.sync_result(feeds[1],"","","",1700000000);app.sync_progress(1,1,0,"更新完成");app.sync_finished(false);app.back();
     // Group metadata survives empty folders, rename, cancel and delete.
-    subscriptions();shot("subscriptions");touch(150,1380);assert(app.screen()==rss::App::Screen::Groups);touch(950,140);touch(200,350);app.text_input("测试");app.submit();touch(950,1380);
+    subscriptions();shot("subscription-home");
+    touch(150,1380);assert(app.screen()==rss::App::Screen::SubscriptionHome); // No footer tasks on the hub.
+    touch(200,348);assert(app.screen()==rss::App::Screen::Subscriptions);shot("subscriptions");
+    touch(150,1380);assert(app.screen()==rss::App::Screen::Subscriptions); // The old group shortcut is gone.
+    app.back();assert(app.screen()==rss::App::Screen::SubscriptionHome);
+    touch(150,912);assert(app.screen()==rss::App::Screen::Groups);touch(950,140);touch(200,350);app.text_input("测试");app.submit();
+    touch(950,1380);assert(app.screen()==rss::App::Screen::GroupEdit); // Only the header saves a draft.
+    {const auto draft_groups=store.groups();assert(std::find(draft_groups.begin(),draft_groups.end(),"测试")==draft_groups.end());}
+    touch(950,136);
     auto all=store.groups();assert(std::find(all.begin(),all.end(),"测试")!=all.end());shot("groups");
     auto group_edit=[&](const std::string& path){auto g=store.groups();auto it=std::find(g.begin(),g.end(),path);assert(it!=g.end());touch(950,250+static_cast<int>(it-g.begin())*128+44);assert(app.screen()==rss::App::Screen::GroupEdit);};
-    group_edit("测试");touch(200,350);app.backspace();app.backspace();app.text_input("阅读");app.submit();touch(950,1380);all=store.groups();assert(std::find(all.begin(),all.end(),"阅读")!=all.end());
+    group_edit("测试");touch(200,350);app.backspace();app.backspace();app.text_input("阅读");app.submit();touch(950,136);all=store.groups();assert(std::find(all.begin(),all.end(),"阅读")!=all.end());
     group_edit("阅读");touch(200,820);shot("delete-group");touch(200,1380);all=store.groups();assert(std::find(all.begin(),all.end(),"阅读")!=all.end());touch(200,820);touch(950,1380);all=store.groups();assert(std::find(all.begin(),all.end(),"阅读")==all.end());assert(store.feeds().size()==6&&store.entries(rss::View::All).size()==9);
-    app.back();touch(950,1380);assert(app.screen()==rss::App::Screen::Opml);shot("opml");touch(200,350);touch(200,1380);assert(app.screen()==rss::App::Screen::Opml);touch(200,550);assert(app.take_request()=="export");touch(200,350);touch(950,1380);assert(app.take_request()=="import");app.back();app.back();
+    app.back();touch(200,1100);assert(app.screen()==rss::App::Screen::Opml);shot("opml");touch(200,350);touch(200,1380);assert(app.screen()==rss::App::Screen::Opml);touch(200,550);assert(app.take_request()=="export");touch(200,350);touch(950,1380);assert(app.take_request()=="import");app.back();app.back();
     // Every failed source stays reachable, and returning home can start a full sync.
     for(auto id:feeds)store.sync_result(id,"同步失败","","",0);
     touch(100,1392);touch(140,1174);assert(app.take_request()=="sync");app.sync_finished(false);shot("sync-failures");app.next();shot("sync-failures-page2");
-    touch(200,440);touch(200,330);for(int i=0;i<4;++i)app.backspace();app.text_input("末页源");app.submit();touch(950,1380);
+    touch(200,440);touch(200,330);for(int i=0;i<4;++i)app.backspace();app.text_input("末页源");app.submit();touch(950,136);
     assert(store.feeds()[4].title=="末页源");app.back();touch(100,1392);touch(140,1174);assert(app.take_request()=="sync");
     // A changed address is only a draft, and cannot replace an active download's source.
     app.sync_finished(false);touch(200,440);touch(200,500);for(int i=0;i<22;++i)app.backspace();app.text_input("https://changed.test/rss");app.submit();
-    app.sync_started();bool blocked=false;try{touch(950,1380);}catch(const std::runtime_error&){blocked=true;}assert(blocked&&store.feeds()[0].url=="https://example.test/0");
+    app.sync_started();bool blocked=false;try{touch(950,136);}catch(const std::runtime_error&){blocked=true;}assert(blocked&&store.feeds()[0].url=="https://example.test/0");
     app.back();assert(store.feeds()[0].url=="https://example.test/0");app.sync_finished(true);app.back();
     // Exit is a separate confirmation; cancellation never quits or clicks through.
     touch(100,1392);touch(140,1278);shot("exit-confirm");touch(200,844);assert(!app.quit);
@@ -92,10 +100,10 @@ int main(){
             assert(false&&"Visible empty-state button must fit above the footer");
         };
         capture("no-subscriptions");action();assert(empty_app.screen()==rss::App::Screen::Subscriptions&&empty_store.feeds().empty());empty_app.back();empty_app.back();
-        rss::Feed f;f.url="https://empty.test/rss";f.title="空态测试";f.group="测试";auto fid=empty_store.add_feed(f);empty_app.show_group("");capture("ungrouped");action();assert(empty_app.screen()==rss::App::Screen::Subscriptions);empty_app.back();assert(empty_app.selected_group()==std::optional<std::string>(""));
+        rss::Feed f;f.url="https://empty.test/rss";f.title="空态测试";f.group="测试";auto fid=empty_store.add_feed(f);empty_app.show_group("");capture("ungrouped");action();assert(empty_app.screen()==rss::App::Screen::SubscriptionHome);empty_app.back();assert(empty_app.selected_group()==std::optional<std::string>(""));
         rss::Entry e;e.guid="read";e.title="已经读完";e.text="正文";rss::ParsedFeed parsed;parsed.entries={e};empty_store.save_entries(fid,parsed);auto eid=empty_store.entries(rss::View::All).front().id;empty_store.set_read(eid,true);
         empty_app.show_view(rss::View::Unread);capture("done");action();empty_app.draw();empty_app.tap(100,300);assert(empty_app.current_id()==eid);empty_app.back();
-        empty_app.show_view(rss::View::Starred);capture("starred");action();assert(empty_app.screen()==rss::App::Screen::Subscriptions);empty_app.back();
+        empty_app.show_view(rss::View::Starred);capture("starred");action();assert(empty_app.screen()==rss::App::Screen::SubscriptionHome);empty_app.back();
         empty_app.show_view(rss::View::All);empty_app.draw();empty_app.tap(990,160);empty_app.text_input("没有这个标题");empty_app.submit();capture("search");action();empty_app.text_input("修订");empty_app.submit();assert(empty_app.query()=="没有这个标题修订");
         empty_app.show_view(rss::View::All);empty_app.draw();empty_app.tap(990,160);std::string long_query;for(int i=0;i<300;++i)long_query+="长查询";empty_app.text_input(long_query.substr(0,1800));empty_app.submit();capture("long-search");action();empty_app.back();assert(!empty_app.query().empty()&&empty_store.feeds().size()==1&&empty_store.entry(eid)->read);
     }
@@ -107,7 +115,7 @@ int main(){
         auto tap=[&](int x,int y){nested.draw();nested.tap(x,y);};
         auto capture=[&](const char* name){nested.draw();if(auto dir=std::getenv("RSS_TEST_SNAPSHOTS"))canvas.write_pgm((std::filesystem::path(dir)/(std::string("tree-")+name+".pgm")).string());};
         auto has=[&](const std::string& path){auto g=tree.groups();return std::find(g.begin(),g.end(),path)!=g.end();};
-        auto manage=[&]{tap(100,1392);tap(140,966);tap(150,1380);assert(nested.screen()==rss::App::Screen::Groups);};
+        auto manage=[&]{tap(100,1392);tap(140,966);tap(150,912);assert(nested.screen()==rss::App::Screen::Groups);};
         auto row=[&](const std::string& path,int x,int page=0,int item=-1){
             auto g=tree.groups();auto it=std::find(g.begin(),g.end(),path);assert(it!=g.end());
             const auto index=static_cast<std::size_t>(it-g.begin());
@@ -120,12 +128,12 @@ int main(){
             tap(200,550);assert(nested.screen()==rss::App::Screen::GroupPicker);tap(950,140);nested.text_input(query);nested.submit();
             tap(200,396);assert(nested.screen()==rss::App::Screen::GroupEdit);
         };
-        auto save=[&]{tap(950,1380);assert(nested.screen()==rss::App::Screen::Groups);};
+        auto save=[&]{tap(950,136);assert(nested.screen()==rss::App::Screen::Groups);};
         manage();row("Alpha",800);name("Child");capture("new-child");assert(!has("Alpha/Child"));save();assert(has("Alpha/Child"));
         row("Alpha/Child",800);name("Nested");save();assert(has("Alpha/Child/Nested"));
         tap(950,140);name("FromPicker");parent("Alpha/Child");save();assert(has("Alpha/Child/FromPicker"));
         // A changed parent remains a draft; backing out of its picker preserves the name.
-        row("Alpha/Child",950);name("Draft");parent("Beta");nested.draw();const auto draft_form=canvas.pixels;tap(200,550);nested.back();nested.draw();assert(canvas.pixels==draft_form);tap(200,1380);
+        row("Alpha/Child",950);name("Draft");parent("Beta");nested.draw();const auto draft_form=canvas.pixels;tap(200,550);nested.back();nested.draw();assert(canvas.pixels==draft_form);nested.back();
         assert(has("Alpha/Child")&&!has("Beta/Draft"));row("Alpha/Child",950);save();assert(has("Alpha/Child"));
         // Self and descendants are absent even when they match a parent search.
         row("Alpha/Child",950);tap(200,550);tap(950,140);nested.text_input("Alpha/Child");nested.submit();capture("parent-no-cycle");

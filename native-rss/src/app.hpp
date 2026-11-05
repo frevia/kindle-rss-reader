@@ -6,6 +6,7 @@
 #include "device.hpp"
 #include "selection.hpp"
 #include "update.hpp"
+#include "directory.hpp"
 #include <functional>
 #include <map>
 #include <memory>
@@ -15,7 +16,8 @@ namespace rss {
 class App {
 public:
     enum class ReaderPanel { None, Type, Images, Info, Content, Translation, Selection };
-    enum class Screen { List, Subscriptions, GroupPicker, Groups, GroupEdit, Opml, Sync, Cache, Settings, Update };
+    enum class Screen { List, SubscriptionHome, Subscriptions, GroupPicker, Groups, GroupEdit, Opml, Sync, Cache, Settings, Update,
+                        Discovery, Directories, DirectoryEdit, DirectoryTopics, DirectoryWebsite, DirectoryDetail, DirectoryScope };
     enum class UpdateState { Idle, Checking, Available, Current, Downloading, Ready, Failed };
     enum class SyncState { Idle, Running, Complete, Cancelled, Failed };
     App(Store& store, Canvas& canvas, std::int64_t initial_article = 0, const std::string& status_font = {});
@@ -43,6 +45,9 @@ public:
     void update_checked(const UpdateRelease& release);
     void update_progress(const std::string& message);
     void update_finished(bool cancelled, const std::string& error = "");
+    void directory_started();
+    void directory_finished(bool cancelled, const std::string& error = "");
+    bool directory_running() const { return directory_running_; }
     UpdateState update_state() const { return update_state_; }
     Screen screen() const { return screen_; }
     SyncState sync_state() const { return sync_state_; }
@@ -54,6 +59,7 @@ public:
     void show_group(const std::string& group);
     std::string take_request();
     bool dirty = true, quit = false, install_update = false;
+    std::string open_website;
     bool reading() const { return current_.has_value(); }
     std::size_t reader_page() const { return page_; }
     std::int64_t current_id() const { return current_ ? current_->id : 0; }
@@ -127,6 +133,15 @@ private:
     std::size_t image_page_=0;
     std::optional<Feed> managing_;
     std::string confirmation_;
+    std::vector<Directory> directories_;
+    std::map<std::string,DirectoryCache> directory_caches_;
+    std::vector<Feed> discovery_feeds_;
+    std::optional<Directory> editing_directory_;
+    std::optional<std::string> discovery_topic_;
+    std::string directory_scope_, discovery_query_, directory_message_, directory_website_id_, directory_detail_id_;
+    std::size_t discovery_page_=0, directory_page_=0, directory_topic_page_=0, discovery_page_count_=1;
+    std::size_t directory_scope_page_=0;
+    bool directory_running_=false;
     std::string status_, search_, input_, input_mode_, request_, error_;
     bool chinese_ = false;
     std::string composing_;
@@ -149,10 +164,12 @@ private:
     void button(Rect rect,const std::string& label,std::function<void()> action,bool filled=false,int size=28,Icon icon=Icon::None,bool enabled=true,Align align=Align::Center);
     void back_button(int top=6,int height=64);
     void page_header(const std::string& title);
+    void navigation_pager(std::size_t page, std::size_t pages);
     void device_status(bool clock,bool clock_left=false);
     void list_screen();
     void reader_screen();
     void nav_screen();
+    void subscriptions_home_screen();
     void group_picker_screen();
     void group_edit_screen();
     void edit_group(const std::string& path, bool create);
@@ -162,6 +179,17 @@ private:
     void settings_screen();
     void update_screen();
     void open_subscriptions();
+    void open_discovery();
+    void load_directories();
+    void filter_directory_feeds();
+    void discovery_screen();
+    void directories_screen();
+    void directory_edit_screen();
+    void directory_topics_screen();
+    void directory_website_screen();
+    void directory_detail_screen();
+    void directory_scope_screen();
+    void request_directory_refresh();
     void restore_home();
     void open_group_picker(PickerPurpose purpose);
     void restore_input();

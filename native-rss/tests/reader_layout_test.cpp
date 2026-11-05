@@ -56,12 +56,12 @@ int main(){
             for(int y=6;y<70;++y)for(int x=24;x<120;++x)assert(canvas.pixels[y*1072+x]==header[y*1072+x]);
             for(int y=0;y<70;++y)for(int x=400;x<1072;++x)assert(canvas.pixels[y*1072+x]==header[y*1072+x]);
         };
-        tap(950,140);same_back("add-feed");tap(200,330);app.text_input("尚未保存");same_back("name-input");
+        tap(200,348);tap(950,140);same_back("add-feed");tap(200,330);app.text_input("尚未保存");same_back("name-input");
         tap(62,60);tap(62,60);assert(store.feeds().front().title=="界面一致性");
-        tap(150,1380);same_back("groups");tap(950,140);same_back("group-edit");
+        app.back();tap(150,912);same_back("groups");tap(950,140);same_back("group-edit");
         tap(200,550);same_back("parent-picker");tap(62,60);tap(62,60);tap(62,60);
-        assert(app.screen()==rss::App::Screen::Subscriptions&&store.groups().size()==2);
-        tap(950,1380);same_back("opml");tap(200,350);same_back("confirmation");tap(62,60);
+        assert(app.screen()==rss::App::Screen::SubscriptionHome&&store.groups().size()==2);
+        tap(200,1100);same_back("opml");tap(200,350);same_back("confirmation");tap(62,60);
         assert(app.screen()==rss::App::Screen::Opml&&app.take_request().empty());tap(62,60);tap(62,60);
         tap(990,160);app.text_input("未确认的关键词");same_back("search");tap(400,246);same_back("search-scope");
         tap(950,140);app.text_input("设计");same_back("find-group");tap(62,60);tap(62,60);
@@ -121,7 +121,7 @@ int main(){
         assert(std::equal(list_before.begin()+112*1072,list_before.end(),canvas.pixels.begin()+112*1072));
         app.dirty=false;app.set_reader_status({68,false,true,"09:19"});assert(!app.dirty);
         app.tap(100,1392);assert(app.menu_open());app.draw();app.tap(120,966);app.draw();
-        assert(app.screen()==rss::App::Screen::Subscriptions);const auto navigation=canvas.pixels;
+        assert(app.screen()==rss::App::Screen::SubscriptionHome);const auto navigation=canvas.pixels;
         app.set_reader_status({67,false,true,"09:20"});assert(app.dirty);app.draw();
         assert(std::equal(navigation.begin()+112*1072,navigation.end(),canvas.pixels.begin()+112*1072));
         app.back();app.draw();

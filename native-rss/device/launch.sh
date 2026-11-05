@@ -58,6 +58,7 @@ if [ -e "$UPDATE/journal" ] && [ "${RSS_UPDATE_BOOT:-0}" != 1 ]; then
 fi
 [ -x "$APP" ] || fail "缺少程序 $APP"
 install_update=0
+open_browser=0
 snapshot=
 CRE_CACHE=
 stopped=
@@ -223,6 +224,9 @@ cleanup() {
     if [ "$recovering" -eq 0 ] && [ "$restore_failed" -eq 0 ] && [ "$install_update" -eq 2 ]; then
         RSS_UPDATE_BOOT=1 exec /bin/sh "$LAUNCH" 8>&- 9>&-
     fi
+    if [ "$recovering" -eq 0 ] && [ "$restore_failed" -eq 0 ] && [ "$result" -eq 0 ] && [ "$open_browser" -eq 1 ] && awake; then
+        RSS_BROWSER_GUARD=1 timeout 15 "$APP" --db "$DB" open-directory-website 8>&- || result=1
+    fi
     exit "$result"
 }
 interrupted() {
@@ -340,6 +344,7 @@ while "$KILL" -0 "$child" 2>/dev/null; do
 done
 wait "$child"; result=$?
 child=
+if [ "$result" -eq 43 ]; then open_browser=1; result=0; fi
 if [ "$result" -eq 42 ]; then
     [ -x "$UPDATE/runner" ] && [ ! -L "$UPDATE/runner" ] || fail '升级安装程序缺失'
     # The old shell keeps its open script inode; replacements use rename, never in-place writes.

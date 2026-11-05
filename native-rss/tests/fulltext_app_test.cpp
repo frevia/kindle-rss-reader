@@ -49,10 +49,10 @@ int main(){
         rss::App unread(store,canvas);unread.open(other);assert(unread.using_fulltext());
         rss::App settings(store,canvas);
         auto edit_tap=[&](int x,int y){settings.draw();settings.tap(x,y);};
-        edit_tap(100,1392);edit_tap(120,966);edit_tap(950,398);edit_tap(250,920);
+        edit_tap(100,1392);edit_tap(120,966);edit_tap(200,348);edit_tap(950,398);edit_tap(250,920);
         assert(store.setting("feed_fulltext:"+std::to_string(fid)).empty());
-        edit_tap(150,1380);assert(store.setting("feed_fulltext:"+std::to_string(fid)).empty());
-        edit_tap(950,398);edit_tap(250,920);edit_tap(950,1380);
+        edit_tap(62,60);assert(store.setting("feed_fulltext:"+std::to_string(fid)).empty());
+        edit_tap(950,398);edit_tap(250,920);edit_tap(950,136);
         assert(store.setting("feed_fulltext:"+std::to_string(fid))=="1");
         store.set_starred(id,true);store.remove_feed(fid);assert(store.fulltext_entry(id));
         reopened.open(id);assert(reopened.using_fulltext());

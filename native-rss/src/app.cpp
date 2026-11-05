@@ -131,6 +131,13 @@ void App::back_button(int top,int height){
 void App::page_header(const std::string& title){
     back_button();c_.rule(32,76,c_.width-64,150);c_.text(32,154,title,48);
 }
+void App::navigation_pager(std::size_t page,std::size_t pages){
+    const int w=c_.width,y=c_.height-100;
+    c_.rule(32,y-4,w-64,205);
+    c_.text(32,y+56,"第 "+std::to_string(page+1)+" / "+std::to_string(pages)+" 页",24,85);
+    button({w-344,y,156,88},"上页",[this]{previous();},false,28,Icon::Back,page>0);
+    button({w-188,y,156,88},"下页",[this]{next();},false,28,Icon::Next,page+1<pages);
+}
 void App::draw(){
     if(auto_refresh_pending_&&!reading()&&screen_==Screen::List&&input_mode_.empty()&&confirmation_.empty()&&error_.empty()&&!managing_&&!brand_menu_&&!source_list_)reload();
     hits_.clear();c_.clear();bool reader_visible=false,list_visible=false;
@@ -145,12 +152,20 @@ void App::draw(){
     else if(managing_)management_screen();
     else if(screen_==Screen::GroupEdit)group_edit_screen();
     else if(current_){reader_visible=true;reader_screen();if(reader_tools_)reader_tools();if(reader_panel_!=ReaderPanel::None)reader_panel_screen();else if(selection_)selection_tools();}
+    else if(screen_==Screen::SubscriptionHome)subscriptions_home_screen();
     else if(screen_==Screen::Subscriptions||screen_==Screen::Groups)nav_screen();
     else if(screen_==Screen::Opml)opml_screen();
     else if(screen_==Screen::Sync){list_screen();list_visible=true;sync_screen();}
     else if(screen_==Screen::Cache)management_screen();
     else if(screen_==Screen::Settings)settings_screen();
-        else if(screen_==Screen::Update)update_screen();
+    else if(screen_==Screen::Update)update_screen();
+    else if(screen_==Screen::Discovery)discovery_screen();
+    else if(screen_==Screen::Directories)directories_screen();
+    else if(screen_==Screen::DirectoryEdit)directory_edit_screen();
+    else if(screen_==Screen::DirectoryTopics)directory_topics_screen();
+    else if(screen_==Screen::DirectoryWebsite)directory_website_screen();
+    else if(screen_==Screen::DirectoryDetail)directory_detail_screen();
+    else if(screen_==Screen::DirectoryScope)directory_scope_screen();
     else {list_screen();list_visible=true;if(brand_menu_)app_menu();}
     if(!reader_visible)device_status(true,list_visible);
     dirty=false;
@@ -731,7 +746,7 @@ void App::reader_panel_screen(){
     }
 }
 void App::open_subscriptions(){
-    home_=ListContext{view_,feed_,group_,search_,list_page_};status_.clear();source_list_=false;brand_menu_=false;screen_=Screen::Subscriptions;nav_page_=0;
+    home_=ListContext{view_,feed_,group_,search_,list_page_};status_.clear();source_list_=false;brand_menu_=false;screen_=Screen::SubscriptionHome;nav_page_=0;
     feeds_=store_.feeds();group_names_=store_.groups();
 }
 void App::restore_home(){
@@ -783,9 +798,27 @@ void App::settings_screen(){
         c_.text(32,y,line.text,24,85);y+=36;
     }
 }
+void App::subscriptions_home_screen(){
+    const int w=c_.width;page_header("订阅管理");
+    c_.text(32,224,std::to_string(feeds_.size())+" 个订阅源 · "+std::to_string(group_names_.size()-1)+" 个分组",24,85);
+    const std::array<std::tuple<std::string,std::string,std::function<void()>>,5> tasks{{
+        {"我的订阅","查看和编辑已订阅的来源",[this]{screen_=Screen::Subscriptions;}},
+        {"发现订阅","从源库里挑选新的订阅源",[this]{open_discovery();}},
+        {"订阅源库","管理 OPML 订阅源列表",[this]{load_directories();screen_=Screen::Directories;directory_page_=0;}},
+        {"管理分组","整理订阅源的所属分组",[this]{screen_=Screen::Groups;}},
+        {"导入与导出","通过 OPML 批量迁移个人订阅",[this]{status_.clear();screen_=Screen::Opml;}}
+    }};
+    int y=254;c_.rule(32,y-1,w-64,150);
+    for(const auto& [title,description,action]:tasks){
+        hits_.push_back({{32,y,w-64,188},action});
+        c_.text(40,y+70,title,36);c_.text(40,y+120,description,24,85);
+        c_.icon(Icon::Next,{w-72,y+78,28,28});
+        c_.rule(32,y+187,w-64,205);y+=188;
+    }
+}
 void App::nav_screen(){
     const bool groups=screen_==Screen::Groups;const int w=c_.width,h=c_.height;
-    page_header(groups?"管理分组":"订阅");
+    page_header(groups?"管理分组":"我的订阅");
     button({w-212,92,180,88},groups?"新增":"添加",[this,groups]{if(groups){edit_group("",true);}else edit_feed(Feed{});},false,28,Icon::Plus,true,Align::Right);
 
     c_.text(32,200,std::to_string(groups?group_names_.size()-1:feeds_.size())+(groups?" 个分组":" 个订阅源"),24,85);
@@ -801,7 +834,7 @@ void App::nav_screen(){
         };
         if(count("")>0)add("");for(const auto& path:group_names_)if(!path.empty()&&path.find('/')==std::string::npos)add(path);
     }
-    const int top=250,bottom=h-(groups?104:208);auto starts=navigation_pages(rows,bottom-top);auto& page=groups?groups_page_:nav_page_;
+    const int top=250,bottom=h-104;auto starts=navigation_pages(rows,bottom-top);auto& page=groups?groups_page_:nav_page_;
     page=std::min(page,starts.size()-1);nav_page_count_=starts.size();int y=top;const auto end=page+1<starts.size()?starts[page+1]:rows.size();
     if(starts[page]<rows.size()&&rows[starts[page]].depth>0)c_.text(32,244,c_.ellipsize(rows[starts[page]].path,24,w-64),24,100);
     for(auto i=starts[page];i<end;++i){const auto row=rows[i];const int x=40+std::min(row.depth,8)*32;
@@ -829,11 +862,7 @@ void App::nav_screen(){
         c_.rule(32,y+row.height-1,w-64,205);y+=row.height;
     }
     if(rows.empty())c_.text(32,350,"还没有订阅源",32,80);
-    const int pager=h-(groups?100:204);c_.rule(32,pager-4,w-64,205);
-    button({32,pager,220,88},"上一页",[page_ptr=&page]{--*page_ptr;},false,28,Icon::Back,page>0,Align::Left);
-    const auto page_label="第 "+std::to_string(page+1)+" / "+std::to_string(starts.size())+" 页";c_.text(w/2-c_.measure(page_label,24)/2,pager+56,page_label,24,90);
-    button({w-252,pager,220,88},"下一页",[page_ptr=&page]{++*page_ptr;},false,28,Icon::Next,page+1<starts.size(),Align::Right);
-    if(!groups){c_.rule(32,h-104,w-64,150);button({32,h-100,w/2-64,88},"管理分组",[this]{screen_=Screen::Groups;},false,28,Icon::Folder,true,Align::Left);button({w/2,h-100,w/2-32,88},"OPML",[this]{status_.clear();screen_=Screen::Opml;},false,28,Icon::Download,true,Align::Right);}
+    navigation_pager(page,starts.size());
 }
 void App::open_group_picker(PickerPurpose purpose){
     picker_purpose_=purpose;picker_query_.clear();picker_page_=0;
@@ -881,7 +910,7 @@ void App::group_picker_screen(){
     if(rows.empty())c_.text(popup?left+24:32,top+(popup?58:100),"没有匹配的分组",32,80);
     if(!popup||starts.size()>1){
         const int pager=popup?top+visible_rows*row_height:h-100;
-        if(!popup)c_.rule(32,pager-4,w-64,205);
+        if(!popup){navigation_pager(picker_page_,starts.size());return;}
         button({popup?left+16:32,pager,popup?200:220,88},"上一页",[this]{--picker_page_;},false,28,Icon::Back,picker_page_>0,Align::Left);
         const auto page="第 "+std::to_string(picker_page_+1)+" / "+std::to_string(starts.size())+" 页";c_.text(left+width/2-c_.measure(page,24)/2,pager+56,page,24,90);
         button({popup?left+width-216:w-252,pager,popup?200:220,88},"下一页",[this]{++picker_page_;},false,28,Icon::Next,picker_page_+1<starts.size(),Align::Right);
@@ -893,7 +922,7 @@ void App::edit_group(const std::string& path,bool create){
     screen_=Screen::GroupEdit;
 }
 void App::group_edit_screen(){
-    const int w=c_.width,h=c_.height;page_header(new_group_?"新增分组":"编辑分组");
+    const int w=c_.width;page_header(new_group_?"新增分组":"编辑分组");
     c_.text(32,270,"分组名称",24,85);frame(c_,{32,296,w-64,112});
     button({56,304,w-112,96},group_name_draft_.empty()?"点击输入名称":group_name_draft_,[this]{start_input("folder",group_name_draft_);},false,32,Icon::None,true,Align::Left);
     c_.text(32,470,"上级分组",24,85);frame(c_,{32,496,w-64,112});
@@ -901,9 +930,7 @@ void App::group_edit_screen(){
     down(c_,w-72,552);hits_.push_back({{w-112,496,80,112},[this]{open_group_picker(PickerPurpose::Parent);}});
     c_.text(32,682,new_group_?"保存在所选上级中，可继续添加更深的子分组。":"更换上级会移动整个分组，订阅和文章状态保留。",24,85);
     if(!new_group_){button({32,780,280,88},"删除分组",[this]{confirmation_="delete-group";},false,28,Icon::Close,true,Align::Left);c_.text(32,936,"删除含子分组；订阅移到未分组，文章保留。",24,85);}
-    c_.rule(32,h-104,w-64,205);
-    button({32,h-100,220,88},"取消",[this]{screen_=Screen::Groups;},false,28,Icon::None,true,Align::Left);
-    button({w-252,h-100,220,88},"保存",[this]{
+    button({w-252,92,220,88},"保存",[this]{
         const auto name=trim(group_name_draft_);if(name.empty()||name.find('/')!=std::string::npos)throw std::runtime_error("请输入不含 / 的分组名称");
         const auto target=(group_parent_draft_.empty()?"":group_parent_draft_+"/")+name;
         if(new_group_)store_.add_group(target);else{
@@ -915,7 +942,7 @@ void App::group_edit_screen(){
     },true,28);
 }
 void App::opml_screen(){
-    const int w=c_.width;page_header("OPML");
+    const int w=c_.width;page_header("导入与导出");
     button({32,270,w-64,112},"导入 OPML",[this]{confirmation_="import";},false,32,Icon::Download,true,Align::Left);
     c_.text(32,428,"从本机 feeds.opml 合并订阅及分组",24,85);
     button({32,510,w-64,112},"导出 OPML",[this]{request_="export";},false,32,Icon::Upload,true,Align::Left);
@@ -924,7 +951,7 @@ void App::opml_screen(){
 }
 void App::sync_started(bool translating,bool automatic){translating_=translating;automatic_sync_=automatic;if(!automatic)status_.clear();sync_page_=0;sync_state_=SyncState::Running;sync_completed_=sync_failed_=0;sync_total_=translating?0:static_cast<int>(feeds_.size());sync_message_=translating?"正在准备翻译文章":"正在连接订阅源";if(screen_==Screen::Sync||reader_panel_==ReaderPanel::Translation)dirty=true;}
 void App::maybe_auto_sync(std::time_t now){
-    if(now<=0||quit||!reader_status_.wifi||screen_!=Screen::List||!error_.empty()||!confirmation_.empty()||!input_mode_.empty()||managing_||brand_menu_||selection_||sync_state_==SyncState::Running||update_state_==UpdateState::Checking||update_state_==UpdateState::Downloading||!request_.empty()||store_.setting("auto_sync")=="0")return;
+    if(now<=0||quit||!reader_status_.wifi||screen_!=Screen::List||!error_.empty()||!confirmation_.empty()||!input_mode_.empty()||managing_||brand_menu_||selection_||directory_running_||sync_state_==SyncState::Running||update_state_==UpdateState::Checking||update_state_==UpdateState::Downloading||!request_.empty()||store_.setting("auto_sync")=="0")return;
     if(std::none_of(feeds_.begin(),feeds_.end(),[](const Feed& f){return f.id>0&&!f.url.empty();}))return;
     constexpr std::int64_t interval=1800;std::int64_t latest=0;
     const auto attempted=store_.setting("auto_sync_last_attempt");
@@ -984,8 +1011,9 @@ void App::sync_screen(){
 }
 void App::input_screen(){
     const int w=c_.width,h=c_.height;
-    const auto title=input_mode_=="url"?"订阅地址":input_mode_=="title"?"订阅名称":input_mode_=="folder"?"分组名称":input_mode_=="group-find"?"查找分组":"搜索文章";
-    std::string hint=input_mode_=="url"?"输入 HTTP(S) RSS / Atom 地址":input_mode_=="title"?"可留空，同步时自动读取博客名称":input_mode_=="folder"?"请输入不含 / 的分组名称":input_mode_=="group-find"?"按分组名称或路径查找":"搜索本地文章标题";
+    const bool url_input=input_mode_=="url"||input_mode_=="directory-url";
+    const auto title=input_mode_=="directory-name"?"源库名称":input_mode_=="directory-url"?"源库地址":input_mode_=="directory-search"?"查找订阅源":input_mode_=="url"?"订阅地址":input_mode_=="title"?"订阅名称":input_mode_=="folder"?"分组名称":input_mode_=="group-find"?"查找分组":"搜索文章";
+    std::string hint=input_mode_=="directory-name"?"输入源库名称":input_mode_=="directory-url"?"输入以 .opml 结尾的 HTTP(S) 文件地址":input_mode_=="directory-search"?"查找源库中的名称、主题或网址":input_mode_=="url"?"输入 HTTP(S) RSS / Atom 地址":input_mode_=="title"?"可留空，同步时自动读取博客名称":input_mode_=="folder"?"请输入不含 / 的分组名称":input_mode_=="group-find"?"按分组名称或路径查找":"搜索本地文章标题";
     if(input_mode_=="search")hint+=" · 范围："+(feed_?source(feed_):group_?(group_->empty()?"未分组":*group_):"全部订阅");
     page_header(title);
     const int hint_size=28;
@@ -1036,10 +1064,10 @@ void App::input_screen(){
     const Rect symbols{32,y,144,key_height},space{192,y,420,key_height},language{628,y,168,key_height},confirm{812,y,w-844,key_height};
     frame(symbols);button(symbols,symbols_?"字母":"符号",[this]{symbols_=!symbols_;},false,28);
     frame(space);button(space,composing_.empty()?"空格":"选首词",[this]{input_space();},false,28);
-    frame(language);button(language,input_mode_=="url"?"英文":chinese_?"切换英文":"切换中文",[this]{
+    frame(language);button(language,url_input?"英文":chinese_?"切换英文":"切换中文",[this]{
         if(!composing_.empty()){const auto raw=composing_;text_input(raw);if(!composing_.empty())return;}
         chinese_=!chinese_;shift_=false;
-    },false,28,Icon::None,input_mode_!="url");
+    },false,28,Icon::None,!url_input);
     button(confirm,"确定",[this]{submit();},true,28,Icon::Check);
 }
 bool App::draw_image(const ArticleImage& image,Rect area,bool enlarge,int clip_bottom){
@@ -1057,7 +1085,7 @@ bool App::draw_image(const ArticleImage& image,Rect area,bool enlarge,int clip_b
 void App::edit_feed(const Feed& feed){
     status_.clear();
     if(screen_==Screen::List){home_=ListContext{view_,feed_,group_,search_,list_page_};source_list_=false;}
-    edit_origin_=screen_==Screen::Sync?Screen::Sync:Screen::Subscriptions;screen_=edit_origin_;managing_=feed;
+    edit_origin_=screen_==Screen::Sync?Screen::Sync:screen_==Screen::Discovery?Screen::Discovery:Screen::Subscriptions;screen_=edit_origin_;managing_=feed;
     auto_fulltext_=feed.id&&store_.setting("feed_fulltext:"+std::to_string(feed.id))=="1";
     if(managing_->url.empty())managing_->url="https://";
 }
@@ -1069,7 +1097,7 @@ void App::save_feed(){
         if(original!=feeds_.end()&&sync_state_==SyncState::Running&&(draft.url!=original->url||(draft.title.empty()&&!original->title.empty())))throw std::runtime_error("请先取消同步，再修改订阅地址或清空名称");
         store_.update_feed(draft);
     }else{
-        if(std::any_of(feeds_.begin(),feeds_.end(),[&](const Feed& f){return f.url==draft.url;}))throw std::runtime_error("此订阅地址已存在");
+        if(std::any_of(feeds_.begin(),feeds_.end(),[&](const Feed& f){return same_feed_url(f.url,draft.url);}))throw std::runtime_error("此订阅地址已存在");
         draft.id=store_.add_feed(draft);
     }
     store_.set_setting("feed_fulltext:"+std::to_string(draft.id),auto_fulltext_?"1":"0");
@@ -1089,6 +1117,7 @@ void App::management_screen(){
         int y=680;for(const auto& line:c_.wrap("收藏、未读与正在阅读的文章会保留。\n\n清理会删除这些文章的本地内容和状态；订阅源仍提供的文章可能在同步后重新出现。",28,w-64)){c_.text(32,y,line.text,28,85);y+=44;}
         c_.rule(32,h-104,w-64,205);button({32,h-100,440,88},"清理旧已读缓存",[this]{confirmation_="clean";},false,28,Icon::Download,true,Align::Left);return;
     }
+    button({w-252,92,220,88},"保存",[this]{save_feed();},true,28);
     c_.text(32,254,"名称（选填）",24,85);frame(c_,{32,280,w-64,112});
     button({56,288,w-112,96},managing_->title.empty()?"留空，同步时自动读取博客名称":managing_->title,[this]{start_input("title",managing_->title);},false,32,Icon::None,true,Align::Left);
     c_.text(32,442,"RSS 地址",24,85);frame(c_,{32,466,w-64,160});auto url=c_.wrap(managing_->url,32,w-112);
@@ -1104,9 +1133,6 @@ void App::management_screen(){
     button({32,876,w-64,88},std::string(auto_fulltext_?"✓ ":"○ ")+"自动下载网页正文",[this]{auto_fulltext_=!auto_fulltext_;},false,28,Icon::None,true,Align::Left);
     c_.text(32,1010,"仅下载之后新增的文章；失败保留 RSS 原文。",24,85);
     if(!status_.empty())c_.text(32,h-152,c_.ellipsize(status_,24,w-64),24,80);
-    c_.rule(32,h-104,w-64,205);
-    button({32,h-100,320,88},"放弃更改",[this]{managing_.reset();screen_=edit_origin_;},false,28,Icon::None,true,Align::Left);
-    button({w-312,h-100,280,88},"保存更改",[this]{save_feed();},true,28);
 }
 void App::confirmation_screen(){
     const int w=c_.width,h=c_.height;
@@ -1121,8 +1147,9 @@ void App::confirmation_screen(){
         button({dialog.x+32,dialog.y+252,320,88},"取消",[this]{confirmation_.clear();},false,28,Icon::None,true,Align::Left);
         button({dialog.x+dialog.w-312,dialog.y+252,280,88},"退出应用",[this]{confirmation_.clear();quit=true;},true,28);return;
     }
-    page_header(confirmation_=="remove"?"取消订阅":confirmation_=="read"?"标为已读":confirmation_=="delete-group"?"删除分组":confirmation_=="import"?"导入 OPML":"清理缓存");
+    page_header(confirmation_=="remove-directory"?"移除源库":confirmation_=="remove"?"取消订阅":confirmation_=="read"?"标为已读":confirmation_=="delete-group"?"删除分组":confirmation_=="import"?"导入 OPML":"清理缓存");
     const auto message=confirmation_=="remove"?"取消这个订阅？\n\n收藏文章会保留。其余文章及阅读进度将从本机删除。":
+        confirmation_=="remove-directory"?"移除这个自定义源库？\n\n已经添加的订阅、文章与阅读记录会保留。":
         confirmation_=="read"?"将这个订阅的全部文章标为已读？\n\n收藏和阅读位置会保留。":
         confirmation_=="delete-group"?"删除这个分组？\n\n此分组及子分组会移除，组内订阅移到未分组，所有文章和状态保留。":
         confirmation_=="import"?"导入本地 OPML？\n\n从 feeds.opml 合并订阅与分组；重复地址不会再次添加。":
@@ -1136,6 +1163,10 @@ void App::confirmation_screen(){
             const auto id=managing_->id;store_.remove_feed(id);if(feed_==id){feed_=0;group_.reset();source_list_=false;view_=View::Unread;search_.clear();list_page_=0;}
             if(home_&&home_->feed==id){home_->feed=0;home_->group.reset();home_->search.clear();home_->page=0;}
             managing_.reset();screen_=Screen::Subscriptions;result="已取消订阅，收藏文章已保留";
+        }else if(kind=="remove-directory"){
+            if(directory_running_)throw std::runtime_error("请先取消源库下载，再移除源库。");
+            remove_directory(store_,editing_directory_->id);editing_directory_.reset();load_directories();screen_=Screen::Directories;
+            directory_message_="源库已移除，已有订阅保留。";
         }else if(kind=="read"){
             store_.mark_feed_read(managing_->id);result="本订阅已全部标为已读";
         }else if(kind=="delete-group"){
@@ -1151,7 +1182,7 @@ void App::confirmation_screen(){
     },true,28);
 }
 void App::start_input(const std::string& mode,const std::string& value){
-    input_mode_=mode;input_=value;composing_.clear();candidate_page_=0;chinese_=mode!="url";shift_=false;symbols_=false;
+    input_mode_=mode;input_=value;composing_.clear();candidate_page_=0;chinese_=mode!="url"&&mode!="directory-url";shift_=false;symbols_=false;
 }
 void App::text_input(const std::string& value){
     if(!error_.empty()||input_mode_.empty())return;
@@ -1185,6 +1216,11 @@ void App::submit(){
         if(input_mode_=="url"&&value.empty())throw std::runtime_error("订阅地址不能为空");
         if(input_mode_=="title")managing_->title=value;else managing_->url=value;input_mode_.clear();
     }else if(input_mode_=="folder"){group_name_draft_=value;input_mode_.clear();}
+    else if(input_mode_=="directory-name"||input_mode_=="directory-url"){
+        if(editing_directory_){if(input_mode_=="directory-name")editing_directory_->title=value;else editing_directory_->url=value;}
+        input_mode_.clear();
+    }
+    else if(input_mode_=="directory-search"){discovery_query_=value;discovery_page_=0;input_mode_.clear();filter_directory_feeds();}
     else if(input_mode_=="group-find"){picker_query_=value;picker_page_=0;input_mode_.clear();screen_=Screen::GroupPicker;}
     else if(input_mode_=="search"){
         if(value.empty())clear_search();else{search_=value;view_=View::All;input_mode_.clear();list_page_=0;screen_=Screen::List;reload();}
@@ -1258,6 +1294,10 @@ void App::next(){
     if(!input_mode_.empty()||!confirmation_.empty()||(managing_&&screen_!=Screen::GroupPicker)||brand_menu_)return;
     if(current_&&reader_panel_==ReaderPanel::Images){if(image_page_+1<current_->images.size())++image_page_;}
     else if(current_&&!reader_tools_){clear_selection();if(page_+1<pages_.size()){++page_;reading_source_anchor_.reset();save_position();}}
+    else if(!current_&&(screen_==Screen::Discovery||screen_==Screen::Directories||screen_==Screen::DirectoryTopics||screen_==Screen::DirectoryScope)){
+        auto& page=screen_==Screen::Discovery?discovery_page_:screen_==Screen::Directories?directory_page_:screen_==Screen::DirectoryScope?directory_scope_page_:directory_topic_page_;
+        if(page+1<discovery_page_count_)++page;
+    }
     else if(!current_){auto* nav=screen_==Screen::Subscriptions?&nav_page_:screen_==Screen::Groups?&groups_page_:screen_==Screen::GroupPicker?&picker_page_:screen_==Screen::Sync&&sync_state_==SyncState::Failed?&sync_page_:nullptr;
         if(nav){if(*nav+1<nav_page_count_)++*nav;}else if(screen_==Screen::List){ensure_list_page(list_page_+1);if(list_page_+1<list_starts_.size())++list_page_;}}
     dirty=true;
@@ -1266,6 +1306,10 @@ void App::previous(){
     if(!input_mode_.empty()||!confirmation_.empty()||(managing_&&screen_!=Screen::GroupPicker)||brand_menu_)return;
     if(current_&&reader_panel_==ReaderPanel::Images){if(image_page_)--image_page_;}
     else if(current_&&!reader_tools_){clear_selection();if(page_){--page_;reading_source_anchor_.reset();save_position();}}
+    else if(!current_&&(screen_==Screen::Discovery||screen_==Screen::Directories||screen_==Screen::DirectoryTopics||screen_==Screen::DirectoryScope)){
+        auto& page=screen_==Screen::Discovery?discovery_page_:screen_==Screen::Directories?directory_page_:screen_==Screen::DirectoryScope?directory_scope_page_:directory_topic_page_;
+        if(page)--page;
+    }
     else if(!current_){auto* nav=screen_==Screen::Subscriptions?&nav_page_:screen_==Screen::Groups?&groups_page_:screen_==Screen::GroupPicker?&picker_page_:screen_==Screen::Sync&&sync_state_==SyncState::Failed?&sync_page_:nullptr;
         if(nav){if(*nav)--*nav;}else if(screen_==Screen::List&&list_page_)--list_page_;}
     dirty=true;
@@ -1289,8 +1333,11 @@ void App::back(){
         cre_.reset();current_.reset();pages_.clear();
         if(!saved)notify("阅读进度未保存，请检查剩余空间或稍后重试");
     }
-    else if(screen_==Screen::Subscriptions)restore_home();
-    else if(screen_==Screen::Groups||screen_==Screen::Opml)screen_=Screen::Subscriptions;
+    else if(screen_==Screen::SubscriptionHome)restore_home();
+    else if(screen_==Screen::Subscriptions||screen_==Screen::Groups||screen_==Screen::Opml||screen_==Screen::Discovery||screen_==Screen::Directories)screen_=Screen::SubscriptionHome;
+    else if(screen_==Screen::DirectoryTopics||screen_==Screen::DirectoryScope)screen_=Screen::Discovery;
+    else if(screen_==Screen::DirectoryEdit){editing_directory_.reset();screen_=Screen::Directories;}
+    else if(screen_==Screen::DirectoryWebsite||screen_==Screen::DirectoryDetail)screen_=Screen::Directories;
     else if(screen_==Screen::Cache)screen_=Screen::Sync;
     else if(screen_==Screen::Settings)screen_=Screen::List;
     else if(screen_==Screen::Update)screen_=Screen::Settings;

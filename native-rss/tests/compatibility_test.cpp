@@ -42,7 +42,7 @@ int main(){
         const auto page=app.reader_page();tap(950,1380);assert(app.reader_page()==page+1);
         tap(48,48);assert(!app.reading());
         tap(100,1392);assert(app.menu_open());tap(140,966);
-        assert(app.screen()==rss::App::Screen::Subscriptions);
+        assert(app.screen()==rss::App::Screen::SubscriptionHome);tap(200,348);
         tap(950,140);tap(200,500);for(int i=0;i<8;++i)app.backspace();
         app.text_input("https://new.invalid/rss");snapshot("keyboard");const auto keyboard=canvas.pixels;
         tap(950,1364);snapshot("draft");assert(canvas.pixels!=keyboard);

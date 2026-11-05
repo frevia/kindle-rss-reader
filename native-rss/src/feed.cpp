@@ -206,9 +206,11 @@ void entries(xmlNode* parent, const std::string& source, ParsedFeed& out, bool a
     }
 }
 
-void collect_opml(xmlNode* parent, const std::string& group, std::vector<Feed>& feeds, std::set<std::string>* groups) {
+void collect_opml(xmlNode* parent, const std::string& group, std::vector<Feed>& feeds, std::set<std::string>* groups,
+                  std::set<std::string>& seen, std::size_t max_feeds, const std::atomic<bool>* cancel) {
     for (xmlNode* n = parent->children; n; n = n->next) {
-        if (!named(n, "outline")) { collect_opml(n, group, feeds, groups); continue; }
+        if(cancel&&cancel->load())throw std::runtime_error("已取消 OPML 解析");
+        if (!named(n, "outline")) { collect_opml(n, group, feeds, groups, seen, max_feeds, cancel); continue; }
         std::string title = prop(n, "text"); if (title.empty()) title = prop(n, "title");
         std::string next_group = group.empty() ? title : (title.empty() ? group : group + "/" + title);
         std::string url = prop(n, "xmlUrl");
@@ -217,11 +219,12 @@ void collect_opml(xmlNode* parent, const std::string& group, std::vector<Feed>& 
             xmlURIPtr u = xmlParseURI(url.c_str());
             bool ok = u && u->scheme && u->server && (!std::strcmp(u->scheme, "http") || !std::strcmp(u->scheme, "https"));
             if (u) xmlFreeURI(u);
-            if (ok && std::none_of(feeds.begin(), feeds.end(), [&](const Feed& f) { return f.url == url; })) {
+            if (ok && seen.insert(url).second) {
+                if(max_feeds&&feeds.size()>=max_feeds)throw std::runtime_error("OPML 源库超过 "+std::to_string(max_feeds)+" 个订阅源");
                 Feed f; f.url = url; f.title = prop(n, "title"); if (f.title.empty()) f.title = title; f.group = group; feeds.push_back(std::move(f));
             }
         }
-        collect_opml(n, next_group, feeds, groups);
+        collect_opml(n, next_group, feeds, groups, seen, max_feeds, cancel);
     }
 }
 
@@ -399,13 +402,16 @@ ParsedFeed parse_feed(std::string_view xml, const std::string& source_url) {
     return result;
 }
 
-std::vector<Feed> parse_opml(std::string_view xml, std::vector<std::string>* group_list) {
+std::vector<Feed> parse_opml(std::string_view xml, std::vector<std::string>* group_list,
+                            std::size_t max_feeds, const std::atomic<bool>* cancel) {
+    if(cancel&&cancel->load())throw std::runtime_error("已取消 OPML 解析");
     std::unique_ptr<xmlDoc,decltype(&xmlFreeDoc)> doc(parse_xml(xml),xmlFreeDoc);
     std::vector<Feed> feeds;
     xmlNode* root = xmlDocGetRootElement(doc.get());
     if (!named(root, "opml")) throw std::runtime_error("not an OPML document");
-    std::set<std::string> groups;
-    collect_opml(root, {}, feeds, group_list ? &groups : nullptr);
+    std::set<std::string> groups,seen;
+    collect_opml(root, {}, feeds, group_list ? &groups : nullptr, seen, max_feeds, cancel);
+    if(cancel&&cancel->load())throw std::runtime_error("已取消 OPML 解析");
     if (group_list) group_list->assign(groups.begin(),groups.end());
     return feeds;
 }

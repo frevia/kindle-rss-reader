@@ -111,6 +111,7 @@ elif name=="kill":
             os.kill(os.getppid(),signal.SIGKILL)
         if mode in ("stop-error","soft-stop-error") and sig=="-STOP" and pid==900002:sys.exit(1)
         if mode=="statusbar-signal-error" and sig=="-STOP" and pid==900006:sys.exit(1)
+        if mode=="browser-restore-error" and sig=="-CONT" and pid==900001:sys.exit(1)
     else:
         try:os.kill(pid,0 if sig=="-0" else getattr(signal,"SIG"+sig[1:]))
         except ProcessLookupError:sys.exit(1)
@@ -126,6 +127,14 @@ elif name=="app":
         print("snapshot_bytes="+("99999999" if mode=="bad-snapshot" else str(stride*(yoffset+height))))
         if mode=="duplicate-stride":print("stride=608")
         if mode=="injected-width":print("width=1;exit 0")
+    elif args[-1:]==["open-directory-website"]:
+        assert os.environ["RSS_BROWSER_GUARD"]=="1"
+        events=(root/"events").read_text()
+        assert "-CONT 900001" in events and "-CONT 900003" in events
+        assert "cache-rm" in events
+        assert (root/"fb").read_bytes()[0:1]==b"x"
+        log("browser-open")
+        if mode=="browser-error":sys.exit(1)
     else:
         assert os.environ["RSS_UI_GUARD"]=="1"
         assert os.environ["RSS_FBINK"]==str(root/"bin"/("refresh-fallback" if mode.startswith("fbink-fallback") else "refresh"))
@@ -142,6 +151,7 @@ elif name=="app":
         if mode in ("statusbar-running","statusbar-without-juno","launcher-killed-statusbar"):
             assert "-STOP 900006" in (root/"events").read_text()
         if mode in ("update-install","update-failed"):sys.exit(42)
+        if mode.startswith("browser"):sys.exit(43)
         if mode in ("launcher-killed", "launcher-killed-home", "launcher-killed-statusbar", "launcher-killed-soft"):
             owner=int(os.environ["RSS_LAUNCHER_PID"])
             while os.getppid()==owner:time.sleep(.02)
@@ -455,6 +465,18 @@ class LauncherTests(unittest.TestCase):
         self.assertEqual(result.returncode,0,result.stderr)
         self.assertEqual(events,["update-recover"])
         self.assertEqual(pixel,b"x")
+
+    def test_browser_handoff_waits_for_complete_screen_and_service_restore(self):
+        for mode,code in (("browser",0),("browser-error",1),("browser-restore-error",1)):
+            with self.subTest(mode=mode):
+                result,events,pixel=self.run_case(mode)
+                self.assertEqual(result.returncode,code,result.stderr)
+                self.assertEqual(pixel,b"x")
+                if mode=="browser-restore-error":self.assertNotIn("browser-open",events)
+                else:
+                    self.assertLess(events.index("-CONT 900001"),events.index("browser-open"))
+                    self.assertLess(events.index("-CONT 900003"),events.index("browser-open"))
+                    self.assertLess(events.index("cache-rm"),events.index("browser-open"))
 
     def test_invalid_article_arguments_rejected_before_device_access(self):
         for args in [("--article",),("--article","0"),("--article","-1"),("--article","01"),

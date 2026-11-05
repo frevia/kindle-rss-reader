@@ -65,6 +65,20 @@ int main() {
     assert(std::find(empty_groups.begin(),empty_groups.end(),"Empty & Root/Nested")!=empty_groups.end());
     assert(export_opml({},empty_groups).find("Empty &amp; Root")!=std::string::npos);
 
+    const auto limited_duplicates=parse_opml(R"xml(<opml><body><outline text="First" xmlUrl="https://a.test/rss"/><outline text="Duplicate" xmlUrl="https://a.test/rss"/></body></opml>)xml",nullptr,1);
+    assert(limited_duplicates.size()==1&&limited_duplicates.front().title=="First");
+    std::string large_opml="<opml><body>";
+    for(int i=0;i<6000;++i)large_opml+="<outline text='Feed' xmlUrl='https://a.test/"+std::to_string(i)+"'/>";
+    large_opml+="</body></opml>";
+    bool over_limit=false;
+    empty_groups={"unchanged"};
+    try{parse_opml(large_opml,&empty_groups,5000);}catch(const std::runtime_error& e){over_limit=std::string(e.what()).find("5000")!=std::string::npos;}
+    assert(over_limit&&empty_groups==std::vector<std::string>{"unchanged"});
+    assert(parse_opml(large_opml).size()==6000);
+    std::atomic<bool> stop{true};bool cancelled=false;
+    try{parse_opml(large_opml,&empty_groups,5000,&stop);}catch(const std::runtime_error& e){cancelled=std::string(e.what()).find("取消")!=std::string::npos;}
+    assert(cancelled&&empty_groups==std::vector<std::string>{"unchanged"});
+
     bool rejected = false;
     try { parse_feed("<!DOCTYPE x [<!ENTITY ext SYSTEM 'file:///etc/passwd'>]><rss><channel><title>&ext;</title></channel></rss>", "https://x.test/"); }
     catch (const std::runtime_error&) { rejected = true; }

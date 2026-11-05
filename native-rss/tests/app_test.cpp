@@ -321,17 +321,18 @@ int main(){
     // Navigation and draft edits preserve the confirmed data until save.
     auto tap=[&](int x,int y){app.draw();app.tap(x,y);};
     auto manage=[&]{
-        tap(100,1392);tap(120,966);
+        assert(app.screen()==rss::App::Screen::List);
+        tap(100,1392);tap(120,966);tap(200,348);
         const auto group=store.feeds().front().group;const int headers=group.empty()?1:1+static_cast<int>(std::count(group.begin(),group.end(),'/'));
         tap(950,250+headers*104+44);
     };
     manage();snapshot("subscription.pgm");tap(200,1124);snapshot("unsubscribe.pgm");tap(200,1380);
-    assert(store.feeds().size()==1);app.back();app.back();
+    assert(store.feeds().size()==1);app.back();app.back();app.back();
     store.set_read(entry.id,false);tap(100,300);tap(536,600);tap(894,1380);tap(536,1296);
     assert(!store.entry(entry.id)->read);
     app.back();app.back();app.back();manage();tap(800,1124);tap(900,1380);
-    assert(store.entry(entry.id)->read);app.back();app.back();
-    manage();tap(200,1124);tap(900,1380);assert(store.feeds().empty());assert(store.entry(entry.id)->starred);app.back();
+    assert(store.entry(entry.id)->read);app.back();app.back();app.back();
+    manage();tap(200,1124);tap(900,1380);assert(store.feeds().empty());assert(store.entry(entry.id)->starred);app.back();app.back();
     rss::Feed other;other.url="https://example.com/other";other.title="Other";
     const auto other_id=store.add_feed(other);rss::ParsedFeed old;rss::Entry clean;clean.guid="clean";clean.title="Old";clean.text="text";clean.published=100;
     old.entries={clean};store.save_entries(other_id,old);const auto clean_id=store.entries(rss::View::All,other_id)[0].id;
@@ -339,10 +340,10 @@ int main(){
     tap(100,1392);tap(140,1174);app.take_request();app.sync_finished(true);tap(880,548);tap(200,1380);tap(200,1380);
     assert(store.entry(clean_id));tap(200,1380);tap(900,1380);assert(!store.entry(clean_id));assert(store.entry(entry.id));
     app.back();app.back();manage();tap(200,330);
-    for(int i=0;i<5;++i)app.backspace();app.text_input("新的名称");app.submit();assert(store.feeds()[0].title=="Other");tap(950,1380);assert(store.feeds()[0].title=="新的名称");
-    store.add_group("科技/编程");app.reload();app.back();manage();tap(400,770);tap(300,530);tap(950,1380);assert(store.feeds()[0].group=="科技/编程");
-    app.back();manage();tap(200,330);app.text_input("取消修改");app.back();app.back();assert(store.feeds()[0].title=="新的名称");app.back();
-    tap(100,1392);tap(120,966);tap(150,1380);snapshot("groups.pgm");app.back();app.back();app.show_group("科技");
+    for(int i=0;i<5;++i)app.backspace();app.text_input("新的名称");app.submit();assert(store.feeds()[0].title=="Other");tap(950,136);assert(store.feeds()[0].title=="新的名称");
+    store.add_group("科技/编程");app.reload();app.back();app.back();manage();tap(400,770);tap(300,530);tap(950,136);assert(store.feeds()[0].group=="科技/编程");
+    app.back();app.back();manage();tap(200,330);app.text_input("取消修改");app.back();app.back();assert(store.feeds()[0].title=="新的名称");app.back();app.back();
+    tap(100,1392);tap(120,966);tap(150,912);snapshot("groups.pgm");app.back();app.back();app.show_group("科技");
     old.entries[0].guid="new-child";
     rss::ArticleImage photo;photo.url="https://example.test/photo.png";photo.alt="离线图片";
     rss::ArticleImage missing;missing.url="https://example.test/missing.png";
@@ -449,8 +450,8 @@ int main(){
             assert(found);
         }
     };
-    auto edit_title=[&]{touch(100,1392);touch(120,966);touch(950,398);touch(200,330);};
-    auto commit=[&]{touch(900,1364);touch(950,1380);typing.back();};
+    auto edit_title=[&]{touch(100,1392);touch(120,966);touch(200,348);touch(950,398);touch(200,330);};
+    auto commit=[&]{touch(900,1364);touch(950,136);typing.back();typing.back();};
     edit_title();typing.backspace();typing.backspace();keys("kejix");typing.backspace();
     typing.submit();assert(typing_store.feeds()[0].title=="旧名");typing.back();
     if(const auto folder=std::getenv("RSS_TEST_SNAPSHOTS")){typing.draw();canvas.write_pgm((std::filesystem::path(folder)/"pinyin.pgm").string());canvas.write_pgm((std::filesystem::path(folder)/"candidates.pgm").string());}
@@ -470,20 +471,20 @@ int main(){
         rss::Store names(":memory:");names.set_setting("reader_engine","classic");rss::App optional(names,canvas);
         auto tap=[&](int x,int y){optional.draw();optional.tap(x,y);};
         auto shot=[&](const char* name){optional.draw();if(const auto folder=std::getenv("RSS_TEST_SNAPSHOTS"))canvas.write_pgm((std::filesystem::path(folder)/name).string());};
-        tap(100,1392);tap(140,966);tap(950,140); // Add a feed without entering a name.
+        tap(100,1392);tap(140,966);tap(200,348);tap(950,140); // Add a feed without entering a name.
         tap(200,500);for(int i=0;i<8;++i)optional.backspace();optional.text_input("https://optional.test/rss");shot("keyboard-url.pgm");optional.submit();
-        shot("optional-name-draft.pgm");tap(950,1380);assert(names.feeds().size()==1&&names.feeds()[0].title.empty());
+        shot("optional-name-draft.pgm");tap(950,136);assert(names.feeds().size()==1&&names.feeds()[0].title.empty());
         const auto id=names.feeds()[0].id;rss::ParsedFeed discovered;discovered.title="博客名称";names.save_entries(id,discovered);optional.reload();
         tap(950,398);tap(200,330);for(int i=0;i<4;++i)optional.backspace();optional.submit();
-        assert(names.feeds()[0].title=="博客名称");tap(150,1380);assert(names.feeds()[0].title=="博客名称"); // Discard the empty draft.
+        assert(names.feeds()[0].title=="博客名称");tap(62,60);assert(names.feeds()[0].title=="博客名称"); // Discard the empty draft.
         tap(950,398);tap(200,330);for(int i=0;i<4;++i)optional.backspace();optional.text_input("  ");optional.submit();
-        optional.sync_started();bool rejected=false;try{tap(950,1380);}catch(const std::runtime_error&){rejected=true;}
-        assert(rejected&&names.feeds()[0].title=="博客名称");optional.sync_finished(true);tap(950,1380);assert(names.feeds()[0].title.empty());
+        optional.sync_started();bool rejected=false;try{tap(950,136);}catch(const std::runtime_error&){rejected=true;}
+        assert(rejected&&names.feeds()[0].title=="博客名称");optional.sync_finished(true);tap(950,136);assert(names.feeds()[0].title.empty());
         discovered.title="重新获取名称";names.save_entries(id,discovered);optional.reload();assert(names.feeds()[0].title=="重新获取名称");
         tap(950,398);tap(200,500);for(int i=0;i<25;++i)optional.backspace();rejected=false;try{optional.submit();}catch(const std::runtime_error&){rejected=true;}
-        assert(rejected&&names.feeds()[0].url=="https://optional.test/rss");tap(62,60);tap(150,1380); // Cancel input and source edit.
+        assert(rejected&&names.feeds()[0].url=="https://optional.test/rss");tap(62,60);tap(62,60); // Cancel input and source edit.
         assert(names.feeds()[0].title=="重新获取名称");
-        tap(950,398);tap(200,330);optional.text_input(std::string(700,'a'));shot("keyboard-long-input.pgm");tap(62,60);tap(150,1380);
+        tap(950,398);tap(200,330);optional.text_input(std::string(700,'a'));shot("keyboard-long-input.pgm");tap(62,60);tap(62,60);
         assert(names.feeds()[0].title=="重新获取名称");
     }
 
