@@ -6,7 +6,7 @@
 
 这些功能已随 v0.0.4 beta 发布，正式版 v0.0.3 尚不包含。请在 [beta.2 页面](https://github.com/frevia/kindle-rss-reader/releases/tag/v0.0.4-beta.2)下载 `RSS-Reader-v0.0.4-beta.2-Kindle.zip`，按[安装教程](INSTALL.md)通过 USB 安装并保留个人数据。`/releases/latest` 仍指向正式版，不会跳到 beta。
 
-支持在线升级的正式版只检查更高正式版本，beta 会检查本仓库最近 100 条发布中的后续 beta 和正式版；都不会安装草稿、主分支提交或同版本开发包。已安装 beta.2 且没有更高版本时，显示当前已是最新版本属于正常情况。需要验证 beta.1 → beta.2 时，按[在线升级测试](INSTALL.md#在线升级测试)先安装 beta.1；普通兼容测试无需这样操作。
+支持在线升级的正式版只检查更高正式版本，beta 会检查本仓库最近 100 条发布中的后续 beta 和正式版；都不会安装草稿、主分支提交或同版本开发包。已安装 beta.2 且没有更高版本时，显示当前已是最新版本属于正常情况。beta.3 先构建为 Release 草稿，尚未公开；需要验证 beta.2 → beta.3 时，先安装 beta.2，等 beta.3 公开后按[在线升级测试](INSTALL.md#在线升级测试)操作。
 
 ## 自动同步没有立即开始
 
