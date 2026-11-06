@@ -107,7 +107,11 @@ public:
         const auto browser_error=store_.setting("directory_browser_error");
         if(!browser_error.empty()){app_.notify(browser_error);store_.set_setting("directory_browser_error","");}
     }
-    ~UiTasks(){cancel_=true;if(worker_.valid())worker_.wait();}
+    ~UiTasks(){
+        cancel_=true;check_cancel_=true;
+        if(worker_.valid())worker_.wait();
+        if(update_check_.valid())update_check_.wait();
+    }
     void tick(){
         const auto now=std::chrono::steady_clock::now();
         if(update_task_==UpdateTask::Install&&now>=install_redraw_due_){app_.dirty=true;install_redraw_due_=now+std::chrono::seconds(2);}
@@ -138,27 +142,37 @@ public:
             }catch(const std::exception& e){directory_task_=false;app_.directory_finished(false,e.what());}
         }else if(request=="cancel-directory"){
             if(directory_task_)cancel_=true;
-        }else if(request=="check-update"||request=="download-update") {
-            if(worker_.valid()){app_.update_finished(false,"请先等待当前同步、翻译或更新任务完成");return;}
+        }else if(request=="check-update") {
+            if(update_check_.valid())return;
+            if(update_task_!=UpdateTask::None){app_.update_finished(false,"请先等待当前更新操作完成");return;}
             try {
-                const bool downloading=request=="download-update";
-                if(downloading)require_device_update();
-                cancel_=false;update_task_=downloading?UpdateTask::Download:UpdateTask::Check;
-                app_.update_started(downloading);
-                worker_=std::async(std::launch::async,[this,downloading] {
+                check_cancel_=false;app_.update_started(false);
+                update_check_=std::async(std::launch::async,[this] {
+                    const auto progress=[this](const std::string& message){
+                        std::lock_guard<std::mutex> lock(mutex_);check_progress_=message;
+                    };
+                    return rss::check_update(check_cancel_,progress);
+                });
+            }catch(const std::exception& e){app_.update_finished(false,e.what());}
+        }else if(request=="download-update") {
+            if(worker_.valid()||update_check_.valid()){app_.update_finished(false,"请先等待当前后台任务完成");return;}
+            try {
+                require_device_update();
+                cancel_=false;update_task_=UpdateTask::Download;app_.update_started(true);
+                worker_=std::async(std::launch::async,[this] {
                     const auto progress=[this](const std::string& message){
                         std::lock_guard<std::mutex> lock(mutex_);progress_=rss::SyncProgress{0,0,0,message};
                     };
-                    if(!downloading)update_result_=rss::check_update(cancel_,progress);
-                    else rss::prepare_update(update_result_,"/mnt/us",cancel_,progress);
+                    rss::prepare_update(update_result_,"/mnt/us",cancel_,progress);
                 });
             }catch(const std::exception& e){update_task_=UpdateTask::None;app_.update_finished(false,e.what());}
         }else if(request=="cancel-update") {
-            if(update_task_!=UpdateTask::None){cancel_=true;app_.update_progress("正在取消更新…");}
+            if(update_check_.valid()){check_cancel_=true;app_.update_progress("正在取消检查…");}
+            else if(update_task_!=UpdateTask::None){cancel_=true;app_.update_progress("正在取消更新…");}
         }else if(request=="install-update") {
             try {
                 require_device_update();
-                if(worker_.valid())throw std::runtime_error("请先等待当前任务完成");
+                if(worker_.valid()||update_check_.valid())throw std::runtime_error("请先等待当前后台任务完成");
                 if(std::filesystem::exists("/var/local/native-rss/home/enabled"))throw std::runtime_error("请先在 KUAL 停用首页 RSS");
                 cancel_=false;update_task_=UpdateTask::Install;
                 install_redraw_due_=now+std::chrono::seconds(2);
@@ -223,7 +237,28 @@ private:
         if(update_task_!=UpdateTask::None)app_.update_progress(value.message);
         else app_.sync_progress(value.completed,value.total,value.failed,value.message);
     }
+    void collect_update_check(){
+        if(!update_check_.valid())return;
+        if(update_check_.wait_for(std::chrono::seconds(0))==std::future_status::ready) {
+            try {
+                auto release=update_check_.get();
+                if(check_cancel_)app_.update_finished(true);
+                else {
+                    update_result_=std::move(release);
+                    app_.update_checked(update_result_);
+                }
+            }catch(const std::exception& e){app_.update_finished(check_cancel_,e.what());}
+            // The worker has exited, so no progress from this check can reach the next one.
+            std::lock_guard<std::mutex> lock(mutex_);
+            check_progress_.reset();
+        }else if(!check_cancel_) {
+            std::optional<std::string> message;
+            {std::lock_guard<std::mutex> lock(mutex_);message=std::move(check_progress_);check_progress_.reset();}
+            if(message)app_.update_progress(*message);
+        }
+    }
     void collect(){
+        collect_update_check();
         std::optional<rss::SyncProgress> progress;
         {std::lock_guard<std::mutex> lock(mutex_);progress=std::move(progress_);progress_.reset();}
         if(progress)this->progress(*progress);
@@ -237,7 +272,6 @@ private:
             if(directory_task_){directory_task_=false;app_.directory_finished(cancel_,failure);}
             else if(update_task_!=UpdateTask::None) {
                 if(update_task_==UpdateTask::Install&&failure.empty()&&!cancel_){app_.install_update=true;app_.quit=true;}
-                else if(update_task_==UpdateTask::Check&&failure.empty()&&!cancel_)app_.update_checked(update_result_);
                 else app_.update_finished(cancel_,failure);
                 update_task_=UpdateTask::None;
             }else if(selection_job_){app_.selection_finished(*selection_job_,selection_result_,cancel_,failure);selection_job_.reset();selection_result_.clear();}
@@ -247,12 +281,17 @@ private:
     rss::Store& store_;rss::App& app_;std::string db_;
     std::chrono::steady_clock::time_point status_due_{},auto_due_{},install_redraw_due_{};
     std::optional<rss::SelectionJob> selection_job_;
-    enum class UpdateTask { None, Check, Download, Install };
+    enum class UpdateTask { None, Download, Install };
     UpdateTask update_task_=UpdateTask::None;
     bool directory_task_=false;
     rss::UpdateRelease update_result_;
     std::string selection_result_;
-    std::atomic<bool> cancel_{false};std::future<void> worker_;std::mutex mutex_;std::optional<rss::SyncProgress> progress_;
+    std::atomic<bool> cancel_{false},check_cancel_{false};
+    std::future<void> worker_;
+    std::future<rss::UpdateRelease> update_check_;
+    std::mutex mutex_;
+    std::optional<rss::SyncProgress> progress_;
+    std::optional<std::string> check_progress_;
 };
 volatile std::sig_atomic_t stop_device=0;
 void stop_device_handler(int){stop_device=1;}

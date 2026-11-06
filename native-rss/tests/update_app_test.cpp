@@ -11,10 +11,13 @@ int main() {
     const auto shot=[&](const char* name){app.draw();if(const auto folder=std::getenv("RSS_TEST_SNAPSHOTS")) {
         std::filesystem::create_directories(folder);canvas.write_pgm((std::filesystem::path(folder)/name).string());
     }};
+    app.sync_started(false,true);
     tap(100,1392);tap(140,1070);assert(app.screen()==rss::App::Screen::Settings);shot("update-settings.pgm");
     tap(990,696);assert(app.screen()==rss::App::Screen::Update);shot("update-idle.pgm");
-    tap(140,1380);assert(app.take_request()=="check-update"&&app.update_state()==rss::App::UpdateState::Checking);
-    tap(140,1380);assert(app.take_request()=="cancel-update");app.update_finished(true);assert(app.update_state()==rss::App::UpdateState::Idle);
+    tap(140,1380);assert(app.take_request().empty());
+    tap(900,1380);assert(app.take_request()=="check-update"&&app.update_state()==rss::App::UpdateState::Checking);
+    tap(900,1380);assert(app.take_request()=="cancel-update");app.update_finished(true);assert(app.update_state()==rss::App::UpdateState::Idle);
+    assert(app.sync_state()==rss::App::SyncState::Running);
     rss::UpdateRelease release;release.version="v0.0.4";release.available=true;
     release.notes="升级说明\n\n增加在线升级，保留订阅与阅读位置。\n修复下载中断后的恢复。";
     auto long_notes=release;
@@ -23,6 +26,10 @@ int main() {
     tap(900,1190);app.draw();assert(canvas.pixels!=first_notes);shot("update-notes-next.pgm");
     tap(140,1190);app.draw();assert(canvas.pixels==first_notes&&app.take_request().empty());
     app.update_checked(release);shot("update-available.pgm");
+    tap(900,1380);assert(app.take_request().empty());
+    tap(140,1380);assert(app.take_request()=="check-update");
+    app.update_checked(release);
+    app.sync_finished(true);
     tap(900,1380);assert(app.take_request()=="download-update"&&app.update_state()==rss::App::UpdateState::Downloading);
     app.update_progress("已下载 12 MB");shot("update-downloading.pgm");
     app.back();assert(app.screen()==rss::App::Screen::Settings);
@@ -30,7 +37,7 @@ int main() {
     app.set_reader_status({100,false,true,"12:00"});app.maybe_auto_sync(2000000000);assert(app.take_request().empty());
     tap(100,1392);tap(140,1070);tap(300,696);app.update_finished(false,"安装包 SHA256 校验失败");shot("update-failed.pgm");
     assert(!app.quit&&app.update_state()==rss::App::UpdateState::Failed);
-    tap(900,1380);assert(app.take_request().empty());
+    tap(140,1380);assert(app.take_request().empty());
     app.update_checked(release);app.update_started(true);app.update_finished(false);shot("update-ready.pgm");
     assert(app.update_state()==rss::App::UpdateState::Ready&&!app.quit);
     app.sync_started();tap(900,1380);assert(app.take_request().empty());app.sync_finished(true);
@@ -45,7 +52,7 @@ int main() {
     rss::draw_update_installation(canvas,"正在同步升级文件",4);assert(canvas.pixels!=waiting);
     app.update_finished(false,"无法备份阅读数据库，升级已停止");
     assert(app.update_state()==rss::App::UpdateState::Failed&&!app.quit&&!app.install_update);
-    app.draw();tap(140,1380);assert(app.take_request()=="check-update");
-    app.update_started(false);release.available=false;app.update_checked(release);assert(app.update_state()==rss::App::UpdateState::Current);
-    tap(900,1380);assert(app.take_request().empty());shot("update-current.pgm");
+    tap(900,1380);assert(app.take_request()=="check-update");
+    release.available=false;app.update_checked(release);assert(app.update_state()==rss::App::UpdateState::Current);
+    tap(140,1380);assert(app.take_request().empty());shot("update-current.pgm");
 }
