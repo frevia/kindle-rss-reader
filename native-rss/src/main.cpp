@@ -117,6 +117,12 @@ public:
         if(update_task_==UpdateTask::Install&&now>=install_redraw_due_){app_.dirty=true;install_redraw_due_=now+std::chrono::seconds(2);}
         if(now>=status_due_){app_.set_reader_status(rss::read_reader_status(std::time(nullptr)));status_due_=now+std::chrono::seconds(30);}
         collect();auto request=app_.take_request();
+        if(app_.quit)return;
+        if(request=="prioritize-translation"){
+            if(automatic_sync_task_&&worker_.valid())cancel_=true;
+            request.clear();
+        }
+        if(request.empty()&&!worker_.valid())request=app_.take_queued_translation();
         if(request.empty()&&!worker_.valid()&&now>=auto_due_){
             auto_due_=now+std::chrono::seconds(30);
             try{app_.maybe_auto_sync(std::time(nullptr));request=app_.take_request();}
@@ -211,6 +217,7 @@ public:
                         else if(fulltext_id)rss::sync_fulltext(background,fulltext_id,cancel_,progress);
                         else rss::sync_feeds(background,cancel_,progress,failed_only);
                     });
+                    automatic_sync_task_=automatic;
                 }catch(const std::exception& e){
                     if(selection_job_){app_.selection_finished(*selection_job_,"",false,e.what());selection_job_.reset();}
                     else app_.sync_finished(false,e.what());
@@ -266,6 +273,7 @@ private:
         if(update_task_==UpdateTask::Install&&app_.dirty)return;
         if(worker_.valid()&&worker_.wait_for(std::chrono::seconds(0))==std::future_status::ready){
             std::string failure;try{worker_.get();}catch(const std::exception& e){failure=e.what();}
+            automatic_sync_task_=false;
             // Worker state is committed even when its status page is not visible.
             {std::lock_guard<std::mutex> lock(mutex_);progress=std::move(progress_);progress_.reset();}
             if(progress)this->progress(*progress);
@@ -284,6 +292,7 @@ private:
     enum class UpdateTask { None, Download, Install };
     UpdateTask update_task_=UpdateTask::None;
     bool directory_task_=false;
+    bool automatic_sync_task_=false;
     rss::UpdateRelease update_result_;
     std::string selection_result_;
     std::atomic<bool> cancel_{false},check_cancel_{false};
@@ -337,7 +346,8 @@ int device(rss::Store& store,rss::Canvas& canvas,const std::string& db,std::int6
                 rss::run_bounded({"/usr/bin/lipc-set-prop","-i","com.lab126.powerd","touchScreenSaverTimeout","1"},std::chrono::seconds(2));
                 last_activity=now;
             }
-            try{if(gesture)app.touch(*gesture);tasks.tick();}
+            if(stop_device)break;
+            try{if(gesture)app.touch(*gesture);if(!stop_device)tasks.tick();}
             catch(const std::exception& e){app.show_error(e.what());}
         }
         // The supervising launcher restores the screen after checking the power state.

@@ -38,6 +38,7 @@ public:
     void notify(const std::string& text);
     void sync_started(bool translating = false, bool automatic = false);
     void maybe_auto_sync(std::time_t now);
+    std::string take_queued_translation();
     std::optional<SelectionJob> take_selection_request();
     void selection_finished(const SelectionJob& job, const std::string& translated, bool cancelled, const std::string& error = {});
     const ReaderSelection* selected_text() const { return selection_ ? &*selection_ : nullptr; }
@@ -107,6 +108,7 @@ private:
     std::string sync_message_;
     bool translating_ = false;
     bool automatic_sync_ = false, auto_refresh_pending_ = false;
+    std::string queued_translation_;
     UpdateState update_state_ = UpdateState::Idle;
     UpdateRelease update_release_;
     std::string update_message_;
@@ -136,6 +138,9 @@ private:
     bool auto_fulltext_ = false;
     std::size_t image_page_=0;
     std::optional<Feed> managing_;
+    bool translation_blocked() const;
+    void start_translation(std::string request);
+    void cancel_queued_translation();
     std::string confirmation_;
     std::vector<Directory> directories_;
     std::map<std::string,DirectoryCache> directory_caches_;

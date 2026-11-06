@@ -160,11 +160,15 @@ void App::translate_selected_text(){
     selection_result_page_=0;selection_error_.clear();selection_result_=saved?saved->translation:std::string{};
     reader_tools_=true;reader_panel_=ReaderPanel::Selection;
     if(!selection_result_.empty())return;
-    if(sync_state_==SyncState::Running)return;
+    if(queued_translation_=="translate-selection"&&pending_selection_&&same_job(*pending_selection_,job)){
+        selection_loading_=true;
+        return;
+    }
+    if(translation_blocked())return;
     if(std::none_of(job.range.text.begin(),job.range.text.end(),[](unsigned char c){return c<128&&std::isalpha(c);})){
         selection_error_="请选择英文单词或句子，再翻译为中文。";return;
     }
-    pending_selection_=job;selection_loading_=true;request_="translate-selection";sync_started(true);translation_request_.clear();
+    pending_selection_=job;selection_loading_=true;translation_request_.clear();start_translation("translate-selection");
 }
 std::optional<SelectionJob> App::take_selection_request(){auto job=std::move(pending_selection_);pending_selection_.reset();return job;}
 void App::selection_finished(const SelectionJob& job,const std::string& translated,bool cancelled,const std::string& error){
@@ -183,17 +187,26 @@ void App::selection_panel(int y,int height){
     for(std::size_t i=0;i<std::min<std::size_t>(2,source.size());++i)
         c_.text(32,y+104+static_cast<int>(i)*34,i==1&&source.size()>2?c_.ellipsize(source[i].text+"…",24,c_.width-64):source[i].text,24,85);
     c_.rule(32,y+166,c_.width-64,210);
-    const auto message=selection_loading_?"正在翻译选中文字…":!selection_error_.empty()?selection_error_:!selection_result_.empty()?selection_result_:sync_state_==SyncState::Running?"当前有任务正在进行，完成后可翻译选中文字。":"点下方按钮，将选中的英文翻译为中文。";
+    const bool queued=selection_loading_&&queued_translation_=="translate-selection";
+    const bool blocked=translation_blocked();
+    const auto message=queued?"正在结束本轮自动同步，随后开始翻译选中文字。":
+        selection_loading_?"正在翻译选中文字…":!selection_error_.empty()?selection_error_:
+        !selection_result_.empty()?selection_result_:blocked?"当前有任务正在进行，完成后可翻译选中文字。":
+        "点下方按钮，将选中的英文翻译为中文。";
     const auto lines=c_.wrap(message,26,c_.width-64);constexpr std::size_t visible=6;
     const auto count=std::max<std::size_t>(1,(lines.size()+visible-1)/visible);selection_result_page_=std::min(selection_result_page_,count-1);
     const auto start=selection_result_page_*visible;
     for(std::size_t i=0;i<visible&&start+i<lines.size();++i)c_.text(32,y+212+static_cast<int>(i)*36,lines[start+i].text,26);
     const int controls=y+height-92;c_.rule(32,controls-8,c_.width-64,210);
-    if(selection_loading_)button({32,controls,c_.width-64,80},"取消翻译",[this]{request_="cancel-sync";},false,28,Icon::Close);
+    if(selection_loading_)button({32,controls,c_.width-64,80},queued?"取消等待":"取消翻译",[this,queued]{if(queued)cancel_queued_translation();else request_="cancel-sync";},false,28,Icon::Close);
     else if(!selection_result_.empty()){
         button({32,controls,200,80},"上一页",[this]{--selection_result_page_;},false,28,Icon::Back,selection_result_page_>0);
         const auto label=std::to_string(selection_result_page_+1)+" / "+std::to_string(count);c_.text((c_.width-c_.measure(label,24))/2,controls+48,label,24,85);
         button({c_.width-232,controls,200,80},"下一页",[this]{++selection_result_page_;},false,28,Icon::Next,selection_result_page_+1<count);
-    }else button({32,controls,c_.width-64,80},sync_state_==SyncState::Running?"等待当前任务完成":selection_error_.empty()?"翻译为中文":"重新翻译",[this]{translate_selected_text();},false,28,Icon::None,sync_state_!=SyncState::Running);
+    }else {
+        const auto label=blocked?"等待当前任务完成":
+            selection_error_.empty()?"翻译为中文":"重新翻译";
+        button({32,controls,c_.width-64,80},label,[this]{translate_selected_text();},false,28,Icon::None,!blocked);
+    }
 }
 }

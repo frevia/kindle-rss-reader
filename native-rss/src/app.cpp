@@ -704,14 +704,19 @@ void App::reader_panel_screen(){
         const bool running=sync_state_==SyncState::Running;
         const bool own_task=translating_&&translation_request_==request;
         const bool working=running&&own_task,ready=state.state=="ready";
+        const bool queued=queued_translation_==request;
+        const bool blocked=translation_blocked();
         const bool failed=state.state=="failed"||(own_task&&sync_state_==SyncState::Failed);
         const auto count=std::to_string(state.completed)+" / "+std::to_string(state.total)+" 段";
         std::string heading="尚未翻译",message="联网使用所配置的翻译服务，文章内容将发送至该服务；译文保存在本机。";
-        if(working){
+        if(queued){
+            heading="正在结束本轮自动同步";
+            message="同步退出后将开始翻译，可取消等待。";
+        }else if(working){
             heading=sync_total_>0?"正在翻译 · "+std::to_string(sync_completed_)+" / "+std::to_string(sync_total_)+" 段":"正在准备翻译";
             message="可收起面板继续阅读，已完成的译文会自动保存。";
         }else if(ready){heading="翻译完成 · "+count;message="译文已保存在本机，切换阅读模式无需再次翻译。";}
-        else if(running){heading="等待其他任务完成";message=translating_?"另一篇文章正在翻译，完成后可翻译本篇。":"订阅同步正在进行，完成后可翻译本篇。";}
+        else if(blocked){heading="等待其他任务完成";message="当前任务完成后可翻译本篇。";}
         else if(failed){heading="翻译未完成";message=own_task&&sync_state_==SyncState::Failed?sync_message_:state.error;}
         else if(state.state=="stale"){heading="译文需要更新";message="原文或翻译版本已变化，请重新翻译；新译文保存后才会替换旧缓存。";}
         else if(state.completed){heading="已翻译 · "+count;message="继续时复用已保存译文，未完成的段落暂时显示原文。";}
@@ -724,16 +729,18 @@ void App::reader_panel_screen(){
             c_.fill({32,y+358,w-64,4},220);
             c_.fill({32,y+358,static_cast<int>(static_cast<long long>(w-64)*std::clamp(sync_completed_,0,sync_total_)/sync_total_),4},30);
         }
-        const bool enabled=working||ready||!running;
-        const auto action=working?"暂停翻译":ready?"继续阅读":running?"等待当前任务完成":state.completed?"继续翻译":failed?"重试翻译":"翻译为中文";
+        const bool enabled=queued||working||ready||!blocked;
+        const auto action=queued?"取消等待":working?"暂停翻译":ready?"继续阅读":
+            blocked?"等待当前任务完成":state.completed?"继续翻译":failed?"重试翻译":"翻译为中文";
         const Rect controls{32,y+height-104,w-64,80};frame(c_,controls);
-        button(controls,action,[this,working,ready,request]{
+        button(controls,action,[this,queued,working,ready,request]{
+            if(queued){cancel_queued_translation();return;}
             if(working){request_="cancel-sync";return;}
             if(ready){close_reader_tools();return;}
             save_position();
             translation_request_=request;
-            request_=translation_request_;sync_started(true);
-        },enabled&&!working,28,working?Icon::Close:Icon::None,enabled);
+            start_translation(translation_request_);
+        },enabled&&!working&&!queued,28,working||queued?Icon::Close:Icon::None,enabled);
     }else{
         const std::string details="标题："+current_->title+"\n\n来源："+source(current_->feed_id)+"\n时间："+date(current_->published)+"\n作者："+(current_->author.empty()?"未提供":current_->author)+"\n\n原文地址：\n"+current_->url;
         const auto lines=c_.wrap(details,28,w-64);const std::size_t visible=std::max(1,(height-210)/42);
@@ -959,6 +966,38 @@ void App::opml_screen(){
     if(!status_.empty())c_.text(32,820,c_.ellipsize(status_,24,w-64),24,75);
 }
 void App::sync_started(bool translating,bool automatic){translating_=translating;automatic_sync_=automatic;if(!automatic)status_.clear();sync_page_=0;sync_state_=SyncState::Running;sync_completed_=sync_failed_=0;sync_total_=translating?0:static_cast<int>(feeds_.size());sync_message_=translating?"正在准备翻译文章":"正在连接订阅源";if(screen_==Screen::Sync||reader_panel_==ReaderPanel::Translation)dirty=true;}
+bool App::translation_blocked() const {
+    return !queued_translation_.empty()||
+        (sync_state_==SyncState::Running&&!automatic_sync_)||directory_running_||
+        update_state_==UpdateState::Downloading||update_state_==UpdateState::Installing;
+}
+void App::start_translation(std::string request) {
+    if(automatic_sync_&&sync_state_==SyncState::Running){
+        queued_translation_=std::move(request);
+        request_="prioritize-translation";
+        dirty=true;
+        return;
+    }
+    request_=std::move(request);
+    sync_started(true);
+}
+std::string App::take_queued_translation(){
+    if(queued_translation_.empty())return {};
+    auto request=std::move(queued_translation_);
+    queued_translation_.clear();
+    dirty=true;
+    return request;
+}
+void App::cancel_queued_translation(){
+    if(queued_translation_=="translate-selection"){
+        pending_selection_.reset();
+        selection_loading_=false;
+        selection_error_="翻译已取消，可手动重试。";
+    }
+    queued_translation_.clear();
+    if(request_=="prioritize-translation")request_.clear();
+    dirty=true;
+}
 void App::maybe_auto_sync(std::time_t now){
     if(now<=0||quit||!reader_status_.wifi||screen_!=Screen::List||!error_.empty()||!confirmation_.empty()||!input_mode_.empty()||managing_||brand_menu_||selection_||directory_running_||sync_state_==SyncState::Running||update_state_==UpdateState::Checking||update_state_==UpdateState::Downloading||update_state_==UpdateState::Installing||!request_.empty()||store_.setting("auto_sync")=="0")return;
     if(std::none_of(feeds_.begin(),feeds_.end(),[](const Feed& f){return f.id>0&&!f.url.empty();}))return;
