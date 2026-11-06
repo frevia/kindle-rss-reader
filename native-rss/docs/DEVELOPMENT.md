@@ -4,7 +4,7 @@
 
 面向 Kindle 的独立原生 RSS 阅读器，当前源码新增按设备能力检查的兼容版，范围见 [COMPATIBILITY.md](COMPATIBILITY.md)。C++17、CREngine 正文排版与 FreeType 灰度渲染、SQLite 离线存储、libxml2 订阅解析和 libcurl 联网；桌面使用 SDL 展示相同的渲染结果。不是 KOReader 插件，也不是网页套壳。
 
-**当前版本为 v0.0.4-beta.5，尚未完成跨机型和长期验收。** 本版整理设置页，并在会话锁交接修复基础上将安装进度字体复制到私有会话缓存，避免替换 FAT 字体后崩溃。见 [beta.5 说明](RELEASE-v0.0.4-beta.5.md)和[旧版启动器迁移](INSTALL.md#旧版升级前修复启动器)。[beta 安装包](https://github.com/frevia/kindle-rss-reader/releases/tag/v0.0.4-beta.5)提供中文字体和证书。KPW3 已有字体故障复现、热修后完整 beta.4 在线升级、数据一致性及设置页本地预览实测；最终 beta.5 包、其他机型、休眠和断电恢复的范围分别记录，不能用历史实测代替。完整范围见[实施计划](PLAN.md)，历史设备证据见 [DEVICE.md](DEVICE.md)。
+**当前源码版本为 v0.0.4-beta.6，公开下载仍为 beta.5。** beta.6 修复书库入口的自动重启，分离检查更新与订阅同步，并允许主动翻译优先于自动同步。KPW3 已复现书库入口卸载导致的回滚，并通过设备上的隔离交接验证。跨机型与完整在线安装的验证范围见 [beta.6 说明](RELEASE-v0.0.4-beta.6.md)。
 
 ## 安装到 Kindle
 
@@ -93,7 +93,7 @@ rtk proxy python3 native-rss/tools/package.py
 
 ### 发布步骤
 
-当前发布说明见 [beta.5](RELEASE-v0.0.4-beta.5.md)，历史记录见 [beta.1](RELEASE-v0.0.4-beta.1.md)、[beta.2](RELEASE-v0.0.4-beta.2.md)、[beta.3](RELEASE-v0.0.4-beta.3.md) 与 [beta.4](RELEASE-v0.0.4-beta.4.md)，正式版记录见 [v0.0.3](RELEASE-v0.0.3.md)。更新 CMake 基础版本、`RSS_VERSION_SUFFIX`、KUAL 版本号及对应发布文档后提交，再推送 `v数字.数字.数字` 或 `v数字.数字.数字-beta.序号` 标签，触发[发布工作流](../../.github/workflows/release.yml)。安装文档分别链接正式版最新版和 beta 标签页，不能用 `/releases/latest` 代替 beta 下载入口。
+当前版本说明见 [beta.6](RELEASE-v0.0.4-beta.6.md)，历史记录见 [beta.1](RELEASE-v0.0.4-beta.1.md)、[beta.2](RELEASE-v0.0.4-beta.2.md)、[beta.3](RELEASE-v0.0.4-beta.3.md)、[beta.4](RELEASE-v0.0.4-beta.4.md) 与 [beta.5](RELEASE-v0.0.4-beta.5.md)，正式版记录见 [v0.0.3](RELEASE-v0.0.3.md)。更新 CMake 基础版本、`RSS_VERSION_SUFFIX`、KUAL 版本号及对应发布文档后提交，再推送 `v数字.数字.数字` 或 `v数字.数字.数字-beta.序号` 标签，触发[发布工作流](../../.github/workflows/release.yml)。安装文档分别链接正式版最新版和 beta 标签页，不能用 `/releases/latest` 代替 beta 下载入口。
 
 工作流使用 Apple Silicon macOS runner、固定 Zig 哈希，运行宿主 CTest、重编译 ARM，再运行 `tools/release.py`。后者生成安装包、项目源码、第三方对应源码和 `SHA256SUMS.txt`。第三方归档按构建锁验证，项目源码必须与二进制的构建输入一致；仅修改 `public_release_ready` 布尔值无法通过检查。
 

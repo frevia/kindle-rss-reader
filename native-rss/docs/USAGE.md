@@ -2,7 +2,7 @@
 
 还没有安装的话，先看[安装教程](INSTALL.md)。下面按第一次打开阅读器的顺序介绍。
 
-本文对应 **v0.0.4-beta.5**，包括发现订阅源、新设置页、升级进度反馈及会话锁和字体生命周期修复；[下载 beta.5](https://github.com/frevia/kindle-rss-reader/releases/tag/v0.0.4-beta.5)，变化汇总见[更新记录](../../CHANGELOG.md)。beta.1～beta.4 推荐 USB 升级；开发验证在线安装前先[修复旧启动器](INSTALL.md#旧版升级前修复启动器)。beta.1／beta.2 的旧导航见[对应版本指南](https://github.com/frevia/kindle-rss-reader/blob/v0.0.4-beta.2/native-rss/docs/USAGE.md)。正式版仍为 v0.0.3，仍使用 v0.0.2 时请查看[该版本指南](https://github.com/frevia/kindle-rss-reader/blob/v0.0.2/native-rss/docs/USAGE.md)。
+本文对应 **v0.0.4-beta.5**，包括发现订阅源、新设置页、升级进度反馈及会话锁和字体生命周期修复；[下载 beta.5](https://github.com/frevia/kindle-rss-reader/releases/tag/v0.0.4-beta.5)，变化汇总见[更新记录](../../CHANGELOG.md)。旧 beta 推荐 USB 升级。开发验证在线安装前先[修复旧启动器](INSTALL.md#旧版升级前修复启动器)。beta.1／beta.2 的旧导航见[对应版本指南](https://github.com/frevia/kindle-rss-reader/blob/v0.0.4-beta.2/native-rss/docs/USAGE.md)。正式版仍为 v0.0.3，仍使用 v0.0.2 时请查看[该版本指南](https://github.com/frevia/kindle-rss-reader/blob/v0.0.2/native-rss/docs/USAGE.md)。
 
 ## 订阅管理导航
 
@@ -211,11 +211,11 @@ beta.3 新增此功能，beta.1／beta.2 和正式版 v0.0.3 不包含。
 
 ## 设置与在线升级
 
-beta.5 同时修复会话锁交接和安装器字体被替换后的崩溃。beta.1～beta.4 推荐直接 USB 安装完整 beta.5；开发测试须先[替换 beta.5 启动器并重开阅读器](INSTALL.md#旧版升级前修复启动器)。仅检查到新版不表示旧启动器已修复。
+beta.6 修复书库入口在线升级时的自动重启，包含此前的会话锁和字体修复。旧 beta 推荐通过 USB 安装完整包。开发测试须先[替换 beta.6 启动器并重开阅读器](INSTALL.md#旧版升级前修复启动器)。
 
 beta.3 的升级进度页：点击「安装并重启」后立即显示备份阅读数据，随后显示程序备份、安装和已用时间，完成后自动打开阅读器。安装期间请勿关机或连接 USB，也无需重复点击。备份失败时会留在更新页提示错误，不会继续安装。这些进度改进在安装 beta.3 后生效，从 beta.1／beta.2 升级时仍使用旧版界面。
 
-beta 可通过 **菜单 → 设置 → 在线升级** 手动检查 GitHub 后续 beta 与正式版本、下载并校验后安装重启。正式版 v0.0.3 转入 beta 需 USB 安装，不会自动切换通道；空间、首页适配和恢复限制见[在线升级说明](INSTALL.md#在线升级)。验证已补齐两项修复的旧 beta → beta.5 的步骤见[在线升级测试](INSTALL.md#在线升级测试)。程序升级与订阅自动同步是两个独立功能，不会后台静默安装新版。
+beta 可通过 **菜单 → 设置 → 在线升级** 手动检查 GitHub 后续 beta 与正式版本、下载并校验后安装重启。正式版 v0.0.3 转入 beta 需 USB 安装，不会自动切换通道；空间、首页适配和恢复限制见[在线升级说明](INSTALL.md#在线升级)。开发验证步骤见[在线升级测试](INSTALL.md#在线升级测试)。程序升级与订阅自动同步是两个独立功能，不会后台静默安装新版。
 
 在 **菜单 → 设置** 中点“关于与许可”进入独立详情页，可查看分发许可、源码位置及完整条款的位置。
 

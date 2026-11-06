@@ -204,7 +204,10 @@ cleanup() {
     done
     if [ "$pillow" -eq 1 ]; then pillow_change enable >/dev/null 2>&1 || restore_failed=1; fi
     if [ -n "$stopped" ] && same "$wm_pid" awesome "$wm_born" && awake; then
-        timeout 3 "$SET" com.lab126.appmgrd start app://com.lab126.booklet.home >/dev/null 2>&1 || restore_failed=1
+        # Opening Home unloads SH_Integration and kills the launcher before it can restart.
+        if [ "$install_update" -ne 2 ] || [ "$restore_failed" -ne 0 ]; then
+            timeout 3 "$SET" com.lab126.appmgrd start app://com.lab126.booklet.home >/dev/null 2>&1 || restore_failed=1
+        fi
         if awake; then timeout 5 "$REFRESH" -q -s >/dev/null 2>&1 || restore_failed=1; fi
     fi
     for record in $stopped; do

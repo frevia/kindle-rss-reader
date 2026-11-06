@@ -22,7 +22,7 @@
 
 正常退出已有阅读器，连接电脑，备份整个 `native-rss` 文件夹；首次安装也请备份重要书籍和文件。已有首页适配时先按[首页说明](HOME.md#启用停用和卸载)停用，测试期间保持系统正常竖屏并关闭设备密码锁。
 
-普通兼容试装下载 [beta.5](https://github.com/frevia/kindle-rss-reader/releases/tag/v0.0.4-beta.5) 中的 **`RSS-Reader-v0.0.4-beta.5-Kindle.zip`**，旧 beta 推荐直接 USB 升级。beta.1～beta.4 需要在线升级时，须先[替换 beta.5 启动器](INSTALL.md#旧版升级前修复启动器)并重新打开阅读器，再按[在线升级测试](INSTALL.md#在线升级测试)操作。记录完整文件名和下载来源；自行构建的 `kindle-rss-kindle-dev.zip` 还需记录提交号。
+普通兼容试装下载 [beta.5](https://github.com/frevia/kindle-rss-reader/releases/tag/v0.0.4-beta.5) 中的 **`RSS-Reader-v0.0.4-beta.5-Kindle.zip`**，旧 beta 推荐直接 USB 升级。开发验证旧 beta 在线升级时，须先[替换 beta.6 启动器](INSTALL.md#旧版升级前修复启动器)并重新打开阅读器，再按[在线升级测试](INSTALL.md#在线升级测试)操作。记录完整文件名和下载来源；自行构建的 `kindle-rss-kindle-dev.zip` 还需记录提交号。
 
 注意：[正式版最新版入口](https://github.com/frevia/kindle-rss-reader/releases/latest)仍为 v0.0.3，不包含上述 beta。只使用本项目的 `-Kindle.zip` 兼容包；历史 `-KPW3.zip` 改名也不会获得兼容能力。
 

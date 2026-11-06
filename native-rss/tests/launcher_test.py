@@ -512,6 +512,9 @@ class LauncherTests(unittest.TestCase):
                 self.assertLess(events.index("app-start"),events.index("update-apply"))
                 self.assertLess(events.index("update-apply"),events.index("cache-rm"))
                 self.assertLess(events.index("update-apply"),events.index("-CONT 900003"))
+                # Opening Home unloads a reader started through SH_Integration.
+                self.assertEqual("set com.lab126.appmgrd start app://com.lab126.booklet.home" in events,
+                                 mode=="update-failed")
                 self.assertEqual("restart" in events,mode=="update-install")
 
     def test_successful_update_releases_lock_before_restart(self):

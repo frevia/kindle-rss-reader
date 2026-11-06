@@ -1,5 +1,7 @@
 # RSS Reader v0.0.4-beta.5
 
+> 2026-11-06：已确认本版启动器在 Kindle 书库入口在线安装后仍可能回滚，原因与修复见 [beta.6 说明](RELEASE-v0.0.4-beta.6.md)。
+
 整理设置页排版，并补齐在线安装时的字体生命周期修复。本版同时包含 beta.4 的会话锁交接修复。[下载 beta.5](https://github.com/frevia/kindle-rss-reader/releases/tag/v0.0.4-beta.5)。这是预发布版本，正式版最新版仍为 v0.0.3；历史 beta 附件保持不变。
 
 ## beta.1～beta.4 用户先看这里

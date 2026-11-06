@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.17.5)
 project(kindle_rss VERSION 0.0.4 LANGUAGES CXX)
-set(RSS_VERSION_SUFFIX "-beta.5")
+set(RSS_VERSION_SUFFIX "-beta.6")
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 option(RSS_DESKTOP "Build SDL desktop simulator" ON)
