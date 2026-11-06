@@ -1,8 +1,7 @@
 RSS Reader 安装说明
 
-v0.0.4 beta 已发布兼容代码、自动同步、文章与选区翻译和在线升级。
-普通兼容试装可直接通过 USB 安装 beta.2；验证 beta.1 → beta.2 在线升级时先装 beta.1。
-正式版最新版入口不包含 beta，具体下载地址见本文末尾。
+v0.0.4 提供订阅源库、自动同步、文章与选区翻译和在线升级。
+v0.0.3 及 beta.1～beta.5 用户建议通过 USB 升级。
 
 Kindle 兼容版按屏幕和触摸能力检查设备；已有真机记录为 KPW3，新增机型仍待实机验收。
 要求 ARMv7、可识别的 Kindle 5／Upstart 系统、8 位灰度竖屏和受支持的触摸输入。
@@ -27,20 +26,20 @@ Kindle 兼容版按屏幕和触摸能力检查设备；已有真机记录为 KPW
 
 首次阅读
 连接 Wi-Fi，点“添加订阅”，填入网站提供的 RSS / Atom 订阅地址并保存。
-返回文章列表后 beta 默认在后台自动同步，也可点左下角“菜单 → 同步”手动下载。
+返回文章列表后默认在后台自动同步，也可点左下角“菜单 → 同步”手动下载。
 等下载完成后打开一篇文章。
 网站首页地址不一定是订阅地址。下载完成后可以离线阅读文字和图片。
 日常操作、批量导入和备份见本包 native-rss/docs/USAGE.md。
 
 退出、备份与升级
+如果上次在线升级中断，先从原入口打开阅读器，确认恢复完成。
 1. 在文章列表点左下角“菜单 → 退出”，确认回到 Kindle 系统书库，再连接电脑。
 2. 把整个 native-rss 文件夹复制到电脑备份，再用最新版合并覆盖程序文件。
 3. 保留 native-rss/data，订阅、收藏和阅读记录都在里面，删除后会丢失本地数据。
    安装包不带这个文件夹；不要用整个文件夹替换的方式覆盖它。
-4. 安全弹出并拔线，再次打开检查原有数据。能正常使用时，无需重装启动工具。
+4. 安全弹出并拔线，再次打开，检查版本号和原有数据。能正常使用时，无需重装启动工具。
 
-beta 还可通过“菜单 → 设置 → 在线升级”检查后续 beta 与正式版。
-验证本次在线升级时，先 USB 安装 beta.1，再检查并下载 beta.2，校验后安装重启。
+通过“菜单 → 设置 → 在线升级”手动检查后续正式版。
 升级前备份、停用已启用的首页适配，并保留至少 400 MB 空间；安装期间不要接 USB 或关机。
 真实断电恢复尚未验收。完整步骤见 native-rss/docs/INSTALL.md。
 备份可能包含 data/translation.conf 中的 API Key 和 .update 中的回滚数据库，不要公开上传。
@@ -59,8 +58,6 @@ beta 还可通过“菜单 → 设置 → 在线升级”检查后续 beta 与�
 完整安装教程：本包 native-rss/docs/INSTALL.md
 启动问题排查：本包 native-rss/docs/TROUBLESHOOTING.md
 在线教程：https://github.com/frevia/kindle-rss-reader/blob/main/native-rss/docs/INSTALL.md
-兼容测试 beta.2：https://github.com/frevia/kindle-rss-reader/releases/tag/v0.0.4-beta.2
-升级测试起点 beta.1：https://github.com/frevia/kindle-rss-reader/releases/tag/v0.0.4-beta.1
 正式版最新版（不含 beta）：https://github.com/frevia/kindle-rss-reader/releases/latest
 
 需要反馈时，从书库打开 RSS设备诊断，或 KUAL → Kindle RSS → 导出 RSS 诊断报告。

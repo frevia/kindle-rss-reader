@@ -12,7 +12,7 @@
 - [x] 提交并推送许可证与发布配置，由 GitHub 自动编译和发布安装包。
 - [x] 已发布版本的测试通过，发布附件重新下载后的校验也通过。具体代码与每次运行结果见[发布记录](https://github.com/frevia/kindle-rss-reader/releases)和[自动构建记录](https://github.com/frevia/kindle-rss-reader/actions/workflows/release.yml)。
 
-兼容及新增功能已随 v0.0.4 beta 发布，正式版仍为 v0.0.3；公开 beta 不代表完成真机验收。以上为已有工作记录，仓库可见性由维护者单独管理。
+兼容及新增功能已随 v0.0.4 beta 发布。beta 与正式版均须按下方清单记录实际验收范围。
 
 ## 公开仓库前还要确认
 

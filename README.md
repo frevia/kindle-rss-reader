@@ -4,11 +4,9 @@
 
 已有真机验证设备为 **Kindle Paperwhite 3（KPW3，2015 款）**。当前源码新增按屏幕和触摸能力运行的 Kindle 兼容版，其他机型仍需实机验收，具体条件见[机型兼容说明](native-rss/docs/COMPATIBILITY.md)。设备需要已经越狱，并完成越狱教程中的后续环境设置。
 
-**兼容测试版 v0.0.4-beta.6** 改进在线升级和翻译调度，并为支持的 Kindle 固件内置首页 RSS 适配。[下载 beta.6](https://github.com/frevia/kindle-rss-reader/releases/tag/v0.0.4-beta.6) · [beta.6 发布说明](native-rss/docs/RELEASE-v0.0.4-beta.6.md) · [更新记录](CHANGELOG.md)。其他机型仍待真机验收。
+使用前先看[安装与升级指南](native-rss/docs/INSTALL.md)。下载入口有[正式版](https://github.com/frevia/kindle-rss-reader/releases/latest)和[兼容测试版 beta.6](https://github.com/frevia/kindle-rss-reader/releases/tag/v0.0.4-beta.6)。版本差异见 [v0.0.4 发布说明](native-rss/docs/RELEASE-v0.0.4.md)和[更新记录](CHANGELOG.md)。
 
-**旧 beta 推荐通过 USB 升级。** 从书库打开 beta.5 后在线安装，也可能在自动重启前回滚。[v0.0.4-beta.6](native-rss/docs/RELEASE-v0.0.4-beta.6.md) 修复了这一问题。开发验证在线升级前，须先[替换 beta.6 启动器并重新打开阅读器](native-rss/docs/INSTALL.md#旧版升级前修复启动器)。
-
-当前正式版仍为 **v0.0.3**，[正式版下载入口](https://github.com/frevia/kindle-rss-reader/releases/latest)不包含 beta。本文和使用指南以 beta.6 为准；beta.1／beta.2 的旧订阅导航见[对应版本指南](https://github.com/frevia/kindle-rss-reader/blob/v0.0.4-beta.2/native-rss/docs/USAGE.md)，正式版差异见 [v0.0.3 发布说明](native-rss/docs/RELEASE-v0.0.3.md)；仍使用 v0.0.2 时，请参阅[该版本使用指南](https://github.com/frevia/kindle-rss-reader/blob/v0.0.2/native-rss/docs/USAGE.md)。
+**v0.0.3 和 beta.1～beta.5 用户建议通过 USB 升级。** 如果上一次在线安装中断，先从原入口打开阅读器，确认恢复完成并正常退出，再备份和复制安装包。
 
 ## 可以用它做什么
 
@@ -21,18 +19,18 @@
 - 正文左右滑动翻页，同步进度可收起到后台。
 - 可选[原生首页 RSS 书卡](native-rss/docs/HOME.md)，查看订阅摘要、未读数并直接打开文章；支持的固件可从设置首次开启，正常退出后自动安装适配。
 
-v0.0.4 beta 已提供以下功能，**正式版 v0.0.3 尚不包含**：
+v0.0.4 新增功能：
 
-- [发现订阅源](native-rss/docs/USAGE.md#发现订阅源)（beta.3）：从 OPML 源库查找来源，按主题筛选后添加订阅，缓存后可离线查找。
+- [发现订阅源](native-rss/docs/USAGE.md#发现订阅源)：从 OPML 源库查找来源，按主题筛选后添加订阅，缓存后可离线查找。
 - [自动同步](native-rss/docs/USAGE.md#自动同步)：默认开启，在打开阅读器和使用期间按 30 分钟间隔检查订阅，不唤醒休眠设备。
 - [文章翻译与长按选词翻译](native-rss/docs/USAGE.md#文章翻译)：英文转简体中文，支持原文、译文、双语及离线缓存；可配置 Qwen、SiliconFlow、智谱或自定义 OpenAI 兼容服务，需自行提供 API Key，内容会发往所选服务并可能计费。
-- [GitHub 在线升级](native-rss/docs/INSTALL.md#在线升级)：手动检查当前通道更新、下载校验并安装重启；首次启用需 USB 安装 beta，beta 通道包含后续 beta 和正式版。
+- [GitHub 在线升级](native-rss/docs/INSTALL.md#在线升级)：手动检查当前通道更新、下载校验并安装重启；从 v0.0.3 首次升级需用 USB。
 - [Kindle 兼容版](native-rss/docs/COMPATIBILITY.md)：按屏幕、触摸与系统能力检查其他 ARMv7 Kindle；其他机型仍待真机验收，首页适配范围不变。
 
 ## 开始使用
 
-1. 打开 [beta.6 下载页面](https://github.com/frevia/kindle-rss-reader/releases/tag/v0.0.4-beta.6)。旧 beta 默认通过 USB 升级。开发验证在线安装见[升级测试步骤](native-rss/docs/INSTALL.md#在线升级测试)。
-2. 在 **Assets（下载文件）** 中下载 **`RSS-Reader-v0.0.4-beta.6-Kindle.zip`**。历史 **`-KPW3.zip`** 只供 KPW3 使用，不能用于其他机型。
+1. 打开[正式版下载页面](https://github.com/frevia/kindle-rss-reader/releases/latest)。其他机型请先阅读[兼容试用流程](native-rss/docs/COMPATIBILITY.md#测试安装流程)。
+2. 在 **Assets（下载文件）** 中下载对应版本的安装包。v0.0.4 使用 **`RSS-Reader-v0.0.4-Kindle.zip`**。历史 **`-KPW3.zip`** 只供 KPW3 使用。
 3. 解压后，按[安装教程](native-rss/docs/INSTALL.md)把三个文件夹合并复制到 Kindle，再从书库或 KUAL 打开阅读器。
 4. 连上 Wi-Fi，按[使用指南](native-rss/docs/USAGE.md#添加第一个订阅)添加第一个订阅，下载文章后就能离线阅读。
 
@@ -40,7 +38,7 @@ v0.0.4 beta 已提供以下功能，**正式版 v0.0.3 尚不包含**：
 
 其他机型请按[测试安装流程](native-rss/docs/COMPATIBILITY.md#测试安装流程)先备份、确认兼容包并导出只读诊断，再逐项测试。无论成功或失败，都欢迎使用[兼容反馈模板](native-rss/docs/COMPATIBILITY.md#怎么反馈兼容情况)，通过 GitHub Issues 或邮件反馈；其他机型不启用首页 RSS 适配。
 
-目前仍是开发中的版本，长期使用和反复休眠、退出还需要更多实际使用验证。
+长期使用和反复休眠、退出仍需要更多实际使用验证。
 
 ## 遇到问题
 

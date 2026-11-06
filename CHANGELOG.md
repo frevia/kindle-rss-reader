@@ -2,6 +2,14 @@
 
 下面保留每次发布时的变化，方便回查。兼容测试使用 [v0.0.4-beta.6](https://github.com/frevia/kindle-rss-reader/releases/tag/v0.0.4-beta.6)；[正式版最新版入口](https://github.com/frevia/kindle-rss-reader/releases/latest)不包含 beta。
 
+## v0.0.4
+
+- 新增订阅源库、默认开启的自动同步、整篇及选区翻译，并支持保留阅读数据的 GitHub 在线升级。
+- ARMv7 Kindle 安装包按屏幕和输入能力检查设备。正式支持范围为 KPW3，其他机型可按兼容说明试用。首页 RSS 适配默认关闭，仅适用于通过原文件校验的 KPW3／5.16.2.1.1。
+- 保留 beta.6 的书库入口重启修复，补充旧 beta 在线安装中断后先恢复、再通过 USB 升级的操作步骤。
+
+见 [v0.0.4 说明](native-rss/docs/RELEASE-v0.0.4.md)。
+
 ## v0.0.4-beta.6 · 2026-11-06
 
 - 内置 KPW3／5.16.2.1.1 的首页 RSS 差分配方。支持的设备首次开启后正常退出即可自动安装，其他设备显示灰色开关。切回首页前等待系统接口完成注册，避免首次重载弹出应用程序错误。
@@ -42,7 +50,7 @@
 
 首个已发布 Kindle 兼容及在线升级测试版。beta 版本可检查后续 beta 与正式版，正式版仍只检查正式更新，旧版首次转入 beta 需 USB 安装。见 [beta.1 发布说明](native-rss/docs/RELEASE-v0.0.4-beta.1.md)。
 
-以下为 v0.0.3 发布后的变更，已纳入 v0.0.4 beta 测试包，尚未进入正式版。
+以下保留首个 beta 发布时相较于 v0.0.3 的变更。
 
 ### 新增与改进
 

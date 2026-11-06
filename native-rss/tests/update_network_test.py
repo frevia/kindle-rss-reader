@@ -125,8 +125,7 @@ class UpdateNetworkTests(unittest.TestCase):
                                           "/repos/frevia/kindle-rss-reader/releases/latest"])
 
     def test_check_reports_progress_while_response_is_delayed(self):
-        current = subprocess.check_output([DRIVER, "version"], text=True).strip()
-        self.proxy.release_list = [{"tag_name": "v999.0.0", "draft": False, "prerelease": False, "assets": []}]
+        self.proxy.release_list = [self.installed_release()]
         self.proxy.mode = "slow-check"
         result = subprocess.run([DRIVER, "check"], env=self.env, capture_output=True, text=True, timeout=10)
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -134,7 +133,7 @@ class UpdateNetworkTests(unittest.TestCase):
         self.assertIn("已等待", result.stderr)
 
     def test_check_can_cancel_while_waiting_for_response(self):
-        self.proxy.release_list = []
+        self.proxy.release_list = [self.installed_release()]
         self.proxy.mode = "cancel-check"
         started = time.monotonic()
         result = subprocess.run([DRIVER, "check", "cancel", "1800"], env=self.env,
@@ -142,6 +141,10 @@ class UpdateNetworkTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("更新已取消", result.stderr)
         self.assertLess(time.monotonic() - started, 3)
+
+    def installed_release(self):
+        current = subprocess.check_output([DRIVER, "version"], text=True).strip()
+        return {"tag_name": current, "draft": False, "prerelease": "-beta." in current, "assets": []}
 
     def test_download_follows_only_github_https_and_checks_actual_archive(self):
         for mode in ("slow", "normal", "bad-sha", "downgrade", "foreign-host", "incomplete", "rate-limit"):

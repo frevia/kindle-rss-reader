@@ -24,7 +24,7 @@
 
 普通兼容试装下载 [beta.6](https://github.com/frevia/kindle-rss-reader/releases/tag/v0.0.4-beta.6) 中的 **`RSS-Reader-v0.0.4-beta.6-Kindle.zip`**，旧 beta 推荐直接 USB 升级。开发验证旧 beta 在线升级时，须先[替换 beta.6 启动器](INSTALL.md#旧版升级前修复启动器)并重新打开阅读器，再按[在线升级测试](INSTALL.md#在线升级测试)操作。记录完整文件名和下载来源；自行构建的 `kindle-rss-kindle-dev.zip` 还需记录提交号。
 
-注意：[正式版最新版入口](https://github.com/frevia/kindle-rss-reader/releases/latest)仍为 v0.0.3，不包含上述 beta。只使用本项目的 `-Kindle.zip` 兼容包；历史 `-KPW3.zip` 改名也不会获得兼容能力。
+请选用带兼容代码的 `-Kindle.zip` 安装包。历史 `-KPW3.zip` 改名也不会获得兼容能力。其他机型仍按本页流程试用。
 
 ### 2. 复制文件，先导出诊断
 
