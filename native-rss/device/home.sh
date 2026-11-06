@@ -11,6 +11,7 @@ INIT=/sbin/initctl
 MNTROOT=/usr/sbin/mntroot
 GET=/usr/bin/lipc-get-prop
 SET=/usr/bin/lipc-set-prop
+LIPC_PROBE=/usr/bin/lipc-probe
 PROC=/proc
 SELF=/mnt/us/native-rss/home.sh
 ROOT_RO=0
@@ -141,6 +142,27 @@ bridge_ready() {
     grep -qx 'ready=1' "$STATE/health" || return 1
     bridge_running && grep -qx "pid=$bridge_pid" "$STATE/health"
 }
+home_capability() {
+    profile
+    [ -f "$TARGET" ] && [ ! -L "$TARGET" ] || return 1
+    original=$TARGET
+    if mounted; then
+        [ ! -L "$STATE" ] && [ -f "$STATE/enabled" ] && [ ! -L "$STATE/enabled" ] && owned_job || return 1
+        [ -f "$STATE/mounted.sha256" ] && [ ! -L "$STATE/mounted.sha256" ] || return 1
+        [ "$(hash "$TARGET")" = "$(cat "$STATE/mounted.sha256")" ] || return 1
+        original=$STATE/original.hbc
+        [ -f "$original" ] && [ ! -L "$original" ] || return 1
+    fi
+    if [ "$(hash "$original")" != "$ORIGINAL" ]; then
+        printf '%s\n' unsupported
+    # The bridge clears ready while a reader owns the session lock.
+    elif mounted && bridge_running; then
+        printf '%s\n' active
+    else
+        [ -x "$LIPC_PROBE" ] || return 1
+        printf '%s\n' available
+    fi
+}
 main_pid() { timeout 3 "$INIT" status kppmainapp 2>/dev/null | awk '/start\/running, process/ {print $NF}'; }
 archive_report() {
     case "$1" in ''|*[!0-9]*) return ;; esac
@@ -154,12 +176,26 @@ archive_report() {
     [ "${2:-}" = quiet ] && return 0
     timeout 3 "$SET" com.lab126.pillow pillowAlert '{"name":"simple_alert","clientParams":"{\"alertId\":\"collectingDebugInfoAlert\",\"hide\":true}"}' >/dev/null 2>&1 || :
 }
+open_home_when_ready() {
+    [ -x "$LIPC_PROBE" ] || return 1
+    attempts=0
+    while [ "$attempts" -lt 12 ]; do
+        [ "$(timeout 2 "$GET" com.lab126.powerd state 2>/dev/null)" = active ] || return 0
+        # Upstart reports the new PID before KPP can accept AppMgr requests.
+        if timeout 2 "$LIPC_PROBE" com.lab126.KPPMainApp 2>/dev/null |
+            awk '$NF=="load" {load=1} $NF=="pause" {pause=1} $NF=="go" {go=1} END {exit !(load && pause && go)}'; then
+            timeout 5 "$SET" com.lab126.appmgrd start app://com.lab126.booklet.home >/dev/null 2>&1
+            return $?
+        fi
+        sleep 1
+        attempts=$((attempts+1))
+    done
+    return 1
+}
 reload_home() {
     previous=$(main_pid)
     timeout 25 "$INIT" restart kppmainapp >/dev/null || return 1
-    if [ "${1:-}" != keep-foreground ] && [ "$(timeout 2 "$GET" com.lab126.powerd state 2>/dev/null)" = active ]; then
-        timeout 5 "$SET" com.lab126.appmgrd start app://com.lab126.booklet.home >/dev/null 2>&1 || :
-    fi
+    [ "${1:-}" = keep-foreground ] || open_home_when_ready || :
     archive_report "$previous"
     # The firmware may finish its restart report after the new home has become ready.
     nohup sh "$SELF" archive-after "$previous" 7>&- 8>&- 9>&- </dev/null >/dev/null 2>&1 &
@@ -287,6 +323,14 @@ case "$1" in
         if mounted; then printf '%s\n' '首页 RSS：已加载'; else printf '%s\n' '首页 RSS：未加载'; fi
         timeout 3 "$INIT" status native-rss-home 2>/dev/null || :
         exit ;;
+    capability)
+        (home_capability) 2>/dev/null || printf '%s\n' unavailable
+        exit ;;
+    activate)
+        [ "$#" -eq 1 ] || exit 1
+        sh "$SELF" enable && exit 0
+        open_home_when_ready || :
+        exit 1 ;;
     mount) mount_home; exit ;;
     unmount) unmount_home; exit ;;
     enable|disable|recover) [ "$#" -eq 1 ] || fail '不接受额外参数' ;;
@@ -304,6 +348,7 @@ finish() {
     fi
     if ! ( cleanup_recovery_install ); then result=1; fi
     root_restore || result=1
+    flock -u 8 || result=1
     exit "$result"
 }
 trap finish 0

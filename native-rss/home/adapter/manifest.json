@@ -1,0 +1,21 @@
+{
+  "id": "kpw3-5.16.2.1.1",
+  "firmware": "5.16.2.1.1",
+  "original_sha256": "999d9234f5557820ce13526fa7732e2bebe273a84f5a375c97f9a1936d4cafa2",
+  "hbc_version": 84,
+  "render_function": 6771,
+  "press_function": 6775,
+  "format": 1,
+  "patch_sha256": "85e1720ee3afe1270b48ae195df8df81f5ebdff33325930b0bc94317a6b378b0",
+  "patched_sha256": "c23f88f13c03537c321b1e32db579c7d116e15cd1070575e82e08cf76fc02832",
+  "source_sha256": "4e4b731783bdaf03522bbc566f6df27f684751bdbe97255baa170aed574dbc03",
+  "modified_original_functions": [
+    4669,
+    6607,
+    6612,
+    6771,
+    6775
+  ],
+  "contains_original_firmware": false,
+  "enabled_by_default": false
+}

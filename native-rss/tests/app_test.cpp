@@ -99,13 +99,14 @@ int main(){
         rss::Entry entry;entry.guid="untouched";entry.title="保留的未读文章";entry.text="保留的正文";
         rss::ParsedFeed batch;batch.entries={entry};preferences.save_entries(fid,batch);
         rss::App settings(preferences,canvas);settings.show_view(rss::View::All,fid);
+        settings.set_home_availability(rss::App::HomeAvailability::Active);
         auto touch=[&](int x,int y){settings.draw();settings.tap(x,y);};
         auto shot=[&](const char* name){settings.draw();if(const auto folder=std::getenv("RSS_TEST_SNAPSHOTS")){std::filesystem::create_directories(folder);canvas.write_pgm((std::filesystem::path(folder)/name).string());}};
         touch(100,1392);touch(140,1070);assert(settings.screen()==rss::App::Screen::Settings&&!settings.menu_open());
         assert(preferences.setting("home_visible").empty());shot("settings-home-off.pgm");const auto off=canvas.pixels;
         touch(950,268);assert(preferences.setting("home_visible")=="1");shot("settings-home-on.pgm");const auto on=canvas.pixels;assert(off!=on);
         settings.back();assert(settings.screen()==rss::App::Screen::List);settings.draw();const auto list=canvas.pixels;
-        {rss::App reopened(preferences,canvas);reopened.draw();reopened.tap(100,1392);reopened.draw();reopened.tap(140,1070);reopened.draw();assert(canvas.pixels==on);}
+        {rss::App reopened(preferences,canvas);reopened.set_home_availability(rss::App::HomeAvailability::Active);reopened.draw();reopened.tap(100,1392);reopened.draw();reopened.tap(140,1070);reopened.draw();assert(canvas.pixels==on);}
         touch(100,1392);touch(140,1070);touch(200,268);assert(preferences.setting("home_visible")=="0");
         shot("settings-home-off.pgm");assert(canvas.pixels==off);
         touch(990,800);assert(settings.screen()==rss::App::Screen::About);shot("settings-about.pgm");
@@ -114,6 +115,52 @@ int main(){
         settings.back();settings.draw();assert(canvas.pixels==list);
         assert(preferences.entry_count(rss::View::Unread)==1&&!preferences.entries(rss::View::All).front().read);
         assert(settings.take_request().empty());
+    }
+    {
+        for(const auto availability:{rss::App::HomeAvailability::Unsupported,rss::App::HomeAvailability::Unavailable}){
+            rss::Store preferences(":memory:");preferences.set_setting("reader_engine","classic");
+            preferences.set_setting("home_visible","1");
+            rss::App settings(preferences,canvas);settings.set_home_availability(availability);
+            settings.show_view(rss::View::All);
+            auto touch=[&](int x,int y){settings.draw();settings.tap(x,y);};
+            touch(100,1392);touch(140,1070);assert(settings.screen()==rss::App::Screen::Settings);
+            touch(200,268);touch(950,268);
+            settings.draw();
+            for(int y=234;y<302;++y)for(int x=862;x<1038;++x)
+                assert(canvas.pixels[y*1072+x]>=130);
+            if(const auto folder=std::getenv("RSS_TEST_SNAPSHOTS"))
+                canvas.write_pgm((std::filesystem::path(folder)/(availability==rss::App::HomeAvailability::Unsupported
+                    ?"settings-home-unsupported.pgm":"settings-home-unavailable.pgm")).string());
+            assert(preferences.setting("home_visible")=="1");
+            assert(!settings.home_activation_requested());
+            assert(settings.take_request().empty());
+        }
+    }
+    {
+        rss::Store preferences(":memory:");preferences.set_setting("reader_engine","classic");
+        preferences.set_setting("home_visible","1");
+        rss::App settings(preferences,canvas);settings.set_home_availability(rss::App::HomeAvailability::Available);
+        assert(!settings.home_activation_requested());
+        settings.show_view(rss::View::All);
+        auto touch=[&](int x,int y){settings.draw();settings.tap(x,y);};
+        touch(100,1392);touch(140,1070);assert(settings.screen()==rss::App::Screen::Settings);
+        touch(950,268);
+        assert(preferences.setting("home_visible")=="1");
+        assert(settings.home_activation_requested());
+        settings.draw();
+        if(const auto folder=std::getenv("RSS_TEST_SNAPSHOTS"))
+            canvas.write_pgm((std::filesystem::path(folder)/"settings-home-pending.pgm").string());
+        touch(200,268);
+        assert(preferences.setting("home_visible")=="0");
+        assert(!settings.home_activation_requested());
+        assert(settings.take_request().empty());
+
+        touch(950,268);
+        assert(preferences.setting("home_visible")=="1");
+        assert(settings.home_activation_requested());
+        settings.set_home_availability(rss::App::HomeAvailability::Unavailable);
+        assert(!settings.home_activation_requested());
+        assert(preferences.setting("home_visible")=="1");
     }
     {
         // Hiding sync preserves the filtered page; the overlay consumes underlying article taps.

@@ -54,6 +54,11 @@ elif name=="cp":
         pathlib.Path(args[-1]).write_bytes(b""); sys.exit(1)
     sys.exit(subprocess.run(["/bin/cp", *args]).returncode)
 elif name=="get": print("active")
+elif name=="lipc-probe":
+    if mode=="delayed-kpp" and not (root/"kpp-probed").exists():
+        (root/"kpp-probed").touch();log("kpp-not-ready");sys.exit(1)
+    if mode=="delayed-kpp":log("kpp-ready")
+    print("w Str load\nw Str pause\nw Str go")
 elif name=="set": log("set "+" ".join(args))
 elif name=="mntroot":
     log("mntroot "+args[0]); mounts=root/"proc/mounts"; rows=[]
@@ -84,7 +89,7 @@ elif name=="initctl":
             if result.returncode: sys.exit(result.returncode)
             pid="900004"; comm="bad-process" if mode=="health-wrong-comm" else "kindle-rss-home"
             proc=root/"proc"/pid; proc.mkdir(exist_ok=True); (proc/"comm").write_text(comm+"\n")
-            if mode in ("ready", "health-pid-mismatch", "health-wrong-comm"):
+            if mode in ("ready", "delayed-kpp", "health-pid-mismatch", "health-wrong-comm"):
                 health_pid="900005" if mode=="health-pid-mismatch" else pid
                 (pathlib.Path(os.environ["STATE"])/"health").write_text(f"pid={health_pid}\nready=1\nclients=1\nrevision={'f'*64}\nacks=1\n")
     elif args[0]=="stop" and mounted(): subprocess.run(["/bin/sh",os.environ["SELF"],"unmount"],env=os.environ.copy())
@@ -128,7 +133,7 @@ class HomeManagerTests(unittest.TestCase):
         reader = self.root / "mnt/us/documents/RSS阅读器.sh"
         reader.parent.mkdir(parents=True); reader.write_text("stub\n")
         self.bin.mkdir()
-        for name in ("stat", "chmod", "sha256sum", "get", "set", "mntroot", "mount", "umount", "timeout", "sleep", "flock", "initctl", "nohup", "cp", "df"):
+        for name in ("stat", "chmod", "sha256sum", "get", "set", "lipc-probe", "mntroot", "mount", "umount", "timeout", "sleep", "flock", "initctl", "nohup", "cp", "df"):
             path = self.bin / name; path.write_text(STUB.replace("#!/usr/bin/env python3", "#!" + sys.executable)); path.chmod(0o755)
         homebin = self.app / "bin/kindle-rss-home"
         homebin.write_text(STUB.replace("#!/usr/bin/env python3", "#!" + sys.executable).replace('name=pathlib.Path(sys.argv[0]).name', 'name="homebin"'))
@@ -146,6 +151,7 @@ class HomeManagerTests(unittest.TestCase):
             "/usr/sbin/mntroot": str(self.bin / "mntroot"),
             "/usr/bin/lipc-get-prop": str(self.bin / "get"),
             "/usr/bin/lipc-set-prop": str(self.bin / "set"),
+            "/usr/bin/lipc-probe": str(self.bin / "lipc-probe"),
             "/proc": str(self.proc),
             "/mnt/us/documents/RSS阅读器.sh": str(reader),
             "/var/local/system/userpasswdenabled": str(self.root / "var/local/system/userpasswdenabled"),
@@ -167,6 +173,31 @@ class HomeManagerTests(unittest.TestCase):
         return subprocess.run(["/bin/sh", str(self.self_script), command, *arguments], env=env, capture_output=True, text=True, timeout=60)
 
     def events(self): return (self.root / "events").read_text().splitlines() if (self.root / "events").exists() else []
+
+    def test_capability_is_read_only_and_distinguishes_support_and_installation(self):
+        self.assertEqual(self.invoke("capability").stdout.strip(), "available")
+        self.assertEqual(self.invoke("capability", "target-hash-bad").stdout.strip(), "unsupported")
+        self.assertEqual(self.invoke("capability", "patch-hash-bad").stdout.strip(), "unavailable")
+        self.assertEqual(self.events(), [])
+        self.assertFalse(self.job.exists())
+
+        result = self.invoke("activate", "delayed-kpp")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        events = self.events()
+        self.assertLess(events.index("kpp-not-ready"), events.index("kpp-ready"))
+        self.assertLess(events.index("kpp-ready"), events.index("set com.lab126.appmgrd start app://com.lab126.booklet.home"))
+        self.assertEqual(self.invoke("capability").stdout.strip(), "active")
+        health = self.state / "health"
+        health.write_text(health.read_text().replace("ready=1", "ready=0"))
+        self.assertEqual(self.invoke("capability").stdout.strip(), "active")
+        self.assertEqual(self.invoke("capability", "unknown-bind").stdout.strip(), "unavailable")
+
+    def test_automatic_activation_failure_opens_the_unmodified_home(self):
+        result = self.invoke("activate", "patch-hash-bad")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(self.events(), ["set com.lab126.appmgrd start app://com.lab126.booklet.home"])
+        self.assertFalse(self.job.exists())
+        self.assertFalse((self.root / "mounted").exists())
 
     def test_unsupported_firmware_and_integrity_fail_without_system_changes(self):
         profile = self.app / "home/profile.env"

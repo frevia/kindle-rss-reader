@@ -22,9 +22,12 @@ public:
                         Discovery, Directories, DirectoryEdit, DirectoryTopics, DirectoryWebsite, DirectoryDetail, DirectoryScope };
     enum class UpdateState { Idle, Checking, Available, Current, Downloading, Ready, Installing, Failed };
     enum class SyncState { Idle, Running, Complete, Cancelled, Failed };
+    enum class HomeAvailability { Unsupported, Unavailable, Available, Active };
     App(Store& store, Canvas& canvas, std::int64_t initial_article = 0, const std::string& status_font = {});
     void draw();
     void set_reader_status(const ReaderStatus& status);
+    void set_home_availability(HomeAvailability availability);
+    bool home_activation_requested() const { return home_activation_requested_; }
     void tap(int x, int y);
     void touch(const TouchGesture& gesture);
     void next();
@@ -136,6 +139,8 @@ private:
     std::string picker_query_, editing_group_, group_name_draft_, group_parent_draft_;
     bool new_group_ = false;
     bool auto_fulltext_ = false;
+    HomeAvailability home_availability_ = HomeAvailability::Unsupported;
+    bool home_activation_requested_ = false;
     std::size_t image_page_=0;
     std::optional<Feed> managing_;
     bool translation_blocked() const;

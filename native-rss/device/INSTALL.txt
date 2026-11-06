@@ -46,8 +46,8 @@ beta 还可通过“菜单 → 设置 → 在线升级”检查后续 beta 与�
 备份可能包含 data/translation.conf 中的 API Key 和 .update 中的回滚数据库，不要公开上传。
 
 可选首页 RSS
-普通安装默认关闭；固件支持范围、准备补丁和启停方法见 native-rss/docs/HOME.md。
-其他机型仅测试普通阅读器，不启用首页 RSS 适配。
+首页 RSS 默认关闭。支持的固件可在应用设置开启，首次正常退出后自动安装；其他机型或固件的开关为灰色。
+支持范围和启停方法见 native-rss/docs/HOME.md。
 已经启用时，升级、卸载或更新 Kindle 固件前先在 KUAL 中选择“停用首页 RSS”。
 
 卸载

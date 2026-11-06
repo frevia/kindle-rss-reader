@@ -1,9 +1,10 @@
 # 更新记录
 
-下面保留每次发布时的变化，方便回查。兼容测试使用 [v0.0.4-beta.5](https://github.com/frevia/kindle-rss-reader/releases/tag/v0.0.4-beta.5)；[正式版最新版入口](https://github.com/frevia/kindle-rss-reader/releases/latest)不包含 beta。
+下面保留每次发布时的变化，方便回查。兼容测试使用 [v0.0.4-beta.6](https://github.com/frevia/kindle-rss-reader/releases/tag/v0.0.4-beta.6)；[正式版最新版入口](https://github.com/frevia/kindle-rss-reader/releases/latest)不包含 beta。
 
 ## v0.0.4-beta.6 · 2026-11-06
 
+- 内置 KPW3／5.16.2.1.1 的首页 RSS 差分配方。支持的设备首次开启后正常退出即可自动安装，其他设备显示灰色开关。切回首页前等待系统接口完成注册，避免首次重载弹出应用程序错误。
 - 修复从 Kindle 书库打开阅读器后在线升级回滚的问题。安装成功时，启动器恢复系统服务后直接交接给新版，避免 Kindle 切到首页时卸载书库脚本并终止自动重启。
 - 重整在线升级页，并将检查更新与订阅同步分开。启动自动同步时可以检查更新，下载和安装仍等待占用的后台任务退出。
 - 主动发起选区或整篇翻译时，先取消当前自动同步，待其退出后启动翻译。等待中的翻译可取消。

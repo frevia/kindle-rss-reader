@@ -62,7 +62,7 @@ def source_files(root):
         "src/*.cpp", "src/*.hpp", "tests/*.cpp", "tests/*.py", "tests/*.js",
         *("tests/fixtures/*." + suffix for suffix in ("avif", "jpg", "png", "webp", "pgm")),
         "tools/*.py", "tools/*.cpp", "tools/*.json", "tools/*.cmake", "device/*.sh", "device/*.json", "device/*.conf", "device/book-cover.png",
-        "home/*.js", "home/*.json", "third_party/hbc84/*.json",
+        "home/*.js", "home/*.json", "home/adapter/manifest.json", "home/adapter/patch.rhp", "third_party/hbc84/*.json",
         "device/INSTALL.txt", "device/kual/*.xml", "device/kual/*.json", "docs/*.md",
         "third_party/*/LICENSE", "third_party/*/SOURCE.json", "third_party/*/*.h", "third_party/*/*.yaml",
         "third_party/crengine/README.md", "third_party/crengine/AUTHORS",
@@ -117,7 +117,8 @@ def home_runtime_files():
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--home-patch", type=Path, help="已校验的可选首页差分补丁目录；不包含原固件")
+    parser.add_argument("--home-patch", type=Path, default=ROOT / "home/adapter",
+                        help="替换内置首页差分配方的开发目录；不包含原固件")
     args = parser.parse_args()
     binary = BUILD / "kindle-rss"
     manifest = json.loads((BUILD / "build-info.json").read_text())
@@ -154,8 +155,7 @@ def main():
     files.update(home_runtime_files())
     add("native-rss/home/card.js", ROOT / "home/card.js")
     add("native-rss/home/firmwares.json", ROOT / "home/firmwares.json")
-    if args.home_patch:
-        files.update(home_adapter_files(args.home_patch))
+    files.update(home_adapter_files(args.home_patch))
     add("native-rss/book-cover.png", ROOT / "device/book-cover.png")
     add("native-rss/launch.sh", ROOT / "device/launch.sh", True)
     add("native-rss/diagnose.sh", ROOT / "device/diagnose.sh", True)
@@ -233,7 +233,7 @@ def main():
     files["native-rss/UPDATE.json"] = ((json.dumps(update_metadata(), separators=(",", ":")) + "\n").encode("utf-8"), False)
     checksums = {name: hashlib.sha256(data).hexdigest() for name, (data, _) in files.items()}
     files["native-rss/MANIFEST.json"] = (json.dumps({"development_only": False, "device_tested": False,
-        "reader": reader, "distribution_license": "GPL-3.0-only", "home_adapter": {"included": bool(args.home_patch), "enabled_by_default": False}, "public_release_ready": True, "files": checksums}, indent=2).encode(), False)
+        "reader": reader, "distribution_license": "GPL-3.0-only", "home_adapter": {"included": True, "enabled_by_default": False}, "public_release_ready": True, "files": checksums}, indent=2).encode(), False)
     output = ROOT / "output"
     output.mkdir(exist_ok=True)
     target = output / "kindle-rss-kindle-dev.zip"

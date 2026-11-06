@@ -11,7 +11,7 @@
 
 ## 其他机型测试安装
 
-非 KPW3 设备请先阅读[兼容范围与测试安装流程](COMPATIBILITY.md#哪些设备可以参与测试)，按“备份 → 确认兼容包 → 复制文件 → 只读诊断 → 首次启动 → 分项测试”的顺序操作。兼容代码已包含在 [v0.0.4-beta.5](https://github.com/frevia/kindle-rss-reader/releases/tag/v0.0.4-beta.5) 的 `-Kindle.zip` 安装包中，无需自行构建，不要用历史 `-KPW3.zip` 试装。
+非 KPW3 设备请先阅读[兼容范围与测试安装流程](COMPATIBILITY.md#哪些设备可以参与测试)，按“备份 → 确认兼容包 → 复制文件 → 只读诊断 → 首次启动 → 分项测试”的顺序操作。兼容代码已包含在 [v0.0.4-beta.6](https://github.com/frevia/kindle-rss-reader/releases/tag/v0.0.4-beta.6) 的 `-Kindle.zip` 安装包中，无需自行构建，不要用历史 `-KPW3.zip` 试装。
 
 测试普通阅读器即可，不要在其他机型启用首页 RSS。成功或失败都可按[兼容反馈模板](COMPATIBILITY.md#怎么反馈兼容情况)，通过 GitHub Issues 或邮件反馈机型、固件、安装包、逐项结果及脱敏诊断报告；未测项目明确写“未测试”。
 
@@ -23,7 +23,7 @@
 
 | 用途 | 下载页面与安装包 |
 | --- | --- |
-| 普通试装、旧 beta 的 USB 升级 | [v0.0.4-beta.5](https://github.com/frevia/kindle-rss-reader/releases/tag/v0.0.4-beta.5)，下载 `RSS-Reader-v0.0.4-beta.5-Kindle.zip`。 |
+| 普通试装、旧 beta 的 USB 升级 | [v0.0.4-beta.6](https://github.com/frevia/kindle-rss-reader/releases/tag/v0.0.4-beta.6)，下载 `RSS-Reader-v0.0.4-beta.6-Kindle.zip`。 |
 | 开发验证旧 beta 的在线升级 | 先完成[旧版启动器修复](#旧版升级前修复启动器)，重新打开阅读器后按[升级测试步骤](#在线升级测试)操作。 |
 | 使用正式版 | [正式版最新版](https://github.com/frevia/kindle-rss-reader/releases/latest)，当前为 v0.0.3，仅供 KPW3；不包含 beta 的兼容代码和新增功能。 |
 
@@ -68,7 +68,7 @@ Kindle 磁盘
 
 ## 可选首页 RSS
 
-可选首页适配可将原生首页的 Kindle+ 推荐卡片替换为本地 RSS 摘要，默认关闭，普通 beta 包不会自动安装对应固件补丁。固件支持范围、准备补丁和启停方式见[首页适配说明](HOME.md)。
+可选首页适配可将原生首页的 Kindle+ 推荐卡片替换为本地 RSS 摘要。含内置配方的安装包可在支持的 Kindle 上从设置开启，正常退出后自动安装。功能默认关闭。固件范围与启停方式见[首页适配说明](HOME.md)。
 
 ## 退出与备份
 
@@ -82,7 +82,7 @@ Kindle 磁盘
 
 beta.1～beta.3 的旧启动器有会话锁交接问题，beta.1～beta.4 还可能在替换安装进度页所用字体时崩溃。beta.5 修复了这两项问题。beta.6 进一步修复书库入口在安装后切回 Kindle 首页、导致启动脚本被系统终止的问题。自动重启由当前运行的启动器负责，下载目标包后仍需先按下方步骤替换旧启动器。
 
-普通用户推荐正常退出、备份整个 `native-rss`，再按下方[通过 USB 升级](#通过-usb-升级)合并复制完整安装包，保留 `data`。当前公开下载为 beta.5。使用书库入口时，等装有 beta.6 启动器后再尝试在线升级。
+普通用户推荐正常退出、备份整个 `native-rss`，再按下方[通过 USB 升级](#通过-usb-升级)合并复制完整安装包，保留 `data`。使用书库入口时，等装有 beta.6 启动器后再尝试在线升级。
 
 开发测试旧版在线升级时，先从本地构建、已核对 SHA-256 的 beta.6 安装包取出 `native-rss/launch.sh`，在阅读器正常退出后通过 USB 替换同名文件；使用 SSH 时也应先退出并原子替换。保留其他程序和个人数据，重新从原入口打开旧 beta，再执行检查、下载与安装。重新启动后，本轮在线安装才会使用新版启动器。
 

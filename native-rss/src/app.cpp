@@ -778,19 +778,48 @@ void App::app_menu(){
 void App::settings_screen(){
     const int w=c_.width;page_header("设置");
     int y=224;
-    const auto setting=[&](const std::string& title,const std::string& description,bool enabled,std::function<void()> toggle){
-        button({32,y,w-64,88},title,toggle,false,32,Icon::None,true,Align::Left);
+    const auto setting=[&](const std::string& title,const std::string& description,bool enabled,std::function<void()> toggle,
+                            bool interactive=true,const std::string& state_on="已开启",const std::string& state_off="已关闭"){
+        button({32,y,w-64,88},title,toggle,false,32,Icon::None,interactive,Align::Left);
         const Rect state{w-212,y+8,180,72};frame(c_,state);
-        button(state,enabled?"已开启":"已关闭",toggle,enabled,26);
+        button(state,enabled?state_on:state_off,toggle,interactive&&enabled,26,Icon::None,interactive);
         int baseline=y+112;
         for(const auto& line:c_.wrap(description,24,w-64)){
             c_.text(32,baseline,line.text,24,85);baseline+=36;
         }
         y=baseline+24;c_.rule(32,y,w-64,205);y+=20;
     };
-    const bool enabled=store_.setting("home_visible")=="1";
-    setting("首页 RSS","退出阅读器返回 Kindle 首页后生效；订阅和阅读记录保留。",enabled,
-            [this,enabled]{store_.set_setting("home_visible",enabled?"0":"1");});
+    const auto home_setting=store_.setting("home_visible");
+    const bool home_enabled=home_availability_==HomeAvailability::Active
+        ?home_setting=="1":home_activation_requested_;
+    std::string home_description,home_on="已开启",home_off="已关闭";
+    bool home_interactive=true;
+    switch(home_availability_){
+        case HomeAvailability::Active:
+            home_description="退出阅读器返回 Kindle 首页后生效；订阅和阅读记录保留。";
+            break;
+        case HomeAvailability::Available:
+            home_description="首次开启会在退出时安装；失败后重新开启可重试。";
+            home_on="待安装";
+            break;
+        case HomeAvailability::Unsupported:
+            home_description="此 Kindle 机型或固件暂不支持首页 RSS。";
+            home_off="不支持";home_interactive=false;
+            break;
+        case HomeAvailability::Unavailable:
+            home_description="首页适配未通过检查，首页 RSS 暂不可用。";
+            home_off="不可用";home_interactive=false;
+            break;
+    }
+    setting("首页 RSS",home_description,home_enabled,[this]{
+        if(home_availability_==HomeAvailability::Active){
+            store_.set_setting("home_visible",store_.setting("home_visible")=="1"?"0":"1");
+        }else if(home_availability_==HomeAvailability::Available){
+            const bool requested=!home_activation_requested_;
+            store_.set_setting("home_visible",requested?"1":"0");
+            home_activation_requested_=requested;
+        }
+    },home_interactive,home_on,home_off);
     const bool auto_enabled=store_.setting("auto_sync")!="0";
     setting("自动同步订阅","打开阅读器时检查更新，每 30 分钟同步。\n仅在 Wi-Fi 可用时运行；不唤醒设备，不自动翻译。",auto_enabled,
             [this,auto_enabled]{store_.set_setting("auto_sync",auto_enabled?"0":"1");});
@@ -1399,6 +1428,11 @@ void App::back(){
 void App::set_reader_status(const ReaderStatus& status){
     if(reader_status_==status)return;
     reader_status_=status;dirty=true;
+}
+void App::set_home_availability(HomeAvailability availability){
+    home_availability_=availability;
+    if(availability!=HomeAvailability::Available)home_activation_requested_=false;
+    dirty=true;
 }
 void App::notify(const std::string& text){status_=text;list_starts_={0};list_complete_=false;ensure_list_page(list_page_);list_page_=std::min(list_page_,list_starts_.size()-1);dirty=true;}
 void App::show_error(const std::string& text){error_=text;dirty=true;}

@@ -15,6 +15,7 @@ KILL=kill
 PASSCODE=/var/local/system/userpasswdenabled
 UPDATE=/mnt/us/native-rss/.update
 LAUNCH=/mnt/us/native-rss/launch.sh
+HOME_MANAGER=/mnt/us/native-rss/home.sh
 INITCTL=/sbin/initctl
 STATUSBAR_JOB=/etc/upstart/statusbar.conf
 UPSTART_DIR=/etc/upstart
@@ -43,6 +44,13 @@ chmod 0700 "$STATE" || fail '无法恢复状态目录的私有权限'
 [ ! -L "$STATE/session.lock" ] || fail '无效锁文件'
 exec 9>"$STATE/session.lock" || fail '无法打开锁'
 flock -n 9 || fail '阅读器已经运行'
+home_control=$STATE/home/control.lock
+if [ -e "$home_control" ] || [ -L "$home_control" ]; then
+    [ ! -L "$STATE/home" ] && [ -f "$home_control" ] && [ ! -L "$home_control" ] || fail '首页适配状态异常'
+    exec 6<"$home_control" || fail '无法检查首页适配状态'
+    flock -ns 6 || fail '首页 RSS 正在配置，请稍后重新打开阅读器'
+    exec 6<&-
+fi
 for log in "$STATE/session.log" "$STATE/session.previous.log"; do
     [ ! -L "$log" ] || fail '日志不能是符号链接'
 done
@@ -60,6 +68,7 @@ fi
 [ -x "$APP" ] || fail "缺少程序 $APP"
 install_update=0
 open_browser=0
+activate_home=0
 snapshot=
 CRE_CACHE=
 stopped=
@@ -205,7 +214,7 @@ cleanup() {
     if [ "$pillow" -eq 1 ]; then pillow_change enable >/dev/null 2>&1 || restore_failed=1; fi
     if [ -n "$stopped" ] && same "$wm_pid" awesome "$wm_born" && awake; then
         # Opening Home unloads SH_Integration and kills the launcher before it can restart.
-        if [ "$install_update" -ne 2 ] || [ "$restore_failed" -ne 0 ]; then
+        if { [ "$install_update" -ne 2 ] && [ "$activate_home" -ne 1 ]; } || [ "$restore_failed" -ne 0 ]; then
             timeout 3 "$SET" com.lab126.appmgrd start app://com.lab126.booklet.home >/dev/null 2>&1 || restore_failed=1
         fi
         if awake; then timeout 5 "$REFRESH" -q -s >/dev/null 2>&1 || restore_failed=1; fi
@@ -232,6 +241,15 @@ cleanup() {
     fi
     if [ "$recovering" -eq 0 ] && [ "$restore_failed" -eq 0 ] && [ "$result" -eq 0 ] && [ "$open_browser" -eq 1 ] && awake; then
         RSS_BROWSER_GUARD=1 timeout 15 "$APP" --db "$DB" open-directory-website 8>&- || result=1
+    fi
+    if [ "$recovering" -eq 0 ] && [ "$activate_home" -eq 1 ] && awake; then
+        if [ "$restore_failed" -eq 0 ] && flock -u 9; then
+            # The library launcher can kill this shell when Home comes to the foreground.
+            nohup setsid /bin/sh "$HOME_MANAGER" activate </dev/null 8>&- 9>&- &
+        else
+            timeout 3 "$SET" com.lab126.appmgrd start app://com.lab126.booklet.home >/dev/null 2>&1 || :
+            result=1
+        fi
     fi
     exit "$result"
 }
@@ -261,6 +279,17 @@ snapshot_rows=$((yoffset+height))
 [ "$snapshot_bytes" -eq "$((stride*snapshot_rows))" ] && [ "$snapshot_bytes" -le 67108864 ] || fail '无效屏幕快照长度'
 original_screen=$(screen_signature "$probe")
 printf '%s\n' "$probe"
+home_availability=unsupported
+if [ "$(probe_value model)" = 'Paperwhite 3' ] &&
+    awk '$1 == "Kindle" && $2 == "5.16.2.1.1" { found=1 } END { exit !found }' "$FIRMWARE"; then
+    home_availability=unavailable
+    if [ -f "$HOME_MANAGER" ] && [ ! -L "$HOME_MANAGER" ]; then
+        home_availability=$(timeout 8 /bin/sh "$HOME_MANAGER" capability 9>&-) || home_availability=unavailable
+    fi
+    if [ "$home_availability" = available ] && { ! command -v nohup >/dev/null || ! command -v setsid >/dev/null; }; then
+        home_availability=unavailable
+    fi
+fi
 fbink_selected=
 ulimit -c 0
 for candidate in "$REFRESH" $FBINK_ALTERNATES; do
@@ -337,7 +366,7 @@ done
 # Holding volumd prevents USB mass-storage from exporting the live database volume.
 launching=1
 if [ -n "$article" ]; then set -- --article "$article"; else set --; fi
-RSS_UI_GUARD=1 RSS_LAUNCHER_PID=$owner "$APP" --db "$DB" "$@" device 9>&- &
+RSS_UI_GUARD=1 RSS_LAUNCHER_PID=$owner RSS_HOME_AVAILABILITY=$home_availability "$APP" --db "$DB" "$@" device 9>&- &
 child=$!
 launching=0
 printf 'reader_started pid=%s\n' "$child"
@@ -351,6 +380,7 @@ done
 wait "$child"; result=$?
 child=
 if [ "$result" -eq 43 ]; then open_browser=1; result=0; fi
+if [ "$result" -eq 44 ] && [ "$home_availability" = available ]; then activate_home=1; result=0; fi
 if [ "$result" -eq 42 ]; then
     [ -x "$UPDATE/runner" ] && [ ! -L "$UPDATE/runner" ] || fail '升级安装程序缺失'
     # FAT replacement invalidates the old font mmap; keep the installer font in its session cache.

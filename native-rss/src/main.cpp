@@ -15,6 +15,7 @@
 #include <set>
 #include <sstream>
 #include <stdexcept>
+#include <string_view>
 #include <sys/stat.h>
 #include <csignal>
 #include <thread>
@@ -329,9 +330,16 @@ int device(rss::Store& store,rss::Canvas& canvas,const std::string& db,std::int6
     if(!guard||std::string(guard)!="1")throw std::runtime_error("设备模式必须由屏幕会话启动器运行");
     stop_device=0;
     const auto term=std::signal(SIGTERM,stop_device_handler),interrupt=std::signal(SIGINT,stop_device_handler),hangup=std::signal(SIGHUP,stop_device_handler);
-    bool install=false,browser=false;
+    bool install=false,browser=false,activate_home=false;
     try{
-        rss::KindleDevice hardware;rss::App app(store,canvas,article,status_font_path());UiTasks tasks(store,app,db);
+        rss::KindleDevice hardware;rss::App app(store,canvas,article,status_font_path());
+        if(const auto* state=std::getenv("RSS_HOME_AVAILABILITY")) {
+            const std::string_view availability(state);
+            if(availability=="active")app.set_home_availability(rss::App::HomeAvailability::Active);
+            else if(availability=="available")app.set_home_availability(rss::App::HomeAvailability::Available);
+            else if(availability=="unavailable")app.set_home_availability(rss::App::HomeAvailability::Unavailable);
+        }
+        UiTasks tasks(store,app,db);
         auto last_activity=std::chrono::steady_clock::now()-std::chrono::seconds(5);
         while(!stop_device&&!app.quit){
             if(app.dirty){
@@ -353,9 +361,12 @@ int device(rss::Store& store,rss::Canvas& canvas,const std::string& db,std::int6
         // The supervising launcher restores the screen after checking the power state.
         install=app.install_update;
         browser=!app.open_website.empty();
+        activate_home=!stop_device&&app.quit&&app.home_activation_requested();
     }catch(...){std::signal(SIGTERM,term);std::signal(SIGINT,interrupt);std::signal(SIGHUP,hangup);throw;}
     std::signal(SIGTERM,term);std::signal(SIGINT,interrupt);std::signal(SIGHUP,hangup);
-    return install?42:browser?43:0;
+    if(install)return 42;
+    if(browser)return 43;
+    return activate_home?44:0;
 }
 #ifdef RSS_DESKTOP
 void desktop(rss::Store& store,rss::Canvas& canvas,const std::string& db,std::int64_t article){

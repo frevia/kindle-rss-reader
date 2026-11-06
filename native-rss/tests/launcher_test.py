@@ -49,6 +49,9 @@ elif name=="flock":
     if args in (['-u','9'],['-u9']):
         if mode=="update-unlock-failed":sys.exit(1)
         fcntl.flock(9,fcntl.LOCK_UN)
+    elif args==['-ns','6']:
+        if mode=="home-control-busy":sys.exit(1)
+        fcntl.flock(6,fcntl.LOCK_SH|fcntl.LOCK_NB)
     else:
         try:fcntl.flock(9,fcntl.LOCK_EX|fcntl.LOCK_NB)
         except OSError:sys.exit(1)
@@ -141,6 +144,13 @@ elif name=="runner":
         assert "app-start" not in events and "-STOP 900003" not in events
         log("update-recover")
     else:raise AssertionError(args)
+elif name=="home-activate":
+    with (root/"state/session.lock").open("a") as lock:
+        fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+    events=(root/"events").read_text()
+    assert "-CONT 900003" in events and "cache-rm" in events
+    assert "set com.lab126.appmgrd start app://com.lab126.booklet.home" not in events
+    log("home-activate")
 elif name=="kill":
     sig,pid=args[0],int(args[1])
     if pid>=900000:
@@ -156,6 +166,7 @@ elif name=="kill":
         except ProcessLookupError:sys.exit(1)
 elif name=="app":
     if args==["probe"]:
+        if mode in ("home-activate","home-wrong-firmware"):print("model=Paperwhite 3")
         width,height,stride,xoffset,yoffset={"small-screen":(600,800,608,0,0),
             "large-screen":(1860,2480,1872,4,1)}.get(mode,(1072,1448,1088,0,0))
         print(f"width={width}\nheight={height}\nstride={stride}\nbpp=8\nxoffset={xoffset}\nyoffset={yoffset}")
@@ -192,6 +203,9 @@ elif name=="app":
         if mode in ("update-install","update-failed","update-inherited-lock","update-unlock-failed",
                     "update-font-replaced","update-font-missing","update-font-custom"):sys.exit(42)
         if mode.startswith("browser"):sys.exit(43)
+        if mode in ("home-activate","home-unsupported","home-wrong-firmware"):
+            assert os.environ["RSS_HOME_AVAILABILITY"]==("available" if mode=="home-activate" else "unsupported")
+            sys.exit(44)
         if mode in ("launcher-killed", "launcher-killed-home", "launcher-killed-statusbar", "launcher-killed-soft"):
             owner=int(os.environ["RSS_LAUNCHER_PID"])
             while os.getppid()==owner:time.sleep(.02)
@@ -226,8 +240,13 @@ class LauncherTests(unittest.TestCase):
                 (root/"protected").write_text("untouched")
                 (root/"state/session.log").unlink()
                 (root/"state/session.log").symlink_to(root/"protected")
-            for name in ("stat","chmod","flock","timeout","pidof","initctl","get","set","refresh","kill","app","mktemp","rm","runner"):
+            for name in ("stat","chmod","flock","timeout","pidof","initctl","get","set","refresh","kill","app","mktemp","rm","runner","home-activate"):
                 tool=root/"bin"/name;tool.write_text("#!"+sys.executable+"\n"+FAKE);tool.chmod(0o755)
+            home_manager=root/"home.sh"
+            home_manager.write_text('case "$1" in\ncapability) echo available;;\nactivate) exec "$FIXTURE/bin/home-activate";;\n*) exit 1;;\nesac\n')
+            setsid=root/"bin/setsid";setsid.write_text('#!/bin/sh\nexec "$@"\n');setsid.chmod(0o755)
+            if mode=="home-control-busy":
+                (root/"state/home").mkdir();(root/"state/home/control.lock").touch()
             if mode.startswith("fbink-fallback"):
                 fallback=root/"bin/refresh-fallback";fallback.write_bytes((root/"bin/refresh").read_bytes());fallback.chmod(0o755)
             for pid,name in ((900001,"awesome"),(900002,"JunoStatusBarDr"),(900003,"volumd")):
@@ -271,6 +290,7 @@ class LauncherTests(unittest.TestCase):
                      "firmware-invalid":"5.6.5;exit","firmware-leading-zero":"5.06.5",
                      "firmware-incomplete":"5.","firmware-future":"6.0.0"}.get(mode,"5.16.2.1.1")
             if mode.startswith("soft-") or mode=="launcher-killed-soft":version="5.6.4"
+            if mode=="home-wrong-firmware":version="5.16.2.1.2"
             firmware="Kindle "+version+" (fixture)\n"
             if mode=="firmware-duplicate":firmware+="Kindle 5.6.4\n"
             if mode=="firmware-oversized":firmware+="x"*2048
@@ -279,7 +299,7 @@ class LauncherTests(unittest.TestCase):
             values={"STATE":root/"state","APP":root/"bin/app","DB":root/"rss.sqlite","FB":root/"fb",
                     "FONT":root/"font.ttf",
                     "PROC":root/"proc","GET":root/"bin/get","SET":root/"bin/set","REFRESH":root/"bin/refresh","KILL":root/"bin/kill","PASSCODE":root/"passcode","UPDATE":root/"update","LAUNCH":root/"restart.sh",
-                    "INITCTL":root/"bin/initctl","STATUSBAR_JOB":root/"statusbar.conf",
+                    "INITCTL":root/"bin/initctl","STATUSBAR_JOB":root/"statusbar.conf","HOME_MANAGER":home_manager,
                     "UPSTART_DIR":root/"upstart","FIRMWARE":root/"prettyversion","FBINK_ALTERNATES":root/"bin/refresh-fallback"}
             script=SOURCE.read_text().splitlines()
             (root/"cache").mkdir()
@@ -318,13 +338,17 @@ class LauncherTests(unittest.TestCase):
                     if process.poll() is None:process.kill();process.wait()
             else:
                 result=subprocess.run(["/bin/sh",str(launch)]+(["--article","42"] if mode=="article" else []),env=env,capture_output=True,text=True,timeout=15)
+            if mode=="home-activate":
+                end=time.monotonic()+3
+                while time.monotonic()<end and "home-activate" not in (root/"events").read_text():
+                    time.sleep(.02)
             events=(root/"events").read_text().splitlines() if (root/"events").exists() else []
             if mode=="update-inherited-lock":
                 end=time.monotonic()+4
                 while not (root/"watchdog-exited").exists() and time.monotonic()<end:time.sleep(.01)
                 self.assertTrue((root/"watchdog-exited").exists(),"inherited-lock watchdog did not exit")
             self.assertFalse(list((root/"state").glob("frame.*")))
-            if mode not in ("passcode","log-symlink","state-nonroot","state-unsafe","state-symlink","state-chmod-error") and not (mode=="state-2770" and result.returncode!=0):
+            if mode not in ("passcode","log-symlink","state-nonroot","state-unsafe","state-symlink","state-chmod-error","home-control-busy") and not (mode=="state-2770" and result.returncode!=0):
                 self.assertEqual((root/"state/session.previous.log").read_text(),"previous session fixture\n")
                 log=(root/"state/session.log").read_text()
                 self.assertIn("session_start",log)
@@ -566,6 +590,28 @@ class LauncherTests(unittest.TestCase):
         result,events,pixel=self.run_case("update-recover")
         self.assertEqual(result.returncode,0,result.stderr)
         self.assertEqual(events,["update-recover"])
+        self.assertEqual(pixel,b"x")
+
+    def test_home_activation_waits_for_reader_and_restores_services_before_handoff(self):
+        result,events,pixel=self.run_case("home-activate")
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertEqual(pixel,b"x")
+        self.assertLess(events.index("app-start"),events.index("-CONT 900003"))
+        self.assertLess(events.index("-CONT 900003"),events.index("home-activate"))
+
+    def test_home_activation_requires_a_supported_device(self):
+        for mode in ("home-unsupported","home-wrong-firmware"):
+            with self.subTest(mode=mode):
+                result,events,_=self.run_case(mode)
+                self.assertEqual(result.returncode,44,result.stderr)
+                self.assertNotIn("home-activate",events)
+                self.assertIn("set com.lab126.appmgrd start app://com.lab126.booklet.home",events)
+
+    def test_reader_waits_for_home_configuration(self):
+        result,events,pixel=self.run_case("home-control-busy")
+        self.assertEqual(result.returncode,1)
+        self.assertIn("首页 RSS 正在配置",result.stderr)
+        self.assertNotIn("app-start",events)
         self.assertEqual(pixel,b"x")
 
     def test_browser_handoff_waits_for_complete_screen_and_service_restore(self):

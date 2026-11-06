@@ -91,6 +91,14 @@ class PackageTests(unittest.TestCase):
                 self.assertEqual(packaged.read(name),files[name][0])
                 self.assertEqual(packaged.getinfo(name).external_attr>>16&0o777,0o644)
 
+    def test_default_home_adapter_recipe_matches_bundled_source(self):
+        adapter = pack.ROOT / "home/adapter"
+        runtime = pack.home_adapter_files(adapter)
+        source = pack.source_files(pack.ROOT)
+        for file in ("manifest.json", "patch.rhp"):
+            self.assertEqual(source["native-rss/home/adapter/" + file], runtime["native-rss/home/" + file])
+        self.assertFalse(any(name.endswith(".hbc") for name in source))
+
     def test_rejects_stale_or_changed_binary(self):
         with tempfile.TemporaryDirectory() as folder:
             binary=Path(folder)/"app";binary.write_bytes(elf())
